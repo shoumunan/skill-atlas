@@ -49,10 +49,10 @@ struct CleanupSheet: View {
                         .fill(Theme.warning.opacity(0.12))
                 }
             VStack(alignment: .leading, spacing: 1) {
-                Text("清理 CC Switch 副本")
+                Text(L("清理 CC Switch 副本"))
                     .font(Theme.Fonts.panelTitle)
                     .foregroundStyle(Theme.textPrimary)
-                Text("先逐个校验迁移结果，再把原目录移入废纸篓；cc-switch.db 不动")
+                Text(L("先逐个校验迁移结果，再把原目录移入废纸篓；cc-switch.db 不动"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
             }
@@ -68,7 +68,7 @@ struct CleanupSheet: View {
             }
             .buttonStyle(.plain)
             .keyboardShortcut("w", modifiers: .command)
-            .help("关闭（⌘W / Esc）")
+            .help(L("关闭（⌘W / Esc）"))
         }
         .padding(.horizontal, Theme.Space.s20)
         .padding(.vertical, Theme.Space.s16)
@@ -80,7 +80,7 @@ struct CleanupSheet: View {
         case .checking:
             HStack(spacing: Theme.Space.s12) {
                 ProgressView().controlSize(.small)
-                Text("正在校验每个已迁入技能：库内文件、平台挂载指向…")
+                Text(L("正在校验每个已迁入技能：库内文件、平台挂载指向…"))
                     .font(Theme.Fonts.body)
                     .foregroundStyle(Theme.textSecondary)
                 Spacer()
@@ -91,7 +91,7 @@ struct CleanupSheet: View {
         case .working:
             HStack(spacing: Theme.Space.s12) {
                 ProgressView().controlSize(.small)
-                Text("正在移入废纸篓…")
+                Text(L("正在移入废纸篓…"))
                     .font(Theme.Fonts.body)
                     .foregroundStyle(Theme.textSecondary)
                 Spacer()
@@ -122,11 +122,11 @@ struct CleanupSheet: View {
                     Image(systemName: "checkmark.seal.fill")
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.healthy)
-                    Text("\(passed.count) 个技能校验通过：已在本库、SKILL.md 可读、挂载全部指向本库。")
+                    Text(LF("%lld 个技能校验通过：已在本库、SKILL.md 可读、挂载全部指向本库。", passed.count))
                         .font(Theme.Fonts.body)
                         .foregroundStyle(Theme.textPrimary)
                     Spacer()
-                    Text("可回收 \(Format.bytes(passed.reduce(0) { $0 + $1.sizeBytes }))")
+                    Text(LF("可回收 %@", Format.bytes(passed.reduce(0) { $0 + $1.sizeBytes })))
                         .font(Theme.Fonts.calloutEmphasis)
                         .monospacedDigit()
                         .foregroundStyle(Theme.healthy)
@@ -156,7 +156,7 @@ struct CleanupSheet: View {
                     }
                     .padding(.top, Theme.Space.s4)
                 } label: {
-                    Text("\(failed.count) 个未通过校验，将原样保留（不会动它们）")
+                    Text(LF("%lld 个未通过校验，将原样保留（不会动它们）", failed.count))
                         .font(Theme.Fonts.secondaryEmphasis)
                         .foregroundStyle(Theme.textSecondary)
                 }
@@ -170,11 +170,11 @@ struct CleanupSheet: View {
                         Image(systemName: "exclamationmark.octagon.fill")
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.error)
-                        Text("这一步不可逆，请看清后果")
+                        Text(L("这一步不可逆，请看清后果"))
                             .font(Theme.Fonts.calloutEmphasis)
                             .foregroundStyle(Theme.error)
                     }
-                    Text("· \(passed.count) 个原目录将从 ~/.cc-switch/skills 移入废纸篓，清空废纸篓后无法恢复\n· 清理后「撤销迁移」失效——回滚目标已不存在，技能从此只由本应用管理\n· CC Switch 应用里这些技能会显示为缺失（它的数据库不受影响）\n· 磁盘空间在清空废纸篓后才真正释放")
+                    Text(LF("· %lld 个原目录将从 ~/.cc-switch/skills 移入废纸篓，清空废纸篓后无法恢复\n· 清理后「撤销迁移」失效——回滚目标已不存在，技能从此只由本应用管理\n· CC Switch 应用里这些技能会显示为缺失（它的数据库不受影响）\n· 磁盘空间在清空废纸篓后才真正释放", passed.count))
                         .font(Theme.Fonts.secondary)
                         .lineSpacing(3)
                         .foregroundStyle(Theme.textSecondary)
@@ -199,14 +199,14 @@ struct CleanupSheet: View {
             }
 
             HStack {
-                Button("取消") { dismiss() }
+                Button(L("取消")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 if !passed.isEmpty {
                     Button(role: .destructive) {
                         runCleanup()
                     } label: {
-                        Text("移入废纸篓（\(passed.count)）")
+                        Text(LF("移入废纸篓（%lld）", passed.count))
                     }
                     .keyboardShortcut(.defaultAction)
                 }
@@ -220,11 +220,11 @@ struct CleanupSheet: View {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 14))
                     .foregroundStyle(Theme.healthy)
-                Text("已把 \(count) 个副本移入废纸篓")
+                Text(LF("已把 %lld 个副本移入废纸篓", count))
                     .font(Theme.Fonts.calloutEmphasis)
                     .foregroundStyle(Theme.textPrimary)
             }
-            Text("确认一切正常后，清空废纸篓即可释放空间。技能现在只由 Skill Atlas 库提供。")
+            Text(L("确认一切正常后，清空废纸篓即可释放空间。技能现在只由 Skill Atlas 库提供。"))
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textSecondary)
             if let errorText {
@@ -234,7 +234,7 @@ struct CleanupSheet: View {
             }
             HStack {
                 Spacer()
-                Button("完成") { dismiss() }
+                Button(L("完成")) { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }
         }

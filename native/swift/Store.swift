@@ -90,6 +90,8 @@ final class AppStore: ObservableObject {
 
     /// 技能库排序：名称 / 使用频率
     @Published var sortOrder = "名称"
+    /// 技能库分组视图（二期 F7）：不分组 / 套件 / 类别——逻辑分组，不动物理目录
+    @Published var groupBy = "不分组"
 
     /// 阅读器 sheet 当前展示的技能（nil = 关闭）
     @Published var readerSkill: Skill?
@@ -124,6 +126,78 @@ final class AppStore: ObservableObject {
 
     /// 自增即请求聚焦全局搜索框（⌘K）
     @Published var searchFocusRequest = 0
+
+    /// 素材投递箱（二期 F5）：拖进来的文件与匹配结果
+    struct DroppedMaterial: Identifiable {
+        var url: URL
+        var matches: [DropMatch]
+        var id: String { url.path }
+    }
+    @Published var droppedMaterial: DroppedMaterial?
+    @Published var dropTargeted = false
+
+    func receiveDroppedFile(_ url: URL) {
+        let matches = DropRules.match(fileURL: url, skills: skills)
+        droppedMaterial = DroppedMaterial(url: url, matches: matches)
+    }
+
+    /// 已装技能的安全复扫结果（key = 技能目录名；后台增量，mtime 缓存）
+    @Published var securityFindings: [String: [SecurityFinding]] = [:]
+    private var securityCache: [String: (stamp: Date, findings: [SecurityFinding])] = [:]
+    /// 已装技能的外链清单（info 级 URL，喂给存活探测）
+    @Published var externalLinks: [String: [String]] = [:]
+    /// 外链存活探测结果（并进安全展示）
+    @Published var deadLinkFindings: [String: [SecurityFinding]] = [:]
+    @Published var checkingLinks = false
+    @Published var lastLinkCheck: Date?
+
+    /// 体检/详情用的安全合并视图：静态复扫 + 外链死链
+    var securityDisplay: [String: [SecurityFinding]] {
+        var merged = securityFindings
+        for (directory, findings) in deadLinkFindings {
+            merged[directory, default: []].append(contentsOf: findings)
+        }
+        return merged
+    }
+
+    /// 更新 diff 预览（sheet；nil = 关闭）
+    @Published var diffTarget: Skill?
+    @Published var diffContent: (stat: String, diff: String)?
+
+    func showDiff(for skill: Skill) {
+        diffTarget = skill
+        diffContent = nil
+        let source = URL(fileURLWithPath: skill.sourcePath, isDirectory: true)
+        let branch = skill.repoBranch
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                SkillGit.upstreamDiff(source: source, branch: branch)
+            }.value
+            if diffTarget?.name == skill.name {
+                diffContent = (stat: result.stat, diff: result.skillDiff)
+            }
+        }
+    }
+
+    /// 停用被依赖技能前的警告（F6 链路数据接管理动作）
+    struct DisableWarning: Identifiable {
+        var skill: Skill
+        var dependents: [String]
+        var id: String { skill.name }
+    }
+    @Published var disableWarning: DisableWarning?
+
+    /// 停用入口统一走这里：有活跃下游依赖先警告
+    func requestDisable(_ skill: Skill) {
+        let dependents = ProductionChain.dependents(of: skill.directory).filter { directory in
+            skills.contains { $0.directory == directory && !$0.disabled }
+        }
+        if dependents.isEmpty {
+            setSkillDisabled(skill, disabled: true)
+        } else {
+            disableWarning = DisableWarning(skill: skill, dependents: dependents)
+        }
+    }
 
     /// 界面语言（设置页切换；视图树以它为 .id 整体重建，立即生效）
     @Published var uiLanguage = AppLanguage.stored
@@ -212,7 +286,9 @@ final class AppStore: ObservableObject {
             fatalError = nil
             triggerOverlaps = Self.computeTriggerOverlaps(result.skills)
             reindexUsage(for: result.skills)
+            rescanSecurity(for: result.skills)
             startWatchingIfNeeded()
+            runPhase2ProbesIfRequested(skills: result.skills)
             // 调试钩子：-atlasReader <技能名> 启动即打开阅读器；-atlasSelect <技能名> 启动即选中（截图用）
             if readerSkill == nil,
                let name = UserDefaults.standard.string(forKey: "atlasReader"),
@@ -381,6 +457,39 @@ final class AppStore: ObservableObject {
             }
         default:
             return matched
+        }
+    }
+
+    /// F7 分组：返回 (组名, 组内技能)；分组内沿用当前排序
+    func groupedSkills(_ list: [Skill]) -> [(String, [Skill])] {
+        switch groupBy {
+        case "套件":
+            var prefixCount: [String: Int] = [:]
+            for skill in list {
+                if let prefix = skill.directory.split(separator: "-").first.map(String.init) {
+                    prefixCount[prefix, default: 0] += 1
+                }
+            }
+            var groups: [String: [Skill]] = [:]
+            for skill in list {
+                let prefix = skill.directory.split(separator: "-").first.map(String.init) ?? skill.directory
+                let key = (prefixCount[prefix] ?? 0) >= 3 ? LF("%@ 套件", prefix) : L("独立技能")
+                groups[key, default: []].append(skill)
+            }
+            let standalone = L("独立技能")
+            return groups.sorted {
+                if $0.key == standalone { return false }
+                if $1.key == standalone { return true }
+                return $0.value.count != $1.value.count ? $0.value.count > $1.value.count : $0.key < $1.key
+            }
+        case "类别":
+            var groups: [String: [Skill]] = [:]
+            for skill in list {
+                groups[skill.category, default: []].append(skill)
+            }
+            return groups.sorted { $0.value.count != $1.value.count ? $0.value.count > $1.value.count : $0.key < $1.key }
+        default:
+            return [("", list)]
         }
     }
 
@@ -881,6 +990,173 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // MARK: - 安全复扫（二期 F3：防「几个月后变恶意」）
+
+    /// 后台静态复扫已装技能（atlas/local；CC Switch 只读来源跳过——修复动作是迁移）。
+    /// 以目录 mtime 为缓存键，只重扫有变化的。
+    private func rescanSecurity(for skills: [Skill]) {
+        let targets = skills
+            .filter { $0.origin != .ccSwitch && !$0.disabled }
+            .map { (directory: $0.directory, path: $0.sourcePath) }
+        let cache = securityCache
+        Task { [weak self] in
+            let result: ([String: [SecurityFinding]], [String: (Date, [SecurityFinding])]) =
+                await Task.detached(priority: .utility) {
+                    var findings: [String: [SecurityFinding]] = [:]
+                    var newCache: [String: (Date, [SecurityFinding])] = [:]
+                    let fileManager = FileManager.default
+                    for target in targets {
+                        let url = URL(fileURLWithPath: target.path, isDirectory: true)
+                        let stamp = (try? fileManager.attributesOfItem(atPath: target.path))?[.modificationDate] as? Date ?? .distantPast
+                        if let cached = cache[target.path], cached.stamp == stamp {
+                            newCache[target.path] = cached
+                            if !cached.findings.isEmpty { findings[target.directory] = cached.findings }
+                            continue
+                        }
+                        let scanned = SecurityScanner.scan(directory: url)
+                        newCache[target.path] = (stamp, scanned)
+                        if !scanned.isEmpty { findings[target.directory] = scanned }
+                    }
+                    return (findings, newCache)
+                }.value
+            guard let self else { return }
+            // 可疑项（非 info）进体检展示；info 外链单独收集喂存活探测
+            var visible: [String: [SecurityFinding]] = [:]
+            var links: [String: [String]] = [:]
+            for (directory, findings) in result.0 {
+                let suspicious = findings.filter { $0.severity != .info }
+                if !suspicious.isEmpty { visible[directory] = suspicious }
+                let urls = findings.filter { $0.severity == .info }.map(\.excerpt)
+                if !urls.isEmpty { links[directory] = urls }
+            }
+            self.securityFindings = visible
+            self.externalLinks = links
+            self.securityCache = result.1
+            Task { await self.checkExternalLinks(force: LaunchArgs.flag("atlasCheckLinks")) }
+        }
+    }
+
+    // MARK: - 外链存活复查（每周自动 + 手动；只报确定死掉的）
+
+    private static let linkCheckKey = "atlasLastLinkCheck"
+
+    func checkExternalLinks(force: Bool) async {
+        guard !checkingLinks else { return }
+        let last = UserDefaults.standard.double(forKey: Self.linkCheckKey)
+        if last > 0 { lastLinkCheck = Date(timeIntervalSince1970: last) }
+        if !force, last > 0, Date().timeIntervalSince1970 - last < 7 * 86400 { return }
+        let linkMap = externalLinks
+        guard !linkMap.isEmpty else {
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.linkCheckKey)
+            return
+        }
+        checkingLinks = true
+        defer { checkingLinks = false }
+
+        var uniqueURLs: [String] = []
+        var seen = Set<String>()
+        for urls in linkMap.values {
+            for url in urls where seen.insert(url).inserted {
+                uniqueURLs.append(url)
+            }
+        }
+        uniqueURLs = Array(uniqueURLs.prefix(80))
+
+        let dead = await LinkProber.probe(urls: uniqueURLs)
+
+        var findings: [String: [SecurityFinding]] = [:]
+        for (directory, urls) in linkMap {
+            for url in urls {
+                guard let reason = dead[url] else { continue }
+                findings[directory, default: []].append(SecurityFinding(
+                    severity: .warning,
+                    rule: "外链已失效（引用的端点可能已下线或被替换）",
+                    file: "SKILL.md", line: 0,
+                    excerpt: "\(url) — \(reason)"
+                ))
+            }
+        }
+        deadLinkFindings = findings
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.linkCheckKey)
+        lastLinkCheck = Date()
+
+        // -atlasCheckLinks -atlasProbeOut：验收探针
+        if LaunchArgs.flag("atlasCheckLinks"), let out = LaunchArgs.value("atlasProbeOut") {
+            let payload: [String: Any] = [
+                "checked": uniqueURLs.count,
+                "dead": dead.map { ["url": $0.key, "reason": $0.value] },
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+               let text = String(data: data, encoding: .utf8) {
+                try? text.write(toFile: out, atomically: true, encoding: .utf8)
+            }
+            quitIfRequested()
+        }
+    }
+
+    // MARK: - 二期探针（F1 触发模拟 / F2 发起器 dry-run，验收用）
+
+    private var phase2ProbesDone = false
+
+    private func runPhase2ProbesIfRequested(skills: [Skill]) {
+        guard !phase2ProbesDone else { return }
+        phase2ProbesDone = true
+        // -atlasTriggerProbe "做个PPT" -atlasProbeOut /path.json
+        if let phrase = LaunchArgs.value("atlasTriggerProbe"),
+           let out = LaunchArgs.value("atlasProbeOut") {
+            let atRiskNames = Set(doctorReport.atRisk.map(\.skill.name))
+            let ranked = TriggerLab.simulate(
+                phrase: phrase, skills: skills, usage: usage, atRiskNames: atRiskNames
+            )
+            let payload: [[String: Any]] = ranked.map {
+                ["skill": $0.skill.name, "score": $0.score,
+                 "matched": $0.matched, "buried": $0.buried,
+                 "atRisk": $0.atRisk, "disabled": $0.disabled, "usage": $0.usageCount]
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+               let text = String(data: data, encoding: .utf8) {
+                try? text.write(toFile: out, atomically: true, encoding: .utf8)
+            }
+        }
+        // -atlasLaunchProbe <技能名> -atlasLaunchTopic <主题> -atlasProbeOut /path.json
+        if let name = LaunchArgs.value("atlasLaunchProbe"),
+           let out = LaunchArgs.value("atlasProbeOut"),
+           let skill = skills.first(where: { $0.name == name || $0.directory == name }) {
+            let topic = LaunchArgs.value("atlasLaunchTopic") ?? ""
+            _ = try? SkillLauncher.launch(skill: skill, topic: topic, dryRunProbe: out)
+        }
+        // -atlasOutputsProbe <技能名> -atlasProbeOut /path.json（F4 产出回链）
+        if let name = LaunchArgs.value("atlasOutputsProbe"),
+           let out = LaunchArgs.value("atlasProbeOut"),
+           let skill = skills.first(where: { $0.name == name || $0.directory == name }) {
+            let records = OutputLinker.recentOutputs(for: skill)
+            let payload: [[String: Any]] = records.map {
+                ["dir": $0.directory.path, "date": $0.dateText, "topic": $0.topic,
+                 "files": $0.fileCount, "deliverable": $0.latestDeliverable ?? ""]
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+               let text = String(data: data, encoding: .utf8) {
+                try? text.write(toFile: out, atomically: true, encoding: .utf8)
+            }
+        }
+        // -atlasDropProbe <文件路径> -atlasProbeOut /path.json（F5 规则匹配）
+        if let file = LaunchArgs.value("atlasDropProbe"),
+           let out = LaunchArgs.value("atlasProbeOut") {
+            let matches = DropRules.match(fileURL: URL(fileURLWithPath: file), skills: skills)
+            let payload: [[String: String]] = matches.map {
+                ["skill": $0.skillDirectory, "reason": $0.reason]
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+               let text = String(data: data, encoding: .utf8) {
+                try? text.write(toFile: out, atomically: true, encoding: .utf8)
+            }
+        }
+        let probeKeys = ["atlasTriggerProbe", "atlasLaunchProbe", "atlasOutputsProbe", "atlasDropProbe"]
+        if probeKeys.contains(where: { LaunchArgs.value($0) != nil }) {
+            quitIfRequested()
+        }
+    }
+
     // MARK: - 使用频率统计（后台增量索引）
 
     private var usageTask: Task<Void, Never>?
@@ -910,7 +1186,14 @@ final class AppStore: ObservableObject {
     /// 长期未用批量停用（首次治理主入口：一键把吃灰技能移出 listing）。
     /// CC Switch 来源只读跳过；全部处理完只重扫一次。
     func disableAllStale() {
-        let targets = staleSkills.filter { $0.origin != .ccSwitch && !$0.disabled }
+        // 被活跃下游依赖的跳过（guizang-social-card-skill 被 to-xhs 依赖这类）
+        let targets = staleSkills.filter { skill in
+            guard skill.origin != .ccSwitch, !skill.disabled else { return false }
+            let dependents = ProductionChain.dependents(of: skill.directory)
+            return !dependents.contains { directory in
+                skills.contains { $0.directory == directory && !$0.disabled }
+            }
+        }
         guard !targets.isEmpty else { return }
         pauseWatching()
         var failures: [String] = []

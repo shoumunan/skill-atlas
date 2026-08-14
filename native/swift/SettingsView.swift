@@ -12,6 +12,7 @@ struct SettingsPage: View {
             VStack(spacing: Theme.Space.s20) {
                 AppearanceGroup()
                 LibraryGroup()
+                SyncGroup()
                 MigrationGroup()
                 AppGroup()
             }
@@ -206,7 +207,7 @@ private struct LibraryGroup: View {
                         .font(Theme.Fonts.mono)
                         .foregroundStyle(Theme.textSecondary)
                         .textSelection(.enabled)
-                    Button("在访达中显示") {
+                    Button(L("在访达中显示")) {
                         store.openFolder(AtlasPaths.root.path)
                     }
                     .buttonStyle(.plain)
@@ -222,7 +223,7 @@ private struct LibraryGroup: View {
                     withAnimation(Motion.control) { pathsExpanded.toggle() }
                 } label: {
                     HStack(spacing: Theme.Space.s4) {
-                        Text("\(store.data?.summary.checkedPaths.count ?? 0) 个目录")
+                        Text(LF("%lld 个目录", store.data?.summary.checkedPaths.count ?? 0))
                             .font(Theme.Fonts.callout)
                         Image(systemName: "chevron.down")
                             .font(.system(size: 8, weight: .semibold))
@@ -260,7 +261,7 @@ private struct LibraryGroup: View {
                 Button {
                     Task { await store.rescan() }
                 } label: {
-                    Text("重新扫描")
+                    Text(L("重新扫描"))
                         .font(Theme.Fonts.calloutEmphasis)
                         .foregroundStyle(Theme.textPrimary)
                         .padding(.horizontal, Theme.Space.s12)
@@ -270,7 +271,7 @@ private struct LibraryGroup: View {
                 .buttonStyle(PressableButtonStyle())
                 .quietControl()
                 .disabled(store.scanning)
-                .help("重新扫描全部目录（⌘R）")
+                .help(L("重新扫描全部目录（⌘R）"))
             }
         }
     }
@@ -286,12 +287,12 @@ private struct MigrationGroup: View {
             VStack(alignment: .leading, spacing: Theme.Space.s12) {
                 // 机制：一张图讲清「复制进库，软链出去」
                 MigrationFlow()
-                Text("迁移做两件事：把 CC Switch 库里的技能完整复制进本库（原文件一个不动），再把各平台技能目录里的软链改指本库。之后开关平台、更新、卸载都在这里完成；CC Switch 的数据库和原目录始终只读。撤销迁移只把软链指回去，本库副本保留。")
+                Text(L("迁移做两件事：把 CC Switch 库里的技能完整复制进本库（原文件一个不动），再把各平台技能目录里的软链改指本库。之后开关平台、更新、卸载都在这里完成；CC Switch 的数据库和原目录始终只读。撤销迁移只把软链指回去，本库副本保留。"))
                     .font(Theme.Fonts.secondary)
                     .lineSpacing(3)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("没用过 CC Switch？不需要这一步：用「安装技能」直接装进本库；已经散装在各平台目录里的技能会被自动收录展示，随时可选择收进库统一管理。")
+                Text(L("没用过 CC Switch？不需要这一步：用「安装技能」直接装进本库；已经散装在各平台目录里的技能会被自动收录展示，随时可选择收进库统一管理。"))
                     .font(Theme.Fonts.secondary)
                     .lineSpacing(3)
                     .foregroundStyle(Theme.textTertiary)
@@ -318,7 +319,7 @@ private struct MigrationGroup: View {
                     Button {
                         store.cleanupSheetPresented = true
                     } label: {
-                        Text("检查并清理…")
+                        Text(L("检查并清理…"))
                             .font(Theme.Fonts.calloutEmphasis)
                             .foregroundStyle(Theme.textPrimary)
                             .padding(.horizontal, Theme.Space.s12)
@@ -334,7 +335,7 @@ private struct MigrationGroup: View {
                 Button {
                     store.rollbackMigration()
                 } label: {
-                    Text("撤销迁移")
+                    Text(L("撤销迁移"))
                         .font(Theme.Fonts.calloutEmphasis)
                         .foregroundStyle(Theme.textPrimary)
                         .padding(.horizontal, Theme.Space.s12)
@@ -347,7 +348,7 @@ private struct MigrationGroup: View {
                 Button {
                     store.migrationSheetPresented = true
                 } label: {
-                    Text("迁入…")
+                    Text(L("迁入…"))
                         .font(Theme.Fonts.calloutEmphasis)
                         .foregroundStyle(.white)
                         .padding(.horizontal, Theme.Space.s12 + 2)
@@ -393,17 +394,18 @@ struct MigrationFlow: View {
                     PlatformLogo(platform: .gemini, size: 16)
                     PlatformLogo(platform: .grokbuild, size: 16)
                 }
-                Text("各平台 skills 目录")
+                Text(L("各平台 skills 目录"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textSecondary)
-                Text("软链指向本库")
+                Text(L("软链指向本库"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
             }
             .padding(Theme.Space.s8 + 2)
+            .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
             .quietControl(cornerRadius: Theme.Radius.row)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
     }
 
     private func node(title: String, path: String, note: String) -> some View {
@@ -415,11 +417,13 @@ struct MigrationFlow: View {
                 .font(Theme.Fonts.mono)
                 .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
+                .truncationMode(.middle)
             Text(L(note))
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(Theme.textTertiary)
         }
         .padding(Theme.Space.s8 + 2)
+        .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
         .quietControl(cornerRadius: Theme.Radius.row)
     }
 
@@ -442,14 +446,15 @@ private struct AppGroup: View {
     @ObservedObject private var updates = UpdateChecker.shared
 
     private var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2.2"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.3.0"
     }
 
     var body: some View {
         SettingsGroup(title: "应用") {
             SettingsRow(
                 title: "Skill Atlas \(version)",
-                subtitle: updates.available.map { LF("发现新版本 %@，点右侧按钮更新。", $0.version) } ?? L("启动时自动检查一次新版本。"),
+                subtitle: updates.available.map { LF("发现新版本 %@，点右侧按钮更新。", $0.version) }
+                    ?? (UpdateChecker.feedConfigured ? L("启动时自动检查一次新版本。") : L("本地构建 · 未配置更新源，重新构建即为最新。")),
                 divider: false
             ) {
                 Button {
@@ -466,5 +471,114 @@ private struct AppGroup: View {
                 .quietControl(tint: updates.available == nil ? nil : Theme.accent)
             }
         }
+    }
+}
+
+
+// MARK: - 多机同步（二期 F8：库 git 化最小闭环）
+
+private struct SyncGroup: View {
+    @State private var status: GitSync.Status?
+    @State private var isRepo = GitSync.isRepo()
+    @State private var message: String?
+    @State private var errorText: String?
+
+    var body: some View {
+        SettingsGroup(title: "多机同步") {
+            if !isRepo {
+                SettingsRow(
+                    title: "把库变成 Git 仓库",
+                    subtitle: "对 ~/.skill-atlas/ 执行 git init 并做首次提交（使用缓存与卸载备份不入库）。换机时 clone 后重新扫描即可重建挂载。",
+                    divider: false
+                ) {
+                    Button {
+                        do {
+                            try GitSync.initialize()
+                            refresh()
+                        } catch {
+                            errorText = error.localizedDescription
+                        }
+                    } label: {
+                        Text("初始化…")
+                            .font(Theme.Fonts.calloutEmphasis)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, Theme.Space.s12 + 2)
+                            .frame(height: 26)
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                    .accentGlass(Capsule(style: .continuous))
+                }
+            } else {
+                SettingsRow(
+                    title: "仓库状态",
+                    subtitle: status.map { LF("分支 %@ · 未提交改动 %d 项", $0.branch, $0.dirtyCount) }
+                        ?? L("读取中…")
+                ) {
+                    Text(status?.lastCommit ?? "")
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                SettingsRow(
+                    title: "提交快照",
+                    subtitle: "git add -A + commit。配远端与 push 在终端里做。",
+                    divider: false
+                ) {
+                    HStack(spacing: Theme.Space.s8) {
+                        if let message {
+                            Text(message)
+                                .font(Theme.Fonts.caption)
+                                .foregroundStyle(Theme.healthy)
+                        }
+                        Button {
+                            GitSync.openInTerminal()
+                        } label: {
+                            Text("在终端打开")
+                                .font(Theme.Fonts.calloutEmphasis)
+                                .foregroundStyle(Theme.textPrimary)
+                                .padding(.horizontal, Theme.Space.s12)
+                                .frame(height: 26)
+                                .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                        }
+                        .buttonStyle(PressableButtonStyle())
+                        .quietControl()
+                        Button {
+                            do {
+                                let committed = try GitSync.snapshot()
+                                message = committed ? L("已提交") : L("没有改动")
+                                refresh()
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { message = nil }
+                            } catch {
+                                errorText = error.localizedDescription
+                            }
+                        } label: {
+                            Text("提交快照")
+                                .font(Theme.Fonts.calloutEmphasis)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, Theme.Space.s12 + 2)
+                                .frame(height: 26)
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(PressableButtonStyle())
+                        .accentGlass(Capsule(style: .continuous))
+                    }
+                }
+            }
+            if let errorText {
+                Text(errorText)
+                    .font(Theme.Fonts.secondary)
+                    .foregroundStyle(Theme.error)
+                    .padding(.horizontal, Theme.Space.s16)
+                    .padding(.bottom, Theme.Space.s12)
+            }
+        }
+        .onAppear { refresh() }
+    }
+
+    private func refresh() {
+        isRepo = GitSync.isRepo()
+        status = GitSync.status()
     }
 }

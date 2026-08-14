@@ -1,6 +1,7 @@
 .DS_Store
 .swiftpm/
 native/.build/
+native/resources/_part*.json
 native/vendor/FluidGradient/FluidGradientExample/
 native/vendor/FluidGradient/assets/
 Skill Atlas.app/

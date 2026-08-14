@@ -739,6 +739,20 @@ enum SkillGit {
         return Status(available: true, detail: "可更新")
     }
 
+    /// 更新前 diff 预览：--stat 概览 + SKILL.md 全文 diff（合规场景：技能文本变更 = 行为变更）
+    static func upstreamDiff(source: URL, branch: String) -> (stat: String, skillDiff: String) {
+        _ = run(["fetch", "origin"], in: source)
+        let range = "HEAD..origin/\(branch)"
+        let stat = run(["diff", "--stat", range], in: source).stdout
+        var skillDiff = run(["diff", range, "--", "SKILL.md"], in: source).stdout
+        if skillDiff.isEmpty {
+            // SKILL.md 没变时给全量 diff（截断到 400 行防爆）
+            let full = run(["diff", range], in: source).stdout
+            skillDiff = full.split(separator: "\n").prefix(400).joined(separator: "\n")
+        }
+        return (stat, skillDiff)
+    }
+
     static func pullFF(source: URL) throws {
         let result = run(["pull", "--ff-only"], in: source)
         guard result.status == 0 else {

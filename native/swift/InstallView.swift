@@ -51,10 +51,10 @@ struct InstallSheet: View {
                         .fill(Theme.accent.opacity(0.12))
                 }
             VStack(alignment: .leading, spacing: 1) {
-                Text("安装技能")
+                Text(L("安装技能"))
                     .font(Theme.Fonts.panelTitle)
                     .foregroundStyle(Theme.textPrimary)
-                Text("粘贴 GitHub 仓库链接，或选择本地文件夹，装入 Skill Atlas 技能库")
+                Text(L("粘贴 GitHub 仓库链接，或选择本地文件夹，装入 Skill Atlas 技能库"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
             }
@@ -71,7 +71,7 @@ struct InstallSheet: View {
             }
             .buttonStyle(.plain)
             .keyboardShortcut("w", modifiers: .command)
-            .help("关闭（⌘W / Esc）")
+            .help(L("关闭（⌘W / Esc）"))
         }
         .padding(.horizontal, Theme.Space.s20)
         .padding(.vertical, Theme.Space.s16)
@@ -86,6 +86,8 @@ struct InstallSheet: View {
             progressStage
         case .selecting:
             selectingStage
+        case .reviewing:
+            reviewingStage
         case .done:
             doneStage
         }
@@ -140,11 +142,11 @@ struct InstallSheet: View {
                         .fill(Theme.warning.opacity(0.08))
                 }
             }
-            Text("支持 GitHub 仓库、/tree/<分支>/<子目录>，以及本机已有 SKILL.md 的文件夹。")
+            Text(L("支持 GitHub 仓库、/tree/<分支>/<子目录>，以及本机已有 SKILL.md 的文件夹。"))
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textTertiary)
             HStack {
-                Button("选择本地文件夹…") {
+                Button(L("选择本地文件夹…")) {
                     let panel = NSOpenPanel()
                     panel.canChooseFiles = false
                     panel.canChooseDirectories = true
@@ -160,7 +162,7 @@ struct InstallSheet: View {
                 Button {
                     model.start()
                 } label: {
-                    Text("安装")
+                    Text(L("安装"))
                         .font(Theme.Fonts.calloutEmphasis)
                         .foregroundStyle(.white)
                         .padding(.horizontal, Theme.Space.s16)
@@ -252,14 +254,14 @@ struct InstallSheet: View {
                 }
             }
             HStack {
-                Text("装入本库，再按勾选平台建软链")
+                Text(L("装入本库，再按勾选平台建软链"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
                 Spacer()
                 Button {
                     model.install(store: store)
                 } label: {
-                    Text("安装选中（\(selectedCount)）")
+                    Text(LF("安装选中（%lld）", selectedCount))
                         .font(Theme.Fonts.calloutEmphasis)
                         .foregroundStyle(.white)
                         .padding(.horizontal, Theme.Space.s16)
@@ -275,6 +277,68 @@ struct InstallSheet: View {
         }
     }
 
+    // MARK: 安全审阅（关键级发现强制过闸）
+
+    private var reviewingStage: some View {
+        let flagged = model.candidates.filter { $0.selected && !$0.conflict && !$0.findings.isEmpty }
+        return VStack(alignment: .leading, spacing: Theme.Space.s12) {
+            HStack(spacing: Theme.Space.s8) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.error)
+                Text("静态扫描发现可疑内容，请逐条核对原文")
+                    .font(Theme.Fonts.calloutEmphasis)
+                    .foregroundStyle(Theme.textPrimary)
+            }
+            Text("公开市场约 1/4 技能有安全缺陷。以下是命中行原文：确认来源可信再放行，或返回取消勾选。")
+                .font(Theme.Fonts.secondary)
+                .lineSpacing(2)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.s12) {
+                    ForEach(flagged) { candidate in
+                        VStack(alignment: .leading, spacing: Theme.Space.s4 + 2) {
+                            Text(candidate.directory)
+                                .font(Theme.Fonts.rowTitle)
+                                .foregroundStyle(Theme.textPrimary)
+                            ForEach(candidate.findings.filter { $0.severity != .info }) { finding in
+                                FindingRow(finding: finding)
+                            }
+                        }
+                        .padding(Theme.Space.s12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .quietControl(cornerRadius: Theme.Radius.tile)
+                    }
+                }
+            }
+            .frame(maxHeight: 320)
+            .panelScroll()
+            HStack {
+                Button {
+                    model.backToSelection()
+                } label: {
+                    Text("返回选择")
+                        .font(Theme.Fonts.calloutEmphasis)
+                        .foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, Theme.Space.s12)
+                        .frame(height: 28)
+                        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                }
+                .buttonStyle(PressableButtonStyle())
+                .quietControl()
+                .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button(role: .destructive) {
+                    model.confirmReviewAndInstall(store: store)
+                } label: {
+                    Text("已核对来源，仍要安装")
+                        .font(Theme.Fonts.calloutEmphasis)
+                }
+            }
+        }
+    }
+
     // MARK: 结果
 
     private var doneStage: some View {
@@ -285,7 +349,7 @@ struct InstallSheet: View {
                 Image(systemName: ok > 0 ? "checkmark.circle.fill" : "info.circle.fill")
                     .font(.system(size: 14))
                     .foregroundStyle(ok > 0 ? Theme.healthy : Theme.warning)
-                Text("成功 \(ok) · 跳过 \(skipped)")
+                Text(LF("成功 %lld · 跳过 %lld", ok, skipped))
                     .font(Theme.Fonts.calloutEmphasis)
                     .foregroundStyle(Theme.textPrimary)
             }
@@ -309,7 +373,7 @@ struct InstallSheet: View {
                 }
             }
             HStack {
-                Button("再装一个") { model.reset() }
+                Button(L("再装一个")) { model.reset() }
                     .buttonStyle(.link)
                     .font(Theme.Fonts.secondaryEmphasis)
                 Spacer()
@@ -317,7 +381,7 @@ struct InstallSheet: View {
                     model.reset()
                     dismiss()
                 } label: {
-                    Text("完成")
+                    Text(L("完成"))
                         .font(Theme.Fonts.calloutEmphasis)
                         .foregroundStyle(.white)
                         .padding(.horizontal, Theme.Space.s16)
@@ -364,11 +428,83 @@ private struct CandidateRow: View {
                         .lineLimit(1)
                 }
                 Spacer()
+                // 装前安全扫描徽标（红=关键级会拦截，橙=警告）
+                if candidate.criticalCount > 0 {
+                    Text(LF("%lld 处可疑", candidate.criticalCount))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.error)
+                        .padding(.horizontal, Theme.Space.s8)
+                        .frame(height: 18)
+                        .quietControl(tint: Theme.error)
+                        .help(L("含关键级安全发现，安装前会强制进入审阅页"))
+                } else if candidate.warningCount > 0 {
+                    Text(LF("%lld 处提示", candidate.warningCount))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.warning)
+                        .padding(.horizontal, Theme.Space.s8)
+                        .frame(height: 18)
+                        .quietControl(tint: Theme.warning)
+                        .help(L("含警告级安全发现，详见审阅页"))
+                }
             }
             .padding(.horizontal, Theme.Space.s8)
             .padding(.vertical, 5)
             .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous))
         }
         .buttonStyle(.plain)
+    }
+}
+
+
+/// 安全发现行：严重度图标 + 规则 + 位置 + 命中行原文（mono）
+struct FindingRow: View {
+    var finding: SecurityFinding
+
+    private var tint: Color {
+        switch finding.severity {
+        case .critical: return Theme.error
+        case .warning: return Theme.warning
+        case .info: return Theme.accent
+        }
+    }
+
+    private var symbol: String {
+        switch finding.severity {
+        case .critical: return "exclamationmark.octagon.fill"
+        case .warning: return "exclamationmark.triangle.fill"
+        case .info: return "info.circle.fill"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: Theme.Space.s4 + 2) {
+                Image(systemName: symbol)
+                    .font(.system(size: 10))
+                    .foregroundStyle(tint)
+                Text(L(finding.rule))
+                    .font(Theme.Fonts.secondaryEmphasis)
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer(minLength: Theme.Space.s4)
+                Text(finding.line > 0 ? "\(finding.file):\(finding.line)" : finding.file)
+                    .font(Theme.Fonts.mono)
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            if !finding.excerpt.isEmpty {
+                Text(finding.excerpt)
+                    .font(Theme.Fonts.mono)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+                    .padding(Theme.Space.s4 + 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(tint.opacity(0.06))
+                    }
+            }
+        }
     }
 }

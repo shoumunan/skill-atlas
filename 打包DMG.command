@@ -37,8 +37,10 @@ Skill Atlas 安装说明
    atlas.json、skills/、skill-backups/、migration.json。
    绝不写入 ~/.cc-switch/cc-switch.db 或 ~/.cc-switch/skills。
 
-7. 侧栏：技能库 / 更新 / 健康 / 设置。
-   列表行内 logo 单击开关挂载。日常复制调用语用 ⌥⌘K。
+7. 侧栏：技能库 / 体检 / 指南 / 设置（⌘1–⌘4）。
+   列表行内彩色 logo 单击开关挂载；更新在技能库顶部横条。
+   ⌥⌘K 呼出菜单栏：回车发起会话，⌥回车复制调用语，「试触发」可预演一句话会唤醒谁。
+   设置页可切换界面语言（简中/English/日本語/한국어）与深浅色。
 EOF
 
 hdiutil create -volname "Skill Atlas $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null

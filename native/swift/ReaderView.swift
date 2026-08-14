@@ -163,7 +163,7 @@ struct ReaderSheet: View {
                     Image(systemName: "doc.questionmark")
                         .font(.system(size: 28))
                         .foregroundStyle(Theme.textTertiary)
-                    Text("读不到 SKILL.md")
+                    Text(L("读不到 SKILL.md"))
                         .font(Theme.Fonts.rowTitle)
                         .foregroundStyle(Theme.textSecondary)
                 }
@@ -182,7 +182,7 @@ struct ReaderSheet: View {
                 Text(skill.name)
                     .font(Theme.Fonts.panelTitle)
                     .foregroundStyle(Theme.textPrimary)
-                Text("SKILL.md 完整说明")
+                Text(L("SKILL.md 完整说明"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
             }
@@ -197,7 +197,7 @@ struct ReaderSheet: View {
                     .quietControl()
             }
             .buttonStyle(.plain)
-            .help("在访达中打开技能目录")
+            .help(L("在访达中打开技能目录"))
             Button {
                 dismiss()
             } label: {
@@ -209,7 +209,7 @@ struct ReaderSheet: View {
             }
             .buttonStyle(.plain)
             .keyboardShortcut("w", modifiers: .command)
-            .help("关闭（⌘W / Esc）")
+            .help(L("关闭（⌘W / Esc）"))
         }
         .padding(.horizontal, Theme.Space.s20)
         .padding(.vertical, Theme.Space.s16)
@@ -225,7 +225,7 @@ struct ReaderSheet: View {
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Theme.textTertiary)
                         .rotationEffect(.degrees(frontmatterExpanded ? 90 : 0))
-                    Text("Frontmatter · \(entries.count) 项")
+                    Text(LF("Frontmatter · %lld 项", entries.count))
                         .font(Theme.Fonts.secondaryEmphasis)
                         .foregroundStyle(Theme.textSecondary)
                     Spacer()
@@ -327,10 +327,10 @@ struct ReaderSheet: View {
             Image(systemName: "scissors")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.warning)
-            Text("文件超过 200 KB，仅显示开头部分。")
+            Text(L("文件超过 200 KB，仅显示开头部分。"))
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textSecondary)
-            Button("打开目录查看原文") {
+            Button(L("打开目录查看原文")) {
                 store.openFolder(skill.sourcePath)
             }
             .buttonStyle(.link)

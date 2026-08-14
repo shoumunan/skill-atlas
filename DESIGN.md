@@ -21,6 +21,10 @@
 | 11 | 更新检查自触发循环修复 | `git fetch` 写 .git → FSEvents → rescan → 又 fetch 的死循环：检查全程 `pauseWatching`、后台自动检查 30 分钟节流（手动不限）、后台检查不再展示进度（只有手动「重新检查」露脸）；rescan 继承上一轮 updateAvailable 标记，pull 成功就地清标记 |
 | 12 | 清理 CC Switch 副本 | 设置页迁移组新增「检查并清理…」（已迁移才出现）→ `CleanupSheet` 三段式：逐目录校验（已在本库 / SKILL.md 可读非空 / 启用平台挂载 resolve 后落在本库）→ 红字不可逆警告（进废纸篓、清空后无法恢复、撤销迁移失效、CC Switch 里显示缺失）→ 移入废纸篓并删除 migration.json。未通过校验的原样保留；`cc-switch.db` 永远不动。调试参数 `-atlasCleanup` |
 | 13 | 首次治理快赢（需求清单 1/2） | 长期未用面板顶部「全部停用（n）」批量按钮 + `confirmationDialog`（可回收 token、不删文件、CC Switch 来源跳过；`disableAllStale` 全程只重扫一次）；技能库排序新增「最近使用」；设置页「扫描范围」从桩数据改为真实清单（本库 + CC Switch 源标只读 + 各平台根，软链标注 resolve 落点） |
+| 14 | 第三轮布局修正 | 体检页左右两列改 50/50 均分（右列固定 400 在宽窗失衡）；技能库**默认不选中**、详情栏点行才展开（再点收起 / 头部 ✕ 收起，`.move(.trailing)` 转场）；列表头两行分工：行一「怎么看」（全部/收藏 tabs + 排序 + 计数）、行二「筛哪些」（类别/平台/状态/来源 + 清除）；指南名词卡增至四个（Skill / Agent / **Harness** / MCP）；旋转箭头第二病根修复——usage-index.json 写在被 FSEvents 监听的 `~/.skill-atlas` 根下形成 扫描→写缓存→再扫描 循环，根目录移出监听 |
+| 15 | 迁移引导 sheet 重做 + 四语国际化 | MigrationSheet 换成 Install/Cleanup 同骨架（图标章头部 + 机制图复用 `MigrationFlow` + 三承诺行 + quiet/accentGlass 按钮，替换系统 borderedProminent）；全应用 i18n：`L10n.swift`（`L()/LF()` 显式查表 + `LocalizedBundle` swizzle + `AppLanguage` 五档 跟随系统/简中/EN/JA/KO）、382 词条 × 3 语言（`native/resources/{en,ja,ko}.lproj/Localizable.strings`，键=中文原文，缺译回退中文）、设置页语言选择器即时生效（根视图 `.id(uiLanguage)` 重建）、技能名称与描述等用户内容保持原文；构建脚本打包 lproj，Info.plist 声明 CFBundleLocalizations |
+| 16 | 二期梯队一（2026-08-14 落地并无头验收） | **F1 触发模拟器**：`TriggerLab.swift`——信号=「」短语+名分词+任务别名，250 字符可见窗口口径；⌥⌘K 面板新增「试触发」模式（名次+命中词+丢弃风险/埋深/已停用徽标，点结果跳详情）；体检「描述体检」新增「触发词埋太深」组（`ContextDoctor.buriedTriggers`）。**F3 装前安全扫描**：`SecurityScan.swift` 七类静态规则（动态上下文 !`cmd`、curl\|sh、Base64 解码执行、长 Base64 块、隐藏 Unicode、allowed-tools 全权、硬编码密钥、外链清单）；安装检测后逐候选扫描，关键级强制 `.reviewing` 审阅页（命中行原文 + 「已核对来源，仍要安装」destructive）；已装技能后台复扫（mtime 缓存，CC Switch 只读跳过），结果进体检「需要修复·安全可疑」组与详情「安全扫描」区块。**F2 一键发起器**：`Launcher.swift`——genreMap 映射 Filing 体裁目录，自动建 `projects/<体裁>/<YYYYMMDD_主题>/`，AppleScript 开 Terminal 跑 `claude '请使用 X：主题'`；详情头「发起会话」按钮 + 弹窗（主题/最近主题/目录预览/仅复制），⌥⌘K 回车=发起流程、⌥回车=纯复制。调试探针：`-atlasScanProbe` / `-atlasTriggerProbe`+`-atlasProbeOut` / `-atlasLaunchProbe`+`-atlasLaunchTopic`（dry-run 不开终端）。验收实录：恶意夹具 4 关键级被拦、「做个PPT」第一名 kami 且 pptx 标丢弃风险、hotspot 发起 dry-run 目录与命令合规 |
+| 17 | 二期梯队二/三（2026-08-14 落地并无头验收） | **F4 产出回链**：`OutputLinker.swift` 扫 `projects/<体裁>/YYYYMMDD_主题/`（体裁 ← genreMap 反查），详情页「最近产出」区块（最近 5 次，点击 open、悬停「用同一主题重跑」）；实测回链 hotspot 真实成稿（黄金股/港股医疗CXO/…）。**F5 素材投递箱**：`DropInbox.swift` 规则表（自运营*.xlsx→somd、研报 PDF→research-index、成稿 docx→to-xhs…），主窗口整窗拖放 → 虚线提示浮层 → 投递弹层（首选+备选单选、主题、目录预览、「带素材发起」= 调用语附素材路径）；实测两条规则命中。**F6 生产链路**：`ProductionChain` 静态图（hotspot→to-voiceover→to-xhs；to-xhs 依赖 guizang-social-card-skill），详情「生产链路」区块上游/下游/依赖/被依赖 chips 点击跳转，不做自动编排。**F7 分组视图**：列表「分组」菜单（不分组/套件/类别），套件 = 目录名首段前缀 ≥3 共享，`LazyVStack` pinned section headers，纯逻辑分组不动物理目录。**F8 库 git 化**：`GitSync`（init 含 .gitignore 排除 usage-index 与备份、快照提交、状态行、「在终端打开」做远端与 push——凭据不进 GUI），设置页「多机同步」组。探针：`-atlasOutputsProbe`、`-atlasDropProbe` |
 
 ---
 
@@ -148,7 +152,7 @@
 
 ## ⑤ 信息架构与页面框架
 
-### 页面分工（v1.2.2 外壳回玻璃轨）
+### 页面分工（v3.0 外壳回玻璃轨）
 
 独立总览页已删除。侧栏五级图标轨：技能库 / 更新 / 体检 / 怎么用 / 设置。快捷键 ⌘1–⌘5。窗口是手工 L0/L1/L2 玻璃壳（hiddenTitleBar + 76pt 玻璃 rail + 44pt 工具条），**禁止** `NavigationSplitView`、系统 sidebar List、斑马纹 inset List。空库时内容区换为安装引导。完整功能地图见 ⑩。
 
@@ -240,7 +244,7 @@ macOS 原生应用的做法（Finder / 音乐）：每页内容区域 = 工具�
 
 ---
 
-## ⑩ v1.2.2 产品规划（2026-08-14 定稿；与上文冲突以本章为准）
+## ⑩ v3.0 产品规划（2026-08-14 定稿；与上文冲突以本章为准）
 
 Reading this as: native macOS 14+ 技能管理器, 受众是装了一堆 Claude/Codex/Grok skills 的人, 语言是 Apple HIG / Tahoe Liquid Glass, 系统是 SwiftUI 官方控件。
 
@@ -361,7 +365,7 @@ Dials: VARIANCE 3（系统外壳可预测）/ MOTION 4 / DENSITY 7（管理器�
   [迁入…] [撤销迁移]
   说明：不写 CC Switch 数据库与原目录。
 应用
-  版本 1.2.2     [检查更新…]
+  版本 1.3.0     [检查更新…]
 ```
 
 **首次启动迁移弹窗（模态，不可点窗外关掉）**
@@ -400,7 +404,7 @@ Dials: VARIANCE 3（系统外壳可预测）/ MOTION 4 / DENSITY 7（管理器�
 - 描述 >1 句或 >200 字 → 「建议缩短」+ 首句缩短建议（可复制）
 - 全部标注「估算」
 
-### 10.6 外壳（v1.2.2：回到玻璃轨）
+### 10.6 外壳（v3.0：回到玻璃轨）
 
 v3 曾换成 `NavigationSplitView` + 系统 sidebar + 斑马纹 List，观感变成「系统设置」，已撤销。
 

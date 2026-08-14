@@ -35,10 +35,10 @@ struct MigrationSheet: View {
                         .fill(Theme.accent.opacity(0.12))
                 }
             VStack(alignment: .leading, spacing: 1) {
-                Text("把技能收到一起")
+                Text(L("把技能收到一起"))
                     .font(Theme.Fonts.panelTitle)
                     .foregroundStyle(Theme.textPrimary)
-                Text("首次设置 · 原文件保留，随时可撤销")
+                Text(L("首次设置 · 原文件保留，随时可撤销"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
             }
@@ -50,7 +50,7 @@ struct MigrationSheet: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s16) {
-            Text("发现 CC Switch 里有 \(plan.total) 个技能。收进本库后，开关平台、更新、体检、瘦身都在这一个应用里完成。")
+            Text(LF("发现 CC Switch 里有 %lld 个技能。收进本库后，开关平台、更新、体检、瘦身都在这一个应用里完成。", plan.total))
                 .font(Theme.Fonts.body)
                 .lineSpacing(2)
                 .foregroundStyle(Theme.textPrimary)
@@ -84,7 +84,7 @@ struct MigrationSheet: View {
                     store.skipMigration()
                     dismiss()
                 } label: {
-                    Text("暂时跳过")
+                    Text(L("暂时跳过"))
                         .font(Theme.Fonts.calloutEmphasis)
                         .foregroundStyle(Theme.textSecondary)
                         .padding(.horizontal, Theme.Space.s12)
@@ -95,7 +95,7 @@ struct MigrationSheet: View {
                 .quietControl()
                 .keyboardShortcut(.cancelAction)
                 .disabled(store.migrating)
-                .help("以后可在设置页随时迁入")
+                .help(L("以后可在设置页随时迁入"))
                 Spacer()
                 Button {
                     store.performMigration()

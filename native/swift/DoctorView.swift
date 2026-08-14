@@ -116,13 +116,13 @@ private struct BudgetBand: View {
         HStack(alignment: .top, spacing: Theme.Space.s20) {
             VStack(alignment: .leading, spacing: Theme.Space.s8) {
                 HStack(spacing: Theme.Space.s8) {
-                    Text("技能清单的上下文预算")
+                    Text(L("技能清单的上下文预算"))
                         .font(Theme.Fonts.panelTitle)
                         .foregroundStyle(Theme.textPrimary)
                     Image(systemName: "questionmark.circle")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.textTertiary)
-                        .help("Claude Code 启动时会把所有技能的名称和描述注入上下文，预算约为窗口的 1%。超额后，最少使用的技能描述会被静默丢弃——技能还在，但模型看不到它能做什么，触发就会失灵。数字为估算（CJK×0.7 + 其他÷4 + 条目开销）。")
+                        .help(L("Claude Code 启动时会把所有技能的名称和描述注入上下文，预算约为窗口的 1%。超额后，最少使用的技能描述会被静默丢弃——技能还在，但模型看不到它能做什么，触发就会失灵。数字为估算（CJK×0.7 + 其他÷4 + 条目开销）。"))
                     Spacer()
                     windowPicker
                 }
@@ -177,7 +177,7 @@ private struct BudgetBand: View {
         }
         .padding(2)
         .quietControl()
-        .help("按你常用模型的上下文窗口估算预算（窗口的 1%）")
+        .help(L("按你常用模型的上下文窗口估算预算（窗口的 1%）"))
     }
 
     private func windowTab(_ title: String, tokens: Int) -> some View {
@@ -238,11 +238,21 @@ private struct IssuesPanel: View {
                 if $0.health != $1.health { return (rank[$0.health] ?? 2) < (rank[$1.health] ?? 2) }
                 return $0.name.lowercased() < $1.name.lowercased()
             }
+        let security = store.securityDisplay
+            .compactMap { directory, findings -> (Skill, [SecurityFinding])? in
+                guard let skill = store.skills.first(where: { $0.directory == directory }) else { return nil }
+                return (skill, findings)
+            }
+            .sorted { lhs, rhs in
+                let lc = lhs.1.filter { $0.severity == .critical }.count
+                let rc = rhs.1.filter { $0.severity == .critical }.count
+                return lc != rc ? lc > rc : lhs.0.name.lowercased() < rhs.0.name.lowercased()
+            }
         DoctorPanel(
             symbol: "wrench.and.screwdriver.fill",
             tint: Theme.error,
             title: "需要修复",
-            count: issues.count,
+            count: issues.count + security.count,
             subtitle: issues.isEmpty
                 ? L("挂载与文件检查全部通过。")
                 : L("挂载或文件有问题，技能可能加载不出来。点击行去详情处理。"),
@@ -251,17 +261,61 @@ private struct IssuesPanel: View {
                 ? L("技能由 Skill Atlas 库管理；CC Switch 原数据未做任何修改，可随时在菜单里撤销迁移")
                 : L("本应用不修改 CC Switch 数据；管理动作只对 Skill Atlas 库与本地直装技能生效")
         ) {
-            if issues.isEmpty {
+            HStack(spacing: Theme.Space.s8) {
+                Text(store.lastLinkCheck.map { LF("外链上次复查 %@", Format.day.string(from: $0)) } ?? L("外链尚未复查"))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                Spacer()
+                if store.checkingLinks {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Button {
+                        Task { await store.checkExternalLinks(force: true) }
+                    } label: {
+                        Text("复查外链存活")
+                            .font(Theme.Fonts.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.horizontal, Theme.Space.s8)
+                            .frame(height: 20)
+                            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                    .quietControl()
+                    .help(L("对已装技能引用的外链做存活检查（每周自动跑一次；只报确定失效的）"))
+                }
+            }
+            if issues.isEmpty && security.isEmpty {
                 emptyHint(symbol: "checkmark.seal.fill", tint: Theme.healthy, text: L("所有检查项都正常"))
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(issues) { skill in
-                            DoctorRow(
-                                skill: skill,
-                                note: skill.problems.joined(separator: "；"),
-                                trailing: { AnyView(HealthFlag(health: skill.health)) }
-                            )
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        if !security.isEmpty {
+                            groupHead(L("安全可疑（静态复扫，点行去详情看命中原文）"), count: security.count)
+                            ForEach(security, id: \.0.name) { pair in
+                                let critical = pair.1.filter { $0.severity == .critical }.count
+                                DoctorRow(
+                                    skill: pair.0,
+                                    note: pair.1.first.map { L($0.rule) } ?? "",
+                                    trailing: {
+                                        AnyView(miniBadge(
+                                            critical > 0 ? LF("%lld 关键", critical) : LF("%lld 警告", pair.1.count),
+                                            tint: critical > 0 ? Theme.error : Theme.warning
+                                        ))
+                                    }
+                                )
+                            }
+                        }
+                        if !issues.isEmpty {
+                            if !security.isEmpty {
+                                groupHead(L("挂载与文件"), count: issues.count)
+                            }
+                            ForEach(issues) { skill in
+                                DoctorRow(
+                                    skill: skill,
+                                    note: skill.problems.joined(separator: "；"),
+                                    trailing: { AnyView(HealthFlag(health: skill.health)) }
+                                )
+                            }
                         }
                     }
                 }
@@ -278,7 +332,7 @@ private struct DescriptionPanel: View {
     var report: DoctorReport
 
     var body: some View {
-        let total = report.atRisk.count + report.overlong.count + report.verbose.count
+        let total = report.atRisk.count + report.overlong.count + report.verbose.count + report.buried.count
         DoctorPanel(
             symbol: "text.alignleft",
             tint: Theme.warning,
@@ -301,6 +355,16 @@ private struct DescriptionPanel: View {
                                     skill: entry.skill,
                                     note: LF("%d 次会话 · 上架 ~%d token", entry.sessions, entry.tokens),
                                     trailing: { AnyView(EmptyView()) }
+                                )
+                            }
+                        }
+                        if !report.buried.isEmpty {
+                            groupHead(L("触发词埋太深（前 250 字符之外，listing 里等于没写）"), count: report.buried.count)
+                            ForEach(report.buried) { entry in
+                                DoctorRow(
+                                    skill: entry.skill,
+                                    note: entry.phrases.prefix(4).joined(separator: "、"),
+                                    trailing: { AnyView(miniBadge(L("埋深"), tint: Theme.warning)) }
                                 )
                             }
                         }
@@ -341,19 +405,21 @@ private struct DescriptionPanel: View {
         }
     }
 
-    private func groupHead(_ text: String, count: Int) -> some View {
-        HStack(spacing: Theme.Space.s4) {
-            Text(L(text))
-                .font(Theme.Fonts.secondaryEmphasis)
-                .foregroundStyle(Theme.textSecondary)
-            Text("\(count)")
-                .font(Theme.Fonts.caption)
-                .monospacedDigit()
-                .foregroundStyle(Theme.textTertiary)
-        }
-        .padding(.top, Theme.Space.s8)
-        .padding(.bottom, Theme.Space.s4)
+}
+
+/// 面板内小组头：标题 + 计数
+private func groupHead(_ text: String, count: Int) -> some View {
+    HStack(spacing: Theme.Space.s4) {
+        Text(L(text))
+            .font(Theme.Fonts.secondaryEmphasis)
+            .foregroundStyle(Theme.textSecondary)
+        Text("\(count)")
+            .font(Theme.Fonts.caption)
+            .monospacedDigit()
+            .foregroundStyle(Theme.textTertiary)
     }
+    .padding(.top, Theme.Space.s8)
+    .padding(.bottom, Theme.Space.s4)
 }
 
 // MARK: - 长期未用（可回收）
@@ -379,7 +445,7 @@ private struct StalePanel: View {
             if store.usageIndexing {
                 HStack(spacing: Theme.Space.s8) {
                     ProgressView().controlSize(.small)
-                    Text("正在索引使用记录…")
+                    Text(L("正在索引使用记录…"))
                         .font(Theme.Fonts.secondary)
                         .foregroundStyle(Theme.textSecondary)
                 }
@@ -395,7 +461,7 @@ private struct StalePanel: View {
                             HStack(spacing: Theme.Space.s4) {
                                 Image(systemName: "pause.circle")
                                     .font(.system(size: 11, weight: .semibold))
-                                Text("全部停用（\(batchable.count)）")
+                                Text(LF("全部停用（%lld）", batchable.count))
                                     .font(Theme.Fonts.calloutEmphasis)
                             }
                             .foregroundStyle(Theme.textPrimary)
@@ -405,16 +471,16 @@ private struct StalePanel: View {
                         }
                         .buttonStyle(PressableButtonStyle())
                         .quietControl()
-                        .help("把下面所有吃灰技能移入 .disabled/，不删任何文件，随时可恢复")
+                        .help(L("把下面所有吃灰技能移入 .disabled/，不删任何文件，随时可恢复"))
                         .confirmationDialog(
-                            "停用 \(batchable.count) 个长期未用的技能？",
+                            LF("停用 %lld 个长期未用的技能？", batchable.count),
                             isPresented: $confirmBatch,
                             titleVisibility: .visible
                         ) {
-                            Button("全部停用", role: .destructive) { store.disableAllStale() }
-                            Button("取消", role: .cancel) {}
+                            Button(L("全部停用"), role: .destructive) { store.disableAllStale() }
+                            Button(L("取消"), role: .cancel) {}
                         } message: {
-                            Text("目录移入 .disabled/，平台不再加载，可回收约 \(report.reclaimableTokens) token 上架预算。不删除任何文件，详情页随时恢复；CC Switch 来源的会跳过。")
+                            Text(LF("目录移入 .disabled/，平台不再加载，可回收约 %lld token 上架预算。不删除任何文件，详情页随时恢复；CC Switch 来源的会跳过。", report.reclaimableTokens))
                         }
                     }
                     ScrollView {
@@ -453,9 +519,9 @@ private struct StaleRow: View {
             Spacer(minLength: Theme.Space.s4)
             if hovering, skill.origin != .ccSwitch {
                 Button {
-                    store.setSkillDisabled(skill, disabled: true)
+                    store.requestDisable(skill)
                 } label: {
-                    Text("停用")
+                    Text(L("停用"))
                         .font(Theme.Fonts.caption)
                         .foregroundStyle(Theme.textPrimary)
                         .padding(.horizontal, Theme.Space.s8)
@@ -464,7 +530,7 @@ private struct StaleRow: View {
                 }
                 .buttonStyle(PressableButtonStyle())
                 .quietControl()
-                .help("移入 .disabled/，不删文件，随时恢复")
+                .help(L("移入 .disabled/，不删文件，随时恢复"))
             }
         }
         .padding(.horizontal, Theme.Space.s8)
@@ -555,7 +621,7 @@ private struct OverlapRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("查看 \(skill.name)")
+        .help(LF("查看 %@", skill.name))
     }
 }
 

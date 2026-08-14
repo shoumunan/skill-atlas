@@ -3,8 +3,7 @@ import Foundation
 
 // MARK: - 应用自更新检查
 //
-// 拉取 GitHub Releases 最新版本（同时兼容自定义 appcast.json），
-// 与 CFBundleShortVersionString 做语义化比较。
+// 拉取 appcast.json，与 CFBundleShortVersionString 做语义化比较。
 // 超时 5 秒；后台失败静默。菜单「检查更新…」走三条可见路径：
 // 有新版 / 已最新 / 暂时无法检查更新。
 // 启动 10 秒后若距上次成功检查 ≥7 天则静默查一次；有新版时工具栏亮点。
@@ -24,7 +23,7 @@ enum UpdateOutcome: Equatable {
 @MainActor
 final class UpdateChecker: ObservableObject {
     static let shared = UpdateChecker()
-    static let defaultFeed = "https://api.github.com/repos/shoumunan/skill-atlas/releases/latest"
+    static let defaultFeed = "https://raw.githubusercontent.com/shoumunan/skill-atlas/main/appcast.json"
     private static let lastCheckKey = "atlasLastSilentUpdateCheck"
 
     @Published var available: Appcast?
@@ -36,6 +35,9 @@ final class UpdateChecker: ObservableObject {
         }
         return URL(string: defaultFeed)!
     }
+
+    /// 默认源已指向 github.com/shoumunan/skill-atlas，是真实仓库
+    static var feedConfigured: Bool { true }
 
     static var currentVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
@@ -53,6 +55,11 @@ final class UpdateChecker: ObservableObject {
     }
 
     func checkFromMenu() {
+        // 没配置更新源就别去打网络——诚实告知，而不是弹「网络错误」
+        guard Self.feedConfigured else {
+            Self.presentUnconfiguredAlert()
+            return
+        }
         Task {
             let outcome = await Self.fetch()
             apply(outcome)
@@ -69,10 +76,7 @@ final class UpdateChecker: ObservableObject {
         config.waitsForConnectivity = false
         let session = URLSession(configuration: config)
         do {
-            var request = URLRequest(url: feedURL)
-            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-            request.setValue("Skill-Atlas/\(currentVersion)", forHTTPHeaderField: "User-Agent")
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await session.data(from: feedURL)
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 return .failed("HTTP \(http.statusCode)")
             }
@@ -88,34 +92,13 @@ final class UpdateChecker: ObservableObject {
     }
 
     static func parse(_ data: Data) -> Appcast? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let version = object["version"] as? String, !version.isEmpty,
+              let download = object["download"] as? String, !download.isEmpty else {
             return nil
         }
-
-        if let tag = object["tag_name"] as? String {
-            let version = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
-            let notes = (object["body"] as? String) ?? ""
-            let assets = object["assets"] as? [[String: Any]] ?? []
-            guard !version.isEmpty,
-                  let download = assets.first(where: {
-                      (($0["name"] as? String) ?? "").lowercased().hasSuffix(".dmg")
-                  })?["browser_download_url"] as? String,
-                  isSecureDownload(download) else {
-                return nil
-            }
-            return Appcast(version: version, notes: notes, download: download)
-        }
-
-        guard let version = object["version"] as? String, !version.isEmpty,
-              let download = object["download"] as? String, !download.isEmpty,
-              isSecureDownload(download) else {
-            return nil
-        }
-        return Appcast(version: version, notes: (object["notes"] as? String) ?? "", download: download)
-    }
-
-    private static func isSecureDownload(_ raw: String) -> Bool {
-        URL(string: raw)?.scheme?.lowercased() == "https"
+        let notes = (object["notes"] as? String) ?? ""
+        return Appcast(version: version, notes: notes, download: download)
     }
 
     /// 语义化比较：1.2.0 < 1.10.0 < 2.0.0；缺段按 0
@@ -138,6 +121,7 @@ final class UpdateChecker: ObservableObject {
     // MARK: 静默 / probe
 
     private func silentCheckIfDue() async {
+        guard Self.feedConfigured else { return }
         let last = UserDefaults.standard.double(forKey: Self.lastCheckKey)
         let due = last == 0 || Date().timeIntervalSince1970 - last >= 7 * 86400
         guard due else { return }
@@ -210,12 +194,24 @@ final class UpdateChecker: ObservableObject {
             alert.addButton(withTitle: "好")
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
-        case .failed(_):
+        case .failed(let reason):
             alert.messageText = L("暂时无法检查更新")
-            alert.informativeText = L("请检查网络后重试。")
+            alert.informativeText = reason.contains("404")
+                ? L("更新源仓库还没有 appcast.json：把项目根目录的 appcast.json 推到 github.com/shoumunan/skill-atlas 主分支即可生效。")
+                : LF("请检查网络后重试。（%@）", reason)
             alert.addButton(withTitle: "好")
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
         }
+    }
+
+    /// 本地构建、未配置 appcast 时的诚实提示
+    static func presentUnconfiguredAlert() {
+        let alert = NSAlert()
+        alert.messageText = L("本地构建版本，未配置更新源")
+        alert.informativeText = LF("当前版本 %@。用「构建原生应用.command」重新构建即为最新。\n如需自动更新：把 appcast.json 托管到任意可访问地址后，在终端执行\ndefaults write local.skill-atlas.dashboard atlasAppcastURL \"<地址>\"", currentVersion)
+        alert.addButton(withTitle: "好")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 }

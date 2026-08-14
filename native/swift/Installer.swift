@@ -35,6 +35,11 @@ struct InstallCandidate: Identifiable {
     /// 目标位置已有同名目录 → 只能跳过
     var conflict: Bool
     var selected: Bool
+    /// 装前静态安全扫描结果（二期 F3）
+    var findings: [SecurityFinding] = []
+
+    var criticalCount: Int { findings.filter { $0.severity == .critical }.count }
+    var warningCount: Int { findings.filter { $0.severity == .warning }.count }
 }
 
 struct InstallResult: Identifiable {
@@ -51,6 +56,7 @@ final class InstallerModel: ObservableObject {
         case cloning        // git clone 中
         case detecting      // 扫描 SKILL.md
         case selecting      // 多技能勾选
+        case reviewing      // 安全审阅（有关键级发现时强制过闸）
         case installing     // 拷贝中
         case done           // 结果清单
     }
@@ -66,6 +72,8 @@ final class InstallerModel: ObservableObject {
     private var cloneDir: URL?
     private var parsedRef: RepoRef?
     private var ownsCloneDir = false
+    /// 审阅页已确认「仍要安装」
+    private var reviewConfirmed = false
 
     /// 即时校验（红字提示用）：空串不报错，非法格式报错
     var inlineError: String? {
@@ -151,8 +159,16 @@ final class InstallerModel: ObservableObject {
                     stage = .detecting
                     statusText = "正在检测 SKILL.md…"
                 }
-                let found = try detect(in: dir, ref: ref)
+                var found = try detect(in: dir, ref: ref)
+                // 装前安全扫描：逐候选静态扫（毫秒级，离线）
+                for index in found.indices {
+                    let source = found[index].relativePath == "."
+                        ? dir
+                        : dir.appendingPathComponent(found[index].relativePath)
+                    found[index].findings = SecurityScanner.scan(directory: source)
+                }
                 candidates = found
+                writeScanProbeIfRequested()
                 if found.isEmpty {
                     throw InstallError(L("仓库里没有找到 SKILL.md（检查了根目录与一层子目录）。"))
                 }
@@ -168,6 +184,11 @@ final class InstallerModel: ObservableObject {
 
     func install(store: AppStore) {
         let chosen = candidates.filter { $0.selected && !$0.conflict }
+        // 关键级安全发现 → 强制进入审阅页；「仍要安装」后才放行
+        if !reviewConfirmed, chosen.contains(where: { $0.criticalCount > 0 }) {
+            stage = .reviewing
+            return
+        }
         let skippedConflicts = candidates.filter(\.conflict)
         guard let cloneDir else { return }
         stage = .installing
@@ -239,7 +260,41 @@ final class InstallerModel: ObservableObject {
         Task { await store.rescan(keepSelection: true) }
     }
 
+    /// 审阅页「仍要安装」：放行一次
+    func confirmReviewAndInstall(store: AppStore) {
+        reviewConfirmed = true
+        install(store: store)
+    }
+
+    func backToSelection() {
+        stage = .selecting
+    }
+
+    /// 调试钩子：-atlasScanProbe <path> 把扫描结果写盘（验收用）
+    private func writeScanProbeIfRequested() {
+        guard let path = UserDefaults.standard.string(forKey: "atlasScanProbe"), !path.isEmpty else { return }
+        let payload: [[String: Any]] = candidates.map { candidate in
+            [
+                "directory": candidate.directory,
+                "critical": candidate.criticalCount,
+                "warning": candidate.warningCount,
+                "findings": candidate.findings.map {
+                    ["severity": $0.severity.rawValue, "rule": $0.rule,
+                     "file": $0.file, "line": $0.line, "excerpt": $0.excerpt]
+                },
+            ]
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+           let text = String(data: data, encoding: .utf8) {
+            try? text.write(toFile: path, atomically: true, encoding: .utf8)
+        }
+        if LaunchArgs.flag("atlasQuit") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exit(0) }
+        }
+    }
+
     func reset() {
+        reviewConfirmed = false
         cleanupClone()
         urlText = ""
         stage = .input

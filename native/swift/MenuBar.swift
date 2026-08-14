@@ -116,9 +116,16 @@ struct MenuBarPalette: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
     @FocusState private var searchFocused: Bool
+    @FocusState private var topicFocused: Bool
     @State private var query = ""
     @State private var selection = 0
     @State private var copiedName: String?
+    /// 模式：搜技能（回车发起）/ 试触发（这句话会唤醒谁）
+    @State private var triggerMode = false
+    /// 发起第二步：已选技能，等待主题
+    @State private var launchTarget: Skill?
+    @State private var topic = ""
+    @State private var launchError: String?
 
     /// 结果按使用频率加权：常用的排前面（第一轮使用统计的直接复用）
     private var results: [Skill] {
@@ -134,62 +141,88 @@ struct MenuBarPalette: View {
             .map { $0 }
     }
 
+    private var triggerResults: [TriggerCandidate] {
+        let atRisk = Set(store.doctorReport.atRisk.map(\.skill.name))
+        return TriggerLab.simulate(
+            phrase: query, skills: store.skills, usage: store.usage, atRiskNames: atRisk
+        )
+    }
+
     var body: some View {
-        let list = results
         VStack(alignment: .leading, spacing: 0) {
-            searchField
-                .padding(Theme.Space.s8)
-            Divider()
-            if list.isEmpty {
-                Text(store.skills.isEmpty ? L("还没有可用的技能") : LF("没有匹配「%@」的技能", query))
-                    .font(Theme.Fonts.secondary)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, Theme.Space.s20)
+            if let target = launchTarget {
+                launchStep(target)
             } else {
-                VStack(spacing: 1) {
-                    ForEach(Array(list.enumerated()), id: \.element.name) { index, skill in
-                        PaletteRow(
-                            skill: skill,
-                            usage: store.usage[skill.directory]?.total ?? 0,
-                            selected: index == selection,
-                            copied: copiedName == skill.name
-                        ) {
-                            copyAndClose(skill)
-                        }
-                        .onHover { if $0 { selection = index } }
-                    }
+                modeTabs
+                    .padding(.horizontal, Theme.Space.s8)
+                    .padding(.top, Theme.Space.s8)
+                searchField
+                    .padding(Theme.Space.s8)
+                Divider()
+                if triggerMode {
+                    triggerList
+                } else {
+                    searchList
                 }
-                .padding(Theme.Space.s4)
             }
             Divider()
             footer
         }
-        .frame(width: 340)
+        .frame(width: 360)
         .onAppear {
             query = ""
+            topic = ""
             selection = 0
             copiedName = nil
+            launchTarget = nil
+            launchError = nil
             // 浮层动画结束后再聚焦，太早会丢
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { searchFocused = true }
         }
         .onChange(of: query) { selection = 0 }
     }
 
+    // MARK: 模式切换
+
+    private var modeTabs: some View {
+        HStack(spacing: 2) {
+            modeTab(L("搜技能"), active: !triggerMode) { triggerMode = false }
+            modeTab(L("试触发"), active: triggerMode) { triggerMode = true }
+            Spacer()
+        }
+    }
+
+    private func modeTab(_ title: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(active ? Theme.Fonts.secondaryEmphasis : Theme.Fonts.secondary)
+                .foregroundStyle(active ? Theme.textPrimary : Theme.textTertiary)
+                .padding(.horizontal, Theme.Space.s8)
+                .frame(height: 20)
+                .background {
+                    if active {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.primary.opacity(0.08))
+                    }
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
     private var searchField: some View {
         HStack(spacing: Theme.Space.s8) {
-            Image(systemName: "magnifyingglass")
+            Image(systemName: triggerMode ? "bolt" : "magnifyingglass")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
-            TextField("搜索技能，⏎ 复制调用语", text: $query)
+            TextField(
+                triggerMode ? L("输入你打算说的话，看谁会抢答") : L("搜索技能，⏎ 发起 · ⌥⏎ 复制"),
+                text: $query
+            )
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused($searchFocused)
-                .onSubmit {
-                    let list = results
-                    guard list.indices.contains(selection) else { return }
-                    copyAndClose(list[selection])
-                }
+                .onSubmit { handleSubmit() }
                 .onKeyPress(.downArrow) {
                     selection = min(selection + 1, results.count - 1)
                     return .handled
@@ -208,6 +241,147 @@ struct MenuBarPalette: View {
         }
     }
 
+    // MARK: 搜技能列表（⏎ 发起 / ⌥⏎ 复制）
+
+    private var searchList: some View {
+        let list = results
+        return Group {
+            if list.isEmpty {
+                Text(store.skills.isEmpty ? L("还没有可用的技能") : LF("没有匹配「%@」的技能", query))
+                    .font(Theme.Fonts.secondary)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Theme.Space.s20)
+            } else {
+                VStack(spacing: 1) {
+                    ForEach(Array(list.enumerated()), id: \.element.name) { index, skill in
+                        PaletteRow(
+                            skill: skill,
+                            usage: store.usage[skill.directory]?.total ?? 0,
+                            selected: index == selection,
+                            copied: copiedName == skill.name
+                        ) {
+                            beginLaunch(skill)
+                        }
+                        .onHover { if $0 { selection = index } }
+                    }
+                }
+                .padding(Theme.Space.s4)
+            }
+        }
+    }
+
+    // MARK: 试触发列表（F1：这句话会唤醒谁）
+
+    private var triggerList: some View {
+        let candidates = triggerResults
+        return Group {
+            if query.trimmingCharacters(in: .whitespaces).count < 2 {
+                Text(L("像平时一样打一句话，比如「做个PPT」"))
+                    .font(Theme.Fonts.secondary)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Theme.Space.s20)
+            } else if candidates.isEmpty {
+                Text(L("没有技能会响应这句话——要么点名调用，要么去改描述"))
+                    .font(Theme.Fonts.secondary)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Theme.Space.s20)
+            } else {
+                VStack(spacing: 1) {
+                    ForEach(Array(candidates.enumerated()), id: \.element.id) { index, candidate in
+                        TriggerRow(candidate: candidate, rank: index + 1) {
+                            store.select(candidate.skill.name)
+                            openWindow(id: "main")
+                            NSApp.activate(ignoringOtherApps: true)
+                            closePanel()
+                        }
+                    }
+                }
+                .padding(Theme.Space.s4)
+            }
+        }
+    }
+
+    // MARK: 发起第二步（F2：主题 → 建目录 → Terminal）
+
+    private func launchStep(_ skill: Skill) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s8) {
+            HStack(spacing: Theme.Space.s8) {
+                CategoryIcon(category: skill.category, size: 22, style: .quiet)
+                Text(skill.name)
+                    .font(.system(size: 12.5, weight: .medium))
+                Spacer()
+                Button {
+                    launchTarget = nil
+                    DispatchQueue.main.async { searchFocused = true }
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(L("返回（Esc）"))
+            }
+            TextField(L("主题（回车发起，可留空）"), text: $topic)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .focused($topicFocused)
+                .onSubmit { performLaunch(skill) }
+                .onExitCommand {
+                    launchTarget = nil
+                    DispatchQueue.main.async { searchFocused = true }
+                }
+                .padding(.horizontal, Theme.Space.s8)
+                .frame(height: 30)
+                .background {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.primary.opacity(0.05))
+                }
+            let recents = SkillLauncher.recentTopics(for: skill)
+            if !recents.isEmpty {
+                HStack(spacing: Theme.Space.s4) {
+                    ForEach(recents.prefix(3), id: \.self) { recent in
+                        Button {
+                            topic = recent
+                        } label: {
+                            Text(recent)
+                                .font(Theme.Fonts.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .padding(.horizontal, Theme.Space.s8)
+                                .frame(height: 18)
+                                .background {
+                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                        .fill(Color.primary.opacity(0.05))
+                                }
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            Text(SkillLauncher.sessionDirectory(for: skill, topic: topic).path
+                .replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                .font(Theme.Fonts.mono)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let launchError {
+                Text(launchError)
+                    .font(Theme.Fonts.secondary)
+                    .foregroundStyle(Theme.error)
+            }
+        }
+        .padding(Theme.Space.s8 + 2)
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { topicFocused = true }
+        }
+    }
+
     private var footer: some View {
         HStack {
             Button {
@@ -221,12 +395,55 @@ struct MenuBarPalette: View {
             }
             .buttonStyle(.plain)
             Spacer()
-            Text("↑↓ 选择 · ⏎ 复制 · ⌥⌘K 呼出")
+            Text(launchTarget != nil
+                ? L("⏎ 发起 · ⌥⏎ 仅复制 · Esc 返回")
+                : triggerMode
+                    ? L("点结果跳到主窗口详情 · ⌥⌘K 呼出")
+                    : L("⏎ 发起 · ⌥⏎ 复制调用语 · ⌥⌘K 呼出"))
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, Theme.Space.s12)
         .padding(.vertical, Theme.Space.s8)
+    }
+
+    // MARK: 动作
+
+    private func handleSubmit() {
+        guard !triggerMode else { return }
+        let list = results
+        guard list.indices.contains(selection) else { return }
+        let skill = list[selection]
+        // ⌥⏎ = 纯复制（旧行为）；⏎ = 进入发起流程
+        if NSEvent.modifierFlags.contains(.option) {
+            copyAndClose(skill)
+        } else {
+            beginLaunch(skill)
+        }
+    }
+
+    private func beginLaunch(_ skill: Skill) {
+        if NSEvent.modifierFlags.contains(.option) {
+            copyAndClose(skill)
+            return
+        }
+        launchTarget = skill
+        topic = ""
+        launchError = nil
+    }
+
+    private func performLaunch(_ skill: Skill) {
+        if NSEvent.modifierFlags.contains(.option) {
+            store.copyToPasteboard(SkillLauncher.command(for: skill, topic: topic))
+            closePanel()
+            return
+        }
+        do {
+            _ = try SkillLauncher.launch(skill: skill, topic: topic)
+            closePanel()
+        } catch {
+            launchError = error.localizedDescription
+        }
     }
 
     private func copyAndClose(_ skill: Skill) {
@@ -240,7 +457,78 @@ struct MenuBarPalette: View {
 
     private func closePanel() {
         copiedName = nil
+        launchTarget = nil
         dismiss()
+    }
+}
+
+/// 试触发结果行：名次 + 技能 + 命中词 + 风险徽标
+private struct TriggerRow: View {
+    var candidate: TriggerCandidate
+    var rank: Int
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: Theme.Space.s8) {
+                Text("\(rank)")
+                    .font(Theme.Fonts.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(rank == 1 ? Color.white : Color.secondary)
+                    .frame(width: 16, height: 16)
+                    .background {
+                        Circle().fill(rank == 1 ? Theme.accent : Color.primary.opacity(0.06))
+                    }
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: Theme.Space.s4) {
+                        Text(candidate.skill.name)
+                            .font(.system(size: 12.5, weight: rank == 1 ? .semibold : .medium))
+                            .lineLimit(1)
+                        if candidate.disabled {
+                            flag(L("已停用"), tint: .secondary)
+                        }
+                        if candidate.atRisk {
+                            flag(L("丢弃风险"), tint: Theme.warning)
+                        }
+                        if !candidate.buried.isEmpty {
+                            flag(LF("埋深 %lld", candidate.buried.count), tint: Theme.warning)
+                        }
+                    }
+                    Text(LF("命中：%@", candidate.matched.prefix(4).joined(separator: "、")))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: Theme.Space.s4)
+                if candidate.usageCount > 0 {
+                    Text(LF("%lld 次", candidate.usageCount))
+                        .font(Theme.Fonts.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, Theme.Space.s8)
+            .padding(.vertical, 5)
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .background {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(rank == 1 ? Theme.accent.opacity(0.08) : Color.clear)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func flag(_ text: String, tint: Color) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .medium))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 4)
+            .frame(height: 14)
+            .background {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(tint.opacity(0.10))
+            }
     }
 }
 
@@ -261,11 +549,11 @@ private struct PaletteRow: View {
                     .lineLimit(1)
                 Spacer(minLength: Theme.Space.s8)
                 if copied {
-                    Label("已复制", systemImage: "checkmark")
+                    Label(L("已复制"), systemImage: "checkmark")
                         .font(Theme.Fonts.caption)
                         .foregroundStyle(Theme.healthy)
                 } else if usage > 0 {
-                    Text("\(usage) 次")
+                    Text(LF("%lld 次", usage))
                         .font(Theme.Fonts.caption)
                         .monospacedDigit()
                         .foregroundStyle(.tertiary)

@@ -93,6 +93,7 @@ struct SkillAtlasApp: App {
             RootView()
                 // 切语言时整棵树重建，所有 LocalizedStringKey 立即按新语言取词
                 .id(store.uiLanguage)
+                .environment(\.locale, store.uiLanguage.resolvedLocale)
                 .environmentObject(store)
                 .frame(minWidth: 1000, minHeight: 660)
                 .background(WindowConfigurator())
@@ -102,27 +103,27 @@ struct SkillAtlasApp: App {
         .defaultSize(width: 1380, height: 860)
         .commands {
             CommandGroup(after: .appInfo) {
-                Button("检查更新…") { UpdateChecker.shared.checkFromMenu() }
+                Button(L("检查更新…")) { UpdateChecker.shared.checkFromMenu() }
             }
             CommandGroup(replacing: .newItem) {
-                Button("安装技能…") { store.installSheetPresented = true }
+                Button(L("安装技能…")) { store.installSheetPresented = true }
                     .keyboardShortcut("n", modifiers: .command)
-                Button("导出技能清单…") { store.exportSkillList() }
+                Button(L("导出技能清单…")) { store.exportSkillList() }
                     .keyboardShortcut("e", modifiers: .command)
                     .disabled(store.skills.isEmpty)
             }
             CommandMenu("管理") {
-                Button("从 CC Switch 迁入…") { store.migrationSheetPresented = true }
+                Button(L("从 CC Switch 迁入…")) { store.migrationSheetPresented = true }
                     .disabled(!store.canMigrate || store.migrating)
-                Button("撤销迁移") { store.rollbackMigration() }
+                Button(L("撤销迁移")) { store.rollbackMigration() }
                     .disabled(!store.canRollback || store.migrating)
                 Divider()
-                Button("检查技能更新") {
+                Button(L("检查技能更新")) {
                     Task { await store.checkSkillUpdates(interactive: true) }
                 }
                 .keyboardShortcut("u", modifiers: .command)
                 .disabled(store.skills.isEmpty)
-                Button("全部更新") { store.updateAllSkills() }
+                Button(L("全部更新")) { store.updateAllSkills() }
                     .keyboardShortcut("u", modifiers: [.command, .shift])
                     .disabled(store.updatableSkills.isEmpty)
             }
@@ -132,9 +133,9 @@ struct SkillAtlasApp: App {
                         .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
                 }
                 Divider()
-                Button("搜索技能") { store.searchFocusRequest += 1 }
+                Button(L("搜索技能")) { store.searchFocusRequest += 1 }
                     .keyboardShortcut("k", modifiers: .command)
-                Button("重新扫描") { Task { await store.rescan() } }
+                Button(L("重新扫描")) { Task { await store.rescan() } }
                     .keyboardShortcut("r", modifiers: .command)
             }
         }
@@ -143,6 +144,7 @@ struct SkillAtlasApp: App {
         MenuBarExtra(isInserted: $menuBarEnabled) {
             MenuBarPalette()
                 .id(store.uiLanguage)
+                .environment(\.locale, store.uiLanguage.resolvedLocale)
                 .environmentObject(store)
         } label: {
             Image(nsImage: MenuBarIcon.template)

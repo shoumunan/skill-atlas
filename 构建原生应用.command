@@ -19,6 +19,13 @@ cp "$APP_DIR/native/SkillAtlas.icns" "$APP_BUNDLE/Contents/Resources/SkillAtlas.
 rm -rf "$APP_BUNDLE/Contents/Resources/logos"
 mkdir -p "$APP_BUNDLE/Contents/Resources/logos"
 cp "$APP_DIR"/native/Resources/logos/*.svg "$APP_BUNDLE/Contents/Resources/logos/"
+# 多语言资源（en/ja/ko；中文是开发语言无需 lproj）
+rm -rf "$APP_BUNDLE/Contents/Resources/"{en,ja,ko}.lproj
+for lang in en ja ko; do
+  if [[ -d "$APP_DIR/native/resources/$lang.lproj" ]]; then
+    cp -R "$APP_DIR/native/resources/$lang.lproj" "$APP_BUNDLE/Contents/Resources/$lang.lproj"
+  fi
+done
 # 纯原生版不再内嵌网页与 Python 服务
 rm -rf "$APP_BUNDLE/Contents/Resources/dashboard"
 

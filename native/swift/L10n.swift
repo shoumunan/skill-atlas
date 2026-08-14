@@ -64,6 +64,24 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    /// SwiftUI Text(LocalizedStringKey) 的取词 locale（system 时跟随系统首选）
+    var resolvedLocale: Locale {
+        switch self {
+        case .system:
+            for preferred in Locale.preferredLanguages {
+                for candidate in ["en", "ja", "ko"] where preferred.hasPrefix(candidate) {
+                    return Locale(identifier: candidate)
+                }
+                if preferred.hasPrefix("zh") { return Locale(identifier: "zh-Hans") }
+            }
+            return Locale(identifier: "zh-Hans")
+        case .zhHans: return Locale(identifier: "zh-Hans")
+        case .english: return Locale(identifier: "en")
+        case .japanese: return Locale(identifier: "ja")
+        case .korean: return Locale(identifier: "ko")
+        }
+    }
+
     static func select(_ language: AppLanguage) {
         UserDefaults.standard.set(language.rawValue, forKey: storageKey)
         apply(language)

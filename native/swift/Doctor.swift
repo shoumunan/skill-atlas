@@ -37,6 +37,8 @@ struct DoctorReport {
     var atRisk: [ListingEntry] = []
     var overlong: [ListingEntry] = []
     var verbose: [VerboseEntry] = []
+    /// 「」触发词全部/大半埋在前 250 字符之外的技能（TriggerLab 口径）
+    var buried: [BuriedTriggerEntry] = []
     var reclaimableTokens = 0
 
     var overBudget: Bool { totalTokens > budgetTokens }
@@ -144,6 +146,8 @@ enum ContextDoctor {
             )
         }
         .sorted { $0.chars > $1.chars }
+
+        report.buried = buriedTriggers(skills: skills)
 
         return report
     }

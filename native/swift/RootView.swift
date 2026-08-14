@@ -31,11 +31,52 @@ struct RootView: View {
         .sheet(isPresented: $store.cleanupSheetPresented) {
             CleanupSheet()
         }
-        .alert("操作未完成", isPresented: Binding(
+        // 素材投递箱（二期 F5）：拖文件进窗口任意位置
+        .sheet(item: $store.droppedMaterial) { material in
+            DropSheet(fileURL: material.url, matches: material.matches)
+        }
+        .sheet(item: $store.diffTarget) { skill in
+            DiffSheet(skill: skill)
+        }
+        // 停用被依赖技能的警告（F6 链路数据接管理动作）
+        .confirmationDialog(
+            LF("「%@」被其他技能依赖", store.disableWarning?.skill.name ?? ""),
+            isPresented: Binding(
+                get: { store.disableWarning != nil },
+                set: { if !$0 { store.disableWarning = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(L("仍要停用"), role: .destructive) {
+                if let warning = store.disableWarning {
+                    store.setSkillDisabled(warning.skill, disabled: true)
+                }
+                store.disableWarning = nil
+            }
+            Button(L("取消"), role: .cancel) { store.disableWarning = nil }
+        } message: {
+            Text(LF("%@ 依赖它才能工作，停用后这些技能会静默失效。", (store.disableWarning?.dependents ?? []).joined(separator: "、")))
+        }
+        .onDrop(of: [.fileURL], isTargeted: $store.dropTargeted) { providers in
+            guard let provider = providers.first else { return false }
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url else { return }
+                Task { @MainActor in
+                    store.receiveDroppedFile(url)
+                }
+            }
+            return true
+        }
+        .overlay {
+            if store.dropTargeted {
+                DropTargetOverlay()
+            }
+        }
+        .alert(L("操作未完成"), isPresented: Binding(
             get: { store.actionError != nil },
             set: { if !$0 { store.actionError = nil } }
         )) {
-            Button("好", role: .cancel) { store.actionError = nil }
+            Button(L("好"), role: .cancel) { store.actionError = nil }
         } message: {
             Text(store.actionError ?? "")
         }
@@ -47,15 +88,15 @@ struct RootView: View {
             ),
             titleVisibility: .visible
         ) {
-            Button("只移除平台挂载") {
+            Button(L("只移除平台挂载")) {
                 if let skill = store.uninstallTarget { store.confirmUninstall(skill, trashLibrary: false) }
             }
-            Button("卸载并移入废纸篓", role: .destructive) {
+            Button(L("卸载并移入废纸篓"), role: .destructive) {
                 if let skill = store.uninstallTarget { store.confirmUninstall(skill, trashLibrary: true) }
             }
-            Button("取消", role: .cancel) { store.uninstallTarget = nil }
+            Button(L("取消"), role: .cancel) { store.uninstallTarget = nil }
         } message: {
-            Text("会移除本应用建的平台软链。库内目录会先备份再处理。CC Switch 原文件不会删除。")
+            Text(uninstallMessage)
         }
         .task {
             applyLaunchPage()
@@ -77,6 +118,20 @@ struct RootView: View {
             store.nav = .library
             DispatchQueue.main.async { searchFocused = true }
         }
+    }
+
+    /// 卸载确认文案：被依赖时追加警告
+    private var uninstallMessage: String {
+        var message = L("会移除本应用建的平台软链。库内目录会先备份再处理。CC Switch 原文件不会删除。")
+        if let target = store.uninstallTarget {
+            let dependents = ProductionChain.dependents(of: target.directory).filter { directory in
+                store.skills.contains { $0.directory == directory && !$0.disabled }
+            }
+            if !dependents.isEmpty {
+                message += LF("\n\n注意：%@ 依赖它，卸载后会静默失效。", dependents.joined(separator: "、"))
+            }
+        }
+        return message
     }
 
     private func applyLaunchPage() {
@@ -162,9 +217,9 @@ struct ToolbarStrip: View {
                                 .frame(width: 8, height: 8)
                         }
                         .buttonStyle(.plain)
-                        .help("发现应用新版本")
+                        .help(L("发现应用新版本"))
                     }
-                    Text("更新于 \(Format.clock.string(from: scannedAt))")
+                    Text(LF("更新于 %@", Format.clock.string(from: scannedAt)))
                         .font(Theme.Fonts.caption)
                         .monospacedDigit()
                         .foregroundStyle(Theme.textTertiary)
@@ -189,7 +244,7 @@ private struct SearchCapsule: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(focused ? Theme.accent : Theme.textSecondary)
-            TextField("搜索技能、用途或任务", text: $store.search)
+            TextField(L("搜索技能、用途或任务"), text: $store.search)
                 .textFieldStyle(.plain)
                 .font(Theme.Fonts.callout)
                 .foregroundStyle(Theme.textPrimary)
@@ -212,7 +267,7 @@ private struct SearchCapsule: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .help("清空搜索")
+                .help(L("清空搜索"))
             }
         }
         .padding(.horizontal, Theme.Space.s12)
@@ -226,7 +281,7 @@ private struct SearchCapsule: View {
                     .shadow(color: Theme.accent.opacity(0.25), radius: 4)
             }
         }
-        .help("窗口内 ⌘K 聚焦搜索；在任何应用里按 ⌥⌘K 呼出菜单栏快速搜索")
+        .help(L("窗口内 ⌘K 聚焦搜索；在任何应用里按 ⌥⌘K 呼出菜单栏快速搜索"))
     }
 }
 
@@ -241,7 +296,7 @@ private struct InstallChromeButton: View {
             HStack(spacing: Theme.Space.s4 + 1) {
                 Image(systemName: "plus")
                     .font(.system(size: 11, weight: .bold))
-                Text("安装技能")
+                Text(L("安装技能"))
                     .font(Theme.Fonts.calloutEmphasis)
             }
             .foregroundStyle(.white)
@@ -251,42 +306,44 @@ private struct InstallChromeButton: View {
         }
         .buttonStyle(PressableButtonStyle())
         .accentGlass(Capsule(style: .continuous))
-        .help("从 GitHub 链接或本地文件夹装入技能库（⌘N）")
+        .help(L("从 GitHub 链接或本地文件夹装入技能库（⌘N）"))
     }
 }
 
 private struct RefreshButton: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var rotation = 0.0
 
     var body: some View {
         Button {
             Task { await store.rescan() }
         } label: {
-            Image(systemName: "arrow.clockwise")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .rotationEffect(.degrees(rotation))
-                .frame(width: 32, height: 32)
-                .contentShape(Circle())
+            Group {
+                // repeatForever 动画在 macOS 上无法可靠取消（曾导致图标永转），
+                // 改用 TimelineView 按时间驱动：scanning 一停视图即换回静态，物理上不可能卡住
+                if store.scanning && !reduceMotion {
+                    TimelineView(.animation) { timeline in
+                        let angle = timeline.date.timeIntervalSinceReferenceDate
+                            .truncatingRemainder(dividingBy: 0.9) / 0.9 * 360
+                        icon.rotationEffect(.degrees(angle))
+                    }
+                } else {
+                    icon
+                }
+            }
+            .frame(width: 32, height: 32)
+            .contentShape(Circle())
         }
         .buttonStyle(PressableButtonStyle())
         .glassChrome(Circle(), interactive: true)
         .disabled(store.scanning)
-        .help("重新扫描（⌘R）")
-        .onChange(of: store.scanning) {
-            guard !reduceMotion else { return }
-            if store.scanning {
-                withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) {
-                    rotation = 360
-                }
-            } else {
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { rotation = 0 }
-            }
-        }
+        .help(L("重新扫描（⌘R）"))
+    }
+
+    private var icon: some View {
+        Image(systemName: "arrow.clockwise")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(Theme.textPrimary)
     }
 }
 
@@ -316,13 +373,13 @@ struct SidebarRail: View {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.healthy)
-                Text("CC Switch 数据只读")
+                Text(L("CC Switch 数据只读"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
             }
             .padding(.horizontal, Theme.Space.s16)
             .padding(.bottom, Theme.Space.s16)
-            .help("不改动 CC Switch 原文件。本应用只管理自己的技能库，随时可撤销迁移。")
+            .help(L("不改动 CC Switch 原文件。本应用只管理自己的技能库，随时可撤销迁移。"))
         }
         .frame(width: 176)
         .frame(maxHeight: .infinity)
@@ -353,7 +410,7 @@ private struct BrandRow: View {
                 Text("Skill Atlas")
                     .font(Theme.Fonts.rowTitle)
                     .foregroundStyle(Theme.textPrimary)
-                Text("技能管理")
+                Text(L("技能管理"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
             }
@@ -521,21 +578,21 @@ struct OnboardingView: View {
             Image(systemName: "sparkles.rectangle.stack")
                 .font(.system(size: 32, weight: .light))
                 .foregroundStyle(Theme.accent)
-            Text("技能库还是空的")
+            Text(L("技能库还是空的"))
                 .font(Theme.Fonts.panelTitle)
-            Text("从 GitHub 或本地文件夹装入第一个技能，或把 CC Switch 里已有的技能收进来。")
+            Text(L("从 GitHub 或本地文件夹装入第一个技能，或把 CC Switch 里已有的技能收进来。"))
                 .font(Theme.Fonts.body)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)
             HStack(spacing: Theme.Space.s8) {
-                Button("安装技能…") {
+                Button(L("安装技能…")) {
                     store.installSheetPresented = true
                 }
                 .buttonStyle(.borderedProminent)
-                .help("装入本应用技能库（⌘N）")
+                .help(L("装入本应用技能库（⌘N）"))
                 if store.canMigrate {
-                    Button("从 CC Switch 迁入…") {
+                    Button(L("从 CC Switch 迁入…")) {
                         store.migrationSheetPresented = true
                     }
                     .buttonStyle(.bordered)
@@ -584,7 +641,7 @@ struct FatalView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 28))
                 .foregroundStyle(Theme.warning)
-            Text("扫描技能时出错")
+            Text(L("扫描技能时出错"))
                 .font(Theme.Fonts.panelTitle)
                 .foregroundStyle(Theme.textPrimary)
             Text(message)
@@ -596,7 +653,7 @@ struct FatalView: View {
             Button {
                 Task { await store.rescan() }
             } label: {
-                Text("重试")
+                Text(L("重试"))
                     .font(Theme.Fonts.calloutEmphasis)
                     .foregroundStyle(.white)
                     .padding(.horizontal, Theme.Space.s20)
@@ -610,5 +667,35 @@ struct FatalView: View {
         .frame(maxWidth: 460)
         .contentSurface()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+
+/// 拖文件悬停时的全窗提示浮层
+private struct DropTargetOverlay: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
+                .strokeBorder(Theme.accent.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+                .background {
+                    RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
+                        .fill(Theme.accent.opacity(0.06))
+                }
+                .padding(Theme.Space.s16)
+            VStack(spacing: Theme.Space.s8) {
+                Image(systemName: "tray.and.arrow.down.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(Theme.accent)
+                Text("松手投递素材")
+                    .font(Theme.Fonts.panelTitle)
+                    .foregroundStyle(Theme.textPrimary)
+                Text("按文件名和类型匹配技能，带路径发起会话")
+                    .font(Theme.Fonts.secondary)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .padding(Theme.Space.s24)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
+        }
+        .allowsHitTesting(false)
     }
 }

@@ -8,8 +8,8 @@
   <key>CFBundleExecutable</key><string>SkillAtlas</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>SkillAtlas</string>
-  <key>CFBundleShortVersionString</key><string>1.2.2</string>
-  <key>CFBundleVersion</key><string>122</string>
+  <key>CFBundleShortVersionString</key><string>1.3.0</string>
+  <key>CFBundleVersion</key><string>130</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>CFBundleDevelopmentRegion</key><string>zh-Hans</string>
   <key>CFBundleLocalizations</key>

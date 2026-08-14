@@ -200,7 +200,7 @@ private struct FeaturedExample: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .quietControl(cornerRadius: Theme.Radius.tile)
         } else {
-            Text("库里还没有技能，先去安装一个。")
+            Text(L("库里还没有技能，先去安装一个。"))
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textTertiary)
         }
@@ -287,7 +287,7 @@ private struct CapacityPanel: View {
         VStack(alignment: .leading, spacing: Theme.Space.s12) {
             PanelHead(
                 title: "装多了会怎样",
-                subtitle: "Claude 启动时大约只能看完 \(ContextDoctor.listingSoftCap) 个描述，多出来的会静默失踪。"
+                subtitle: LF("Claude 启动时大约只能看完 %d 个描述，多出来的会静默失踪。", ContextDoctor.listingSoftCap)
             )
             HStack(spacing: Theme.Space.s16) {
                 mini(value: "\(total)", label: "上架")
@@ -306,7 +306,7 @@ private struct CapacityPanel: View {
                 HStack(spacing: Theme.Space.s4) {
                     Image(systemName: "heart.text.square")
                         .font(.system(size: 11, weight: .semibold))
-                    Text("去体检页处理")
+                    Text(L("去体检页处理"))
                         .font(Theme.Fonts.calloutEmphasis)
                 }
                 .foregroundStyle(.white)
@@ -316,7 +316,7 @@ private struct CapacityPanel: View {
             }
             .buttonStyle(PressableButtonStyle())
             .accentGlass(Capsule(style: .continuous))
-            .help("打开体检：预算、重叠、长期未用")
+            .help(L("打开体检：预算、重叠、长期未用"))
             Spacer(minLength: 0)
         }
         .padding(Theme.Space.s20)
