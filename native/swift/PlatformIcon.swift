@@ -4,11 +4,14 @@ import SwiftUI
 // MARK: - 平台真 logo（DESIGN.md §10.4，v7 彩色芯片版）
 //
 // LobeHub Icons（MIT，github.com/lobehub/lobe-icons）打进 Resources/logos/：
-//   Claude = claude-color.svg（品牌橙，原色渲染）
-//   Codex  = openai.svg（OpenAI 标准黑，模板渲染随明暗反色）
-//   Gemini = gemini-color.svg（官方四色渐变，原色渲染）
-//   Grok   = xai.svg（xAI 官方 X 标，模板渲染随明暗反色）
-// UI 只展示这四个平台；OpenCode / Hermes 仅保留数据兼容，不再出现在界面上。
+//   Claude    = claude-color.svg（品牌橙，原色渲染）
+//   Codex     = openai.svg（OpenAI 标准黑，模板渲染随明暗反色）
+//   Gemini    = gemini-color.svg（官方四色渐变，原色渲染）
+//   Grok      = xai.svg（xAI 官方 X 标，模板渲染随明暗反色）
+//   WorkBuddy = workbuddy.png（workbuddy.ai 官方猫耳机器人 app icon，原色渲染。
+//               官方只发 SVG，但其 evenodd 挖孔 + 高斯模糊 CoreSVG 渲染不了，
+//               已用 Chrome 无头栅格成 256px PNG——改这个标请重走栅格化）
+// UI 只展示这五个平台；OpenCode / Hermes 仅保留数据兼容，不再出现在界面上。
 
 extension AgentPlatform {
     /// 界面展示名（`label` 是 skills.platforms 的存储键，不能改）
@@ -18,6 +21,7 @@ extension AgentPlatform {
         case .codex: return "Codex"
         case .gemini: return "Gemini"
         case .grokbuild: return "Grok"
+        case .workbuddy: return "WorkBuddy"
         case .opencode: return "OpenCode"
         case .hermes: return "Hermes"
         }
@@ -49,6 +53,7 @@ enum PlatformBrand {
             glyphScale: 0.78
         )
         case .grokbuild: return Spec(file: "xai", template: true, tint: Color(hex: 0x8E8E93), glyphScale: 0.58)
+        case .workbuddy: return Spec(file: "workbuddy", template: false, tint: Color(hex: 0x01C886), glyphScale: 0.78)
         case .opencode, .hermes: return nil
         }
     }
@@ -66,18 +71,24 @@ enum PlatformBrand {
         return image
     }
 
+    /// 先找 .svg，找不到再找 .png（WorkBuddy 这类 CoreSVG 渲染不了的标走栅格版）
     private static func loadSVG(named file: String) -> NSImage? {
         let directories = ["logos", "platform-icons"]
-        for directory in directories {
-            if let path = Bundle.main.path(forResource: file, ofType: "svg", inDirectory: directory),
-               let image = NSImage(contentsOfFile: path) {
-                return image
+        let types = ["svg", "png"]
+        for type in types {
+            for directory in directories {
+                if let path = Bundle.main.path(forResource: file, ofType: type, inDirectory: directory),
+                   let image = NSImage(contentsOfFile: path) {
+                    return image
+                }
             }
         }
-        let fallbacks = [
-            Bundle.main.resourceURL?.appendingPathComponent("logos/\(file).svg"),
-            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/logos/\(file).svg"),
-        ]
+        let fallbacks = types.flatMap { type in
+            [
+                Bundle.main.resourceURL?.appendingPathComponent("logos/\(file).\(type)"),
+                Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/logos/\(file).\(type)"),
+            ]
+        }
         for url in fallbacks.compactMap({ $0 }) {
             if let image = NSImage(contentsOf: url) { return image }
         }
@@ -188,7 +199,7 @@ struct PlatformStrip: View {
         }
         switch skill.origin {
         case .ccSwitch: return LF("%@：%@（CC Switch 只读，先迁移）", platform.displayName, lit ? L("已启用") : L("未启用"))
-        case .local: return LF("%@：%@", platform.displayName, lit ? L("本地直装") : L("未挂载"))
+        case .local: return LF("%@：%@（详情页「管理」收进本库后可开关）", platform.displayName, lit ? L("本地直装") : L("未挂载"))
         case .atlas: return LF("%@：已停用技能不参与挂载", platform.displayName)
         }
     }

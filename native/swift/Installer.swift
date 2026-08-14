@@ -22,7 +22,6 @@ struct RepoRef: Equatable {
     var display: String { "\(owner)/\(repo)" + (subpath.map { " → \($0)" } ?? "") }
     var isLocalFolder: Bool { localDirectory != nil }
 }
-
 struct InstallCandidate: Identifiable {
     var id: String { directory }
     /// 克隆目录内的相对路径（"." = 仓库根）
@@ -131,6 +130,25 @@ final class InstallerModel: ObservableObject {
         return RepoRef(owner: "local", repo: name, cloneOverride: input)
     }
 
+    /// 选的文件夹已在平台技能根 / CC Switch 源里：拦下改道，不做重复拷贝安装。
+    /// 拷贝安装会留下「库里一份 + 原地一份普通目录」，建链跳过后落成 .directory 警告态；
+    /// 正确路径是技能库列表里的收编（平台目录）或迁移（CC Switch）。
+    static func adoptionRedirect(for path: String) -> String? {
+        let real = URL(fileURLWithPath: path, isDirectory: true)
+            .resolvingSymlinksInPath().standardizedFileURL.path
+        let ccRoot = SkillScanner.sourceRoot.resolvingSymlinksInPath().standardizedFileURL.path
+        if real == ccRoot || real.hasPrefix(ccRoot + "/") {
+            return L("这个文件夹由 CC Switch 管理。请在设置页执行「从 CC Switch 迁入」，不要重复安装。")
+        }
+        for platform in AgentPlatform.allCases {
+            let root = platform.resolvedRoot(home: AtlasPaths.home).standardizedFileURL.path
+            if real == root || real.hasPrefix(root + "/") {
+                return LF("这个文件夹已经在 %@ 的技能目录里，不用重装：回到技能库列表选中它，在「管理」区收进本库接管（列表顶部也有「全部收编」）。", platform.displayName)
+            }
+        }
+        return nil
+    }
+
     // MARK: 主流程
 
     func start() {
@@ -145,6 +163,9 @@ final class InstallerModel: ObservableObject {
             do {
                 let dir: URL
                 if let local = ref.localDirectory {
+                    if let redirect = Self.adoptionRedirect(for: local) {
+                        throw InstallError(redirect)
+                    }
                     dir = URL(fileURLWithPath: local)
                     ownsCloneDir = false
                     cloneDir = dir
@@ -177,8 +198,22 @@ final class InstallerModel: ObservableObject {
             } catch {
                 stage = .input
                 statusText = ""
-                errorText = (error as? InstallError)?.message ?? error.localizedDescription
+                let message = (error as? InstallError)?.message ?? error.localizedDescription
+                errorText = message
+                writeErrorProbeIfRequested(message)
             }
+        }
+    }
+
+    /// 调试钩子：-atlasScanProbe 也承接错误路径（安装拦截改道等验收用）
+    private func writeErrorProbeIfRequested(_ message: String) {
+        guard let path = UserDefaults.standard.string(forKey: "atlasScanProbe"), !path.isEmpty else { return }
+        if let data = try? JSONSerialization.data(withJSONObject: ["error": message], options: [.prettyPrinted]),
+           let text = String(data: data, encoding: .utf8) {
+            try? text.write(toFile: path, atomically: true, encoding: .utf8)
+        }
+        if LaunchArgs.flag("atlasQuit") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exit(0) }
         }
     }
 

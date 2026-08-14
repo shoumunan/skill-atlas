@@ -145,6 +145,10 @@ struct InstallSheet: View {
             Text(L("支持 GitHub 仓库、/tree/<分支>/<子目录>，以及本机已有 SKILL.md 的文件夹。"))
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textTertiary)
+            Text(L("已经装在 ~/.claude/skills 等平台目录里的技能不用重装：它们会出现在技能库列表，选中后在「管理」区一键收进本库接管。"))
+                .font(Theme.Fonts.secondary)
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button(L("选择本地文件夹…")) {
                     let panel = NSOpenPanel()

@@ -1,6 +1,6 @@
 # Skill Atlas
 
-**把散落在 Claude Code、Codex、Gemini、Grok 里的 AI 技能，收进一张本地地图。**
+**把散落在 Claude Code、Codex、Gemini、Grok、WorkBuddy 里的 AI 技能，收进一张本地地图。**
 
 [![Release](https://img.shields.io/github/v/release/shoumunan/skill-atlas?display_name=tag)](https://github.com/shoumunan/skill-atlas/releases/latest)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111111?logo=apple)](https://github.com/shoumunan/skill-atlas/releases/latest)
@@ -9,9 +9,18 @@
 
 [下载最新版](https://github.com/shoumunan/skill-atlas/releases/latest) · 纯原生 SwiftUI · 本地优先 · 不修改 CC Switch 原数据
 
-![Skill Atlas 1.3.0 技能库](docs/readme-library-1.3.0.png)
+![Skill Atlas 技能库](docs/readme-library-1.3.0.png)
 
-## 1.3.0 有什么新东西
+## 1.4.0 有什么新东西
+
+- **本地技能收编**：自动发现直接安装在 `~/.claude/skills`、`~/.codex/skills` 等平台目录里的散装技能，可单个或一键全部收进 Skill Atlas 库。
+- **统一接管挂载**：收编后，原平台目录会替换为指向本库的软链，平台开关、停用、卸载和备份能力随即解锁。
+- **迁移后仍持续发现**：即使已经完成 CC Switch 迁移，后来手动安装到平台目录的新技能也能被扫描和收编。
+- **安装路径防误选**：选择平台技能目录或 CC Switch 源目录时会拦截重复安装，并引导使用收编或迁移。
+- **新增 WorkBuddy**：支持扫描和管理 `~/.workbuddy/skills`，并在界面中提供独立的平台开关。
+- **包含 1.3.x 全部能力**：试触发、安全扫描、一键发起、素材投递、产出回链、生产链路、多机同步与四语界面继续保留。
+
+## 1.3.x 核心能力
 
 - **试触发**：输入一句你准备对 AI 说的话，提前看哪些技能会响应、谁排第一，以及触发词是否埋得太深。
 - **安装前安全扫描**：检查动态命令、`curl | sh`、Base64 藏命令、隐藏 Unicode、全权工具声明、疑似硬编码密钥和外链；关键风险必须先看原文再决定是否安装。
@@ -62,7 +71,7 @@ Skill Atlas 管理自己的库，CC Switch 原数据保持只读：
 └── migration.json      # 迁移与回滚清单
 ```
 
-它会扫描 `~/.skill-atlas/skills`、`~/.cc-switch/skills`（只读）以及本机存在的 Claude Code、Codex、Gemini、Grok 等技能目录，并按真实软链落点去重。不会写入 `~/.cc-switch/cc-switch.db`，也不会修改或删除 `~/.cc-switch/skills/`。
+它会扫描 `~/.skill-atlas/skills`、`~/.cc-switch/skills`（只读）以及本机存在的 Claude Code、Codex、Gemini、Grok、WorkBuddy 等技能目录，并按真实软链落点去重。不会写入 `~/.cc-switch/cc-switch.db`，也不会修改或删除 `~/.cc-switch/skills/`。
 
 ## 常用快捷键
 
@@ -83,7 +92,7 @@ App 启动后会定期读取仓库根目录的 `appcast.json`；发现更高版�
 发布新版本时：
 
 1. 同步修改 `native/Info.plist` 和 `appcast.json` 中的版本号。
-2. 推送同版本标签，例如 `v1.3.0`。
+2. 推送同版本标签，例如 `v1.4.0`。
 3. GitHub Actions 自动构建 Apple 芯片 DMG 并创建 Release。
 
 ## 从源码构建

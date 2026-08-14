@@ -300,7 +300,7 @@ final class AppStore: ObservableObject {
                result.skills.contains(where: { $0.name == name }) {
                 select(name)
             }
-            // 调试钩子：-atlasAction disable/enable 对当前选中技能执行停用/恢复（验收用，只跑一次）
+            // 调试钩子：-atlasAction disable/enable/adopt/uninstall* 对当前选中技能执行（验收用，只跑一次）
             if !debugActionDone,
                let action = UserDefaults.standard.string(forKey: "atlasAction"),
                let skill = selectedSkill {
@@ -311,6 +311,10 @@ final class AppStore: ObservableObject {
                         self?.confirmUninstall(skill, trashLibrary: true)
                     case "uninstallKeep":
                         self?.confirmUninstall(skill, trashLibrary: false)
+                    case "adopt":
+                        self?.adoptLocalSkill(skill)
+                    case "adoptAll":
+                        self?.adoptAllLocalSkills()
                     default:
                         self?.setSkillDisabled(skill, disabled: action == "disable")
                     }
@@ -324,7 +328,9 @@ final class AppStore: ObservableObject {
                                 "directory": skill.directory,
                                 "linkExists": FileManager.default.fileExists(atPath: link.path)
                                     || !LinkTool.destination(of: link).isEmpty,
+                                "linkTarget": LinkTool.destination(of: link),
                                 "libraryExists": FileManager.default.fileExists(atPath: library.path),
+                                "inCatalog": AtlasCatalog.load().skills[skill.directory] != nil,
                                 "ccSwitchUntouched": true,
                             ]
                             if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]),
@@ -542,10 +548,10 @@ final class AppStore: ObservableObject {
         return errors + (doctorReport.overBudget ? 1 : 0)
     }
 
-    /// UI 展示的平台固定四个：Claude Code / Codex / Gemini / Grok。
+    /// UI 展示的平台固定五个：Claude Code / Codex / Gemini / Grok / WorkBuddy。
     /// OpenCode、Hermes 仅保留数据兼容（已有软链不动），不再出现在界面上。
     var visiblePlatforms: [AgentPlatform] {
-        [.claude, .codex, .gemini, .grokbuild]
+        [.claude, .codex, .gemini, .grokbuild, .workbuddy]
     }
 
     /// 体检报告（预算模拟 + 超长描述 + 可回收）
@@ -580,6 +586,7 @@ final class AppStore: ObservableObject {
             AgentPlatform.gemini.root(home: SkillScanner.home),
             AgentPlatform.opencode.root(home: SkillScanner.home),
             AgentPlatform.hermes.root(home: SkillScanner.home),
+            AgentPlatform.workbuddy.root(home: SkillScanner.home),
         ]
             .map { $0.resolvingSymlinksInPath().standardizedFileURL.path }
         let resolved = url.resolvingSymlinksInPath().standardizedFileURL.path
@@ -690,6 +697,7 @@ final class AppStore: ObservableObject {
             AgentPlatform.gemini.root(home: SkillScanner.home).path,
             AgentPlatform.opencode.root(home: SkillScanner.home).path,
             AgentPlatform.hermes.root(home: SkillScanner.home).path,
+            AgentPlatform.workbuddy.root(home: SkillScanner.home).path,
         ])
         watcher.start(paths: Array(paths)) { [weak self] in
             MainActor.assumeIsolated { self?.scheduleAutoRescan() }
@@ -765,6 +773,53 @@ final class AppStore: ObservableObject {
             try SkillActions.setPlatform(directory: skill.directory, platform: platform, enabled: enabled)
         } catch {
             actionError = error.localizedDescription
+        }
+        resumeWatching()
+        Task { await rescan(keepSelection: true) }
+    }
+
+    /// 收编本地直装：拷入本库、原散装目录替换成指向库的软链。
+    /// 重扫后 origin 变 atlas，详情页原地解锁平台 logo 开关。
+    func adoptLocalSkill(_ skill: Skill) {
+        guard skill.origin == .local, !skill.disabled else { return }
+        pauseWatching()
+        do {
+            try SkillActions.adoptLocal(skill: skill)
+        } catch {
+            actionError = error.localizedDescription
+        }
+        resumeWatching()
+        Task { await rescan(keepSelection: true) }
+    }
+
+    /// 可收编的本地直装（收编条的数据源）
+    var adoptableSkills: [Skill] {
+        skills.filter { $0.origin == .local && !$0.disabled }
+    }
+
+    /// 收编条 →「只看本地安装」
+    func jumpToLocalSkills() {
+        clearFilters()
+        sourceFilter = SkillOrigin.local.label
+        nav = .library
+    }
+
+    /// 一键收编全部本地直装（收编条入口）。逐个执行，全部完成只重扫一次；
+    /// 失败的（同名冲突等）聚合报错，不中断其余。
+    func adoptAllLocalSkills() {
+        let targets = adoptableSkills
+        guard !targets.isEmpty else { return }
+        pauseWatching()
+        var failures: [String] = []
+        for skill in targets {
+            do {
+                try SkillActions.adoptLocal(skill: skill)
+            } catch {
+                failures.append(skill.name)
+            }
+        }
+        if !failures.isEmpty {
+            actionError = LF("有 %d 个未能收编：%@", failures.count, failures.prefix(3).joined(separator: "、") + (failures.count > 3 ? "…" : ""))
         }
         resumeWatching()
         Task { await rescan(keepSelection: true) }

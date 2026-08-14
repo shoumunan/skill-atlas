@@ -32,6 +32,7 @@ struct SkillBrowser: View {
         let skills = store.filteredSkills
         VStack(spacing: 0) {
             UpdatesBanner()
+            AdoptBanner()
 
             // 第一行：视图切换（全部/收藏）＋ 排序 ＋ 计数——「怎么看」的控件
             HStack(spacing: Theme.Space.s12) {
@@ -192,6 +193,84 @@ private struct UpdatesBanner: View {
             }
             .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
         }
+    }
+}
+
+/// 列表顶部收编条（参照 UpdatesBanner）：发现散装的本地直装技能时出现。
+/// 点文字筛出本地安装；右侧「全部收编」批量拷入本库并接管挂载（确认后执行）。
+private struct AdoptBanner: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var confirming = false
+
+    var body: some View {
+        let adoptable = store.adoptableSkills
+        if !adoptable.isEmpty {
+            VStack(spacing: 0) {
+                HStack(spacing: Theme.Space.s8) {
+                    Image(systemName: "square.and.arrow.down.on.square.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                    Button {
+                        store.jumpToLocalSkills()
+                    } label: {
+                        Text(LF("%lld 个本地技能可收进本库", adoptable.count))
+                            .font(Theme.Fonts.calloutEmphasis)
+                            .foregroundStyle(Theme.textPrimary)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(L("只看本地安装的技能"))
+                    Text(L("收编后可开关平台、停用、卸载"))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                    Spacer()
+                    Button {
+                        confirming = true
+                    } label: {
+                        HStack(spacing: Theme.Space.s4) {
+                            Image(systemName: "square.and.arrow.down.on.square")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text(L("全部收编"))
+                                .font(Theme.Fonts.calloutEmphasis)
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, Theme.Space.s12)
+                        .frame(height: 24)
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                    .accentGlass(Capsule(style: .continuous))
+                    .help(L("把全部本地直装技能拷入本库并接管挂载"))
+                    .confirmationDialog(
+                        LF("把 %lld 个本地技能收进 Skill Atlas 库？", adoptable.count),
+                        isPresented: $confirming,
+                        titleVisibility: .visible
+                    ) {
+                        Button(L("收编")) { store.adoptAllLocalSkills() }
+                        Button(L("取消"), role: .cancel) {}
+                    } message: {
+                        Text(confirmMessage(adoptable))
+                    }
+                }
+                .padding(.horizontal, Theme.Space.s16)
+                .frame(height: 40)
+                .background(Theme.accent.opacity(0.07))
+                Rectangle()
+                    .fill(Theme.accent.opacity(0.12))
+                    .frame(height: 1)
+            }
+            .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+        }
+    }
+
+    private func confirmMessage(_ adoptable: [Skill]) -> String {
+        var text = L("内容拷入 ~/.skill-atlas/skills/，原平台目录替换成指向本库的软链，之后在本应用统一开关平台。")
+        let external = adoptable.filter { SkillActions.isExternalSource($0) }.count
+        if external > 0 {
+            text += LF("其中 %lld 个的实体在平台目录之外，收编后编辑原目录不再生效。", external)
+        }
+        return text
     }
 }
 
@@ -423,6 +502,9 @@ struct SkillContextMenu: View {
                     }
                 }
             }
+        }
+        if skill.origin == .local && !skill.disabled {
+            Button(L("收进 Skill Atlas 库")) { store.adoptLocalSkill(skill) }
         }
         if skill.origin == .atlas && skill.updateAvailable {
             Button(L("查看变更")) { store.showDiff(for: skill) }
@@ -703,7 +785,7 @@ private struct InspectorHead: View {
         switch origin {
         case .atlas: return L("由 Skill Atlas 管理，可在本页开关平台")
         case .ccSwitch: return L("由 CC Switch 统一管理（本应用只读）")
-        case .local: return L("直接安装在平台技能目录")
+        case .local: return L("直接安装在平台技能目录。可在下方「管理」区收进本库接管")
         }
     }
 }
@@ -797,7 +879,8 @@ private struct ContextCostSection: View {
     }
 }
 
-/// 详情页「管理」块：Atlas 技能可开关平台 / 停用；CC Switch 只读；本地直装可停用
+/// 详情页「管理」块：Atlas 技能可开关平台 / 停用；CC Switch 只读；
+/// 本地直装可「收进 Skill Atlas 库」接管，也可停用
 private struct ManageSection: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -814,11 +897,55 @@ private struct ManageSection: View {
                 atlasControls
             case .local:
                 VStack(alignment: .leading, spacing: Theme.Space.s12) {
+                    if !skill.disabled {
+                        adoptControls
+                    }
                     localDisableControls
                     uninstallButton
                 }
             }
         }
+    }
+
+    /// 本地直装的主动作：收进本库接管。拷入 ~/.skill-atlas/skills/、原散装目录
+    /// 替换成指向本库的软链；重扫后 origin 变 atlas，上方平台 logo 开关解锁。
+    private var adoptControls: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s8) {
+            Button {
+                store.adoptLocalSkill(skill)
+            } label: {
+                HStack(spacing: Theme.Space.s4) {
+                    Image(systemName: "square.and.arrow.down.on.square")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(L("收进 Skill Atlas 库"))
+                        .font(Theme.Fonts.calloutEmphasis)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, Theme.Space.s12)
+                .frame(height: 28)
+                .background {
+                    RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                        .fill(Theme.accent)
+                }
+                .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+            }
+            .buttonStyle(PressableButtonStyle())
+            .help(L("拷入 ~/.skill-atlas/skills/ 并接管挂载（原目录替换成指向本库的软链）"))
+            Text(L("收编后由本应用管理：内容拷入本库，原平台目录换成指向本库的软链，平台 logo 变成可点开关。"))
+                .font(Theme.Fonts.secondary)
+                .foregroundStyle(Theme.textTertiary)
+            // 实体在平台目录之外（软链指向开发目录等）：收编是拷贝快照，live-edit 会断开
+            if SkillActions.isExternalSource(skill) {
+                Text(LF("注意：此技能的实体在平台目录之外（%@）。收编会拷贝一份进库，之后编辑原目录不再对平台生效。", displaySourcePath))
+                    .font(Theme.Fonts.secondary)
+                    .foregroundStyle(Theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var displaySourcePath: String {
+        skill.sourcePath.replacingOccurrences(of: NSHomeDirectory(), with: "~")
     }
 
     private var atlasControls: some View {

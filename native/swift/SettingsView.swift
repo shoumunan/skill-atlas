@@ -379,7 +379,7 @@ private struct MigrationGroup: View {
     }
 }
 
-/// 迁移机制图：CC Switch --复制--> 本库 --软链--> 四个平台（迁移引导 sheet 复用）
+/// 迁移机制图：CC Switch --复制--> 本库 --软链--> 五个平台（迁移引导 sheet 复用）
 struct MigrationFlow: View {
     var body: some View {
         HStack(spacing: Theme.Space.s8) {
@@ -393,6 +393,7 @@ struct MigrationFlow: View {
                     PlatformLogo(platform: .codex, size: 16)
                     PlatformLogo(platform: .gemini, size: 16)
                     PlatformLogo(platform: .grokbuild, size: 16)
+                    PlatformLogo(platform: .workbuddy, size: 16)
                 }
                 Text(L("各平台 skills 目录"))
                     .font(Theme.Fonts.caption)
@@ -446,7 +447,7 @@ private struct AppGroup: View {
     @ObservedObject private var updates = UpdateChecker.shared
 
     private var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.3.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.4.0"
     }
 
     var body: some View {

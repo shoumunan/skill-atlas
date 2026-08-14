@@ -19,7 +19,7 @@ struct AtlasError: LocalizedError {
 }
 
 enum AgentPlatform: String, CaseIterable, Identifiable, Codable {
-    case claude, codex, gemini, opencode, hermes, grokbuild
+    case claude, codex, gemini, opencode, hermes, grokbuild, workbuddy
 
     var id: String { rawValue }
 
@@ -31,6 +31,7 @@ enum AgentPlatform: String, CaseIterable, Identifiable, Codable {
         case .opencode: return "OpenCode"
         case .hermes: return "Hermes"
         case .grokbuild: return "GrokBuild"
+        case .workbuddy: return "WorkBuddy"
         }
     }
 
@@ -47,6 +48,7 @@ enum AgentPlatform: String, CaseIterable, Identifiable, Codable {
             return home.appendingPathComponent(".opencode/skills")
         case .hermes: return home.appendingPathComponent(".hermes/skills")
         case .grokbuild: return home.appendingPathComponent(".grok/skills")
+        case .workbuddy: return home.appendingPathComponent(".workbuddy/skills")
         }
     }
 
@@ -577,19 +579,23 @@ enum SkillActions {
         guard var record = catalog.skills[directory] else {
             throw AtlasError(LF("「%@」不在 Skill Atlas 库中", directory))
         }
-        record.enabled[platform.rawValue] = enabled
-        catalog.skills[directory] = record
-        try AtlasCatalog.save(catalog)
-
         let source = activeSource(directory: directory)
         let root = platform.resolvedRoot(home: AtlasPaths.home)
         let link = root.appendingPathComponent(directory)
+        // 先做链上动作、成功才落 enabled 位——占位是普通目录时明确报错（多半是这技能
+        // 在该平台的旧物理拷贝），不静默留下「enabled 但挂载是 .directory」的警告态
         if enabled {
+            if !LinkTool.isSymlink(link), FileManager.default.fileExists(atPath: link.path) {
+                throw AtlasError(LF("%@ 的技能目录里已有同名普通目录「%@」，不会覆盖。若它是这技能的旧拷贝，先手动移除再开启。", platform.displayName, directory))
+            }
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             try LinkTool.replaceSymlink(at: link, pointingTo: source)
         } else {
             try LinkTool.removeOurSymlink(at: link)
         }
+        record.enabled[platform.rawValue] = enabled
+        catalog.skills[directory] = record
+        try AtlasCatalog.save(catalog)
     }
 
     static func setDisabled(directory: String, disabled: Bool) throws {
@@ -622,6 +628,89 @@ enum SkillActions {
         let active = AtlasPaths.libraryRoot.appendingPathComponent(directory)
         if FileManager.default.fileExists(atPath: active.path) { return active }
         return AtlasPaths.disabledRoot.appendingPathComponent(directory)
+    }
+
+    // MARK: 收编本地直装（散装技能 → 本库接管）
+    //
+    // 场景：技能直接装在 ~/.claude/skills 等平台根（origin == .local），只能看不能管。
+    // 收编三步：① clonefile 拷入 ~/.skill-atlas/skills/<dir>；② 写 catalog，
+    // enabled = 扫描发现它所在的各平台；③ 原散装入口替换成指向本库的软链。
+    // ③ 必须做：留普通目录的话，重扫后挂载状态是 .directory 警告态，且安装流程的
+    // 「已存在同名目录，跳过」「建链时 fileExists 即跳过」也会永远绕开它。
+    // 不写 migration.json——那是 CC Switch 迁移的回滚清单；收编写进去会让从未用过
+    // CC Switch 的用户凭空出现「撤销迁移」入口。收编后的反向操作走常规卸载。
+    static func adoptLocal(skill: Skill) throws {
+        guard skill.origin == .local else {
+            throw AtlasError(LF("「%@」不是本地直装技能，无需收编。", skill.name))
+        }
+        guard !skill.disabled else {
+            throw AtlasError(LF("「%@」已停用。先恢复，再收进本库。", skill.name))
+        }
+        let fileManager = FileManager.default
+        let directory = skill.directory
+        let source = URL(fileURLWithPath: skill.sourcePath, isDirectory: true)
+        let sourceReal = source.resolvingSymlinksInPath().standardizedFileURL.path
+        guard fileManager.fileExists(atPath: source.path) else {
+            throw AtlasError(LF("找不到源目录：%@", source.path))
+        }
+        let dest = AtlasPaths.libraryRoot.appendingPathComponent(directory)
+        guard !fileManager.fileExists(atPath: dest.path) else {
+            throw AtlasError(LF("本库已有同名目录「%@」，不会覆盖。先处理库内同名目录再收编。", directory))
+        }
+
+        // ① 拷入本库。clonefile 已校验目标存在；SKILL.md 再核一遍，防半拉子拷贝后删源
+        try FileClone.cloneDirectory(from: source, to: dest)
+        if fileManager.fileExists(atPath: source.appendingPathComponent("SKILL.md").path),
+           !fileManager.fileExists(atPath: dest.appendingPathComponent("SKILL.md").path) {
+            try? fileManager.removeItem(at: dest)
+            throw AtlasError(LF("拷贝校验失败：库内 %@/SKILL.md 缺失，已回退收编。", directory))
+        }
+
+        // ② 写 catalog：enabled = 它现在实际所在的平台（platforms 来自 scanLocalSkills）
+        var enabled: [String: Bool] = [:]
+        for platform in AgentPlatform.allCases {
+            enabled[platform.rawValue] = skill.platforms.contains(platform.label)
+        }
+        let now = Int(Date().timeIntervalSince1970)
+        try AtlasCatalog.upsert(AtlasSkillRecord(
+            directory: directory,
+            enabled: enabled,
+            repoOwner: "",
+            repoName: "",
+            repoBranch: "main",
+            installedAt: skill.installedAt != 0 ? skill.installedAt : now,
+            updatedAt: now
+        ))
+
+        // ③ 各平台入口换成指向本库的软链。散装入口可能是真实目录（就是刚拷的源）
+        //    或指向任意开发目录的软链；真实目录只删 resolve 后确为本次源的，防同名异物。
+        for platform in AgentPlatform.allCases where enabled[platform.rawValue] == true {
+            let root = platform.resolvedRoot(home: AtlasPaths.home)
+            try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+            let link = root.appendingPathComponent(directory)
+            if LinkTool.isSymlink(link) {
+                try LinkTool.replaceSymlink(at: link, pointingTo: dest)
+            } else if fileManager.fileExists(atPath: link.path) {
+                let real = link.resolvingSymlinksInPath().standardizedFileURL.path
+                guard real == sourceReal else { continue }
+                try fileManager.removeItem(at: link)
+                try fileManager.createSymbolicLink(at: link, withDestinationURL: dest)
+            } else {
+                try fileManager.createSymbolicLink(at: link, withDestinationURL: dest)
+            }
+        }
+    }
+
+    /// 技能实体是否在所有平台技能根之外（散装入口是指向开发目录/CC 源等处的软链）。
+    /// 这类技能收编 = 拷贝快照：之后编辑原目录不再对平台生效，收编前要提醒。
+    static func isExternalSource(_ skill: Skill) -> Bool {
+        let real = URL(fileURLWithPath: skill.sourcePath, isDirectory: true)
+            .resolvingSymlinksInPath().standardizedFileURL.path
+        for platform in AgentPlatform.allCases {
+            let root = platform.resolvedRoot(home: AtlasPaths.home).standardizedFileURL.path
+            if real == root || real.hasPrefix(root + "/") { return false }
+        }
+        return true
     }
 
     /// 卸载：先移走本应用建的平台软链。

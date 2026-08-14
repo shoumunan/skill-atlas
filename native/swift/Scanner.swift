@@ -3,8 +3,9 @@ import SQLite3
 
 /// 扫描：
 /// 主源永远是 ~/.skill-atlas/skills。挂载检查看各平台软链是否指向本库。
-/// 尚未迁完时额外扫 CC Switch 和平台目录，只为发现还没收进来的散落技能。
-/// 迁完后日常只认本库。绝不写入 CC Switch。
+/// CC Switch 只在尚未迁完时当发现源；平台目录**始终**扫描——发现散装技能
+/// （origin == local）供收编，包括迁完 CC Switch 之后手动新装的。已收录的
+/// 入口 resolve 后都在 seenPaths 里，不会重复计入。绝不写入 CC Switch。
 enum SkillScanner {
     /// 调试钩子：-atlasHome /tmp/fake-home 注入假 HOME（纯本地用户路径测试用）
     static var home: URL {
@@ -68,15 +69,15 @@ enum SkillScanner {
             }
         }
 
-        // 未迁完才扫平台目录，发现还没收进来的散落技能。迁完后日常只认本库。
-        if !migrated {
-            let localSkills = scanLocalSkills(excluding: seenPaths, usedNames: seenNames)
-            for skill in localSkills {
-                if !skill.disabled { healthCounts[skill.health, default: 0] += 1 }
-                skills.append(skill)
-                seenPaths.insert(URL(fileURLWithPath: skill.sourcePath).resolvingSymlinksInPath().standardizedFileURL.path)
-                seenNames.insert(skill.name)
-            }
+        // 平台目录始终扫描：发现散装技能供收编——迁完 CC Switch 的用户手动新装的
+        // 散装技能也要能看见（否则收编不可达，且体检/安全扫描对它全盲）。
+        // 已收进库/CC 已收录的入口 resolve 后都在 seenPaths 里，不会重复计入。
+        let localSkills = scanLocalSkills(excluding: seenPaths, usedNames: seenNames)
+        for skill in localSkills {
+            if !skill.disabled { healthCounts[skill.health, default: 0] += 1 }
+            skills.append(skill)
+            seenPaths.insert(URL(fileURLWithPath: skill.sourcePath).resolvingSymlinksInPath().standardizedFileURL.path)
+            seenNames.insert(skill.name)
         }
 
         skills.sort {
@@ -180,6 +181,7 @@ enum SkillScanner {
             ("enabled_codex", "Codex"), ("enabled_claude", "Claude"),
             ("enabled_gemini", "Gemini"), ("enabled_opencode", "OpenCode"),
             ("enabled_hermes", "Hermes"), ("enabled_grokbuild", "GrokBuild"),
+            ("enabled_workbuddy", "WorkBuddy"),
         ]
         let platforms = platformFlags.compactMap { key, label in row.int(key) != 0 ? label : nil }
 

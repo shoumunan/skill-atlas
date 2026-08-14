@@ -19,6 +19,8 @@ cp "$APP_DIR/native/SkillAtlas.icns" "$APP_BUNDLE/Contents/Resources/SkillAtlas.
 rm -rf "$APP_BUNDLE/Contents/Resources/logos"
 mkdir -p "$APP_BUNDLE/Contents/Resources/logos"
 cp "$APP_DIR"/native/Resources/logos/*.svg "$APP_BUNDLE/Contents/Resources/logos/"
+# WorkBuddy 等无法由 CoreSVG 正确渲染的品牌图标使用 PNG 资源。
+cp "$APP_DIR"/native/Resources/logos/*.png "$APP_BUNDLE/Contents/Resources/logos/" 2>/dev/null || true
 # 多语言资源（en/ja/ko；中文是开发语言无需 lproj）
 rm -rf "$APP_BUNDLE/Contents/Resources/"{en,ja,ko}.lproj
 for lang in en ja ko; do
