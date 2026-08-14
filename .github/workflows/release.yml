@@ -1,0 +1,41 @@
+name: Release macOS app
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate tag and app version
+        shell: bash
+        run: |
+          app_version=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" native/Info.plist)
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [[ "$app_version" != "$tag_version" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match app version $app_version"
+            exit 1
+          fi
+
+      - name: Build Apple Silicon DMG
+        shell: bash
+        run: |
+          chmod +x 构建原生应用.command 打包DMG.command
+          ATLAS_FORCE_VENDOR=1 ./打包DMG.command
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" "dist/Skill Atlas-$version.dmg" \
+            --title "Skill Atlas $version" \
+            --generate-notes

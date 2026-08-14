@@ -1,0 +1,354 @@
+import Foundation
+
+// MARK: - 粘贴 GitHub 链接一键安装
+//
+// 流程：解析 URL → git clone --depth 1 到临时目录 → 检测 SKILL.md
+// （根目录单技能 / 一层子目录多技能勾选 / URL 子路径直装）→
+// 真实拷贝到 ~/.skill-atlas/skills/<name>（保留 .git 以便检查更新），
+// 再按勾选平台在 Claude / Codex / GrokBuild 等目录建软链。
+// 同名冲突跳过不覆盖。写入期间暂停 FSEvents 监听。
+
+struct RepoRef: Equatable {
+    var owner: String
+    var repo: String
+    var branch: String?
+    var subpath: String?
+    /// file:// 裸仓库时的直连克隆地址（离线验收用）
+    var cloneOverride: String?
+    /// 本地文件夹安装（不是 git clone）
+    var localDirectory: String?
+
+    var cloneURL: String { cloneOverride ?? "https://github.com/\(owner)/\(repo).git" }
+    var display: String { "\(owner)/\(repo)" + (subpath.map { " → \($0)" } ?? "") }
+    var isLocalFolder: Bool { localDirectory != nil }
+}
+
+struct InstallCandidate: Identifiable {
+    var id: String { directory }
+    /// 克隆目录内的相对路径（"." = 仓库根）
+    var relativePath: String
+    /// 安装后的目录名
+    var directory: String
+    /// SKILL.md frontmatter 里的名称（展示用）
+    var displayName: String
+    var description: String
+    /// 目标位置已有同名目录 → 只能跳过
+    var conflict: Bool
+    var selected: Bool
+}
+
+struct InstallResult: Identifiable {
+    var id: String { directory }
+    var directory: String
+    var installed: Bool
+    var note: String
+}
+
+@MainActor
+final class InstallerModel: ObservableObject {
+    enum Stage: Equatable {
+        case input          // 等待粘贴
+        case cloning        // git clone 中
+        case detecting      // 扫描 SKILL.md
+        case selecting      // 多技能勾选
+        case installing     // 拷贝中
+        case done           // 结果清单
+    }
+
+    @Published var urlText = ""
+    @Published var stage = Stage.input
+    @Published var statusText = ""
+    @Published var errorText: String?
+    @Published var candidates: [InstallCandidate] = []
+    @Published var selectedPlatforms: Set<String> = [AgentPlatform.claude.rawValue]
+    @Published var results: [InstallResult] = []
+
+    private var cloneDir: URL?
+    private var parsedRef: RepoRef?
+    private var ownsCloneDir = false
+
+    /// 即时校验（红字提示用）：空串不报错，非法格式报错
+    var inlineError: String? {
+        let text = urlText.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return nil }
+        return Self.parse(text) == nil
+            ? L("支持 GitHub 链接，或本机已有 SKILL.md 的文件夹路径")
+            : nil
+    }
+
+    var canStart: Bool {
+        stage == .input && Self.parse(urlText.trimmingCharacters(in: .whitespaces)) != nil
+    }
+
+    // MARK: URL 解析
+
+    static func parse(_ input: String) -> RepoRef? {
+        guard let url = URL(string: input), url.scheme == "https",
+              url.host?.lowercased() == "github.com" else { return localFolderRef(input) }
+        let parts = url.path.split(separator: "/").map(String.init)
+        guard parts.count >= 2 else { return nil }
+        let owner = parts[0]
+        var repo = parts[1]
+        if repo.hasSuffix(".git") { repo = String(repo.dropLast(4)) }
+        guard !owner.isEmpty, !repo.isEmpty else { return nil }
+        var ref = RepoRef(owner: owner, repo: repo)
+        if parts.count >= 4, parts[2] == "tree" {
+            ref.branch = parts[3]
+            if parts.count >= 5 {
+                ref.subpath = parts[4...].joined(separator: "/")
+            }
+        } else if parts.count > 2 {
+            return nil  // 其他子路径形态（blob/issues/…）不支持
+        }
+        return ref
+    }
+
+    private static func localFolderRef(_ input: String) -> RepoRef? {
+        if let git = localFileRef(input) { return git }
+        let path = (input as NSString).expandingTildeInPath
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
+            return nil
+        }
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        guard !name.isEmpty else { return nil }
+        return RepoRef(owner: "local", repo: name, localDirectory: path)
+    }
+
+    /// file:// 裸仓库（离线验收 git clone 全流程用，界面文案不宣传）
+    private static func localFileRef(_ input: String) -> RepoRef? {
+        guard input.hasPrefix("file://"), input.hasSuffix(".git") else { return nil }
+        let name = URL(string: input)?.deletingPathExtension().lastPathComponent ?? ""
+        guard !name.isEmpty else { return nil }
+        return RepoRef(owner: "local", repo: name, cloneOverride: input)
+    }
+
+    // MARK: 主流程
+
+    func start() {
+        let text = urlText.trimmingCharacters(in: .whitespaces)
+        guard let ref = Self.parse(text) else { return }
+        parsedRef = ref
+        errorText = nil
+        stage = .cloning
+        statusText = LF("正在克隆 %@…", ref.display)
+
+        Task {
+            do {
+                let dir: URL
+                if let local = ref.localDirectory {
+                    dir = URL(fileURLWithPath: local)
+                    ownsCloneDir = false
+                    cloneDir = dir
+                    stage = .detecting
+                    statusText = L("正在检测 SKILL.md…")
+                } else {
+                    stage = .cloning
+                    statusText = "正在克隆 \(ref.display)…"
+                    dir = try await clone(ref)
+                    ownsCloneDir = true
+                    cloneDir = dir
+                    stage = .detecting
+                    statusText = "正在检测 SKILL.md…"
+                }
+                let found = try detect(in: dir, ref: ref)
+                candidates = found
+                if found.isEmpty {
+                    throw InstallError(L("仓库里没有找到 SKILL.md（检查了根目录与一层子目录）。"))
+                }
+                stage = .selecting
+                statusText = ""
+            } catch {
+                stage = .input
+                statusText = ""
+                errorText = (error as? InstallError)?.message ?? error.localizedDescription
+            }
+        }
+    }
+
+    func install(store: AppStore) {
+        let chosen = candidates.filter { $0.selected && !$0.conflict }
+        let skippedConflicts = candidates.filter(\.conflict)
+        guard let cloneDir else { return }
+        stage = .installing
+        statusText = L("正在安装…")
+
+        let fileManager = FileManager.default
+        let atlasRoot = AtlasPaths.libraryRoot
+
+        store.pauseWatching()
+        var outcome: [InstallResult] = []
+        for candidate in chosen {
+            let source = candidate.relativePath == "."
+                ? cloneDir
+                : cloneDir.appendingPathComponent(candidate.relativePath)
+            let target = atlasRoot.appendingPathComponent(candidate.directory)
+            do {
+                try fileManager.createDirectory(at: atlasRoot, withIntermediateDirectories: true)
+                guard !fileManager.fileExists(atPath: target.path) else {
+                    outcome.append(.init(directory: candidate.directory, installed: false,
+                                         note: L("已存在同名目录，跳过")))
+                    continue
+                }
+                try fileManager.copyItem(at: source, to: target)
+
+                var enabled: [String: Bool] = [:]
+                for platform in AgentPlatform.allCases {
+                    enabled[platform.rawValue] = selectedPlatforms.contains(platform.rawValue)
+                }
+                try AtlasCatalog.upsert(AtlasSkillRecord(
+                    directory: candidate.directory,
+                    enabled: enabled,
+                    repoOwner: parsedRef?.owner ?? "",
+                    repoName: parsedRef?.repo ?? "",
+                    repoBranch: parsedRef?.branch ?? "main",
+                    installedAt: Int(Date().timeIntervalSince1970),
+                    updatedAt: Int(Date().timeIntervalSince1970)
+                ))
+
+                var linked: [String] = []
+                for platform in AgentPlatform.allCases where selectedPlatforms.contains(platform.rawValue) {
+                    let root = platform.resolvedRoot(home: AtlasPaths.home)
+                    try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+                    let link = root.appendingPathComponent(candidate.directory)
+                    if fileManager.fileExists(atPath: link.path) {
+                        continue
+                    }
+                    try fileManager.createSymbolicLink(at: link, withDestinationURL: target)
+                    linked.append(platform.label)
+                }
+                let note = linked.isEmpty
+                    ? L("已装入 Skill Atlas 库")
+                    : LF("已装入 Skill Atlas 库 + %@ 软链", linked.joined(separator: " / "))
+                outcome.append(.init(directory: candidate.directory, installed: true, note: note))
+            } catch {
+                outcome.append(.init(directory: candidate.directory, installed: false,
+                                     note: LF("安装失败：%@", error.localizedDescription)))
+            }
+        }
+        for skipped in skippedConflicts {
+            outcome.append(.init(directory: skipped.directory, installed: false,
+                                 note: "已存在同名目录，跳过"))
+        }
+        store.resumeWatching()
+
+        results = outcome
+        stage = .done
+        statusText = ""
+        cleanupClone()
+        Task { await store.rescan(keepSelection: true) }
+    }
+
+    func reset() {
+        cleanupClone()
+        urlText = ""
+        stage = .input
+        statusText = ""
+        errorText = nil
+        candidates = []
+        results = []
+    }
+
+    private func cleanupClone() {
+        if ownsCloneDir, let cloneDir {
+            try? FileManager.default.removeItem(at: cloneDir)
+        }
+        cloneDir = nil
+        ownsCloneDir = false
+    }
+
+    // MARK: git
+
+    struct InstallError: Error { let message: String; init(_ m: String) { message = m } }
+
+    private func clone(_ ref: RepoRef) async throws -> URL {
+        // /usr/bin/git 在未装 CLT 的机器上是弹窗替身，先探测再跑
+        let probe = Process()
+        probe.executableURL = URL(fileURLWithPath: "/usr/bin/xcode-select")
+        probe.arguments = ["-p"]
+        probe.standardOutput = Pipe(); probe.standardError = Pipe()
+        try? probe.run(); probe.waitUntilExit()
+        guard probe.terminationStatus == 0 else {
+            throw InstallError(L("没有可用的 git。请先安装命令行工具：终端里执行 xcode-select --install"))
+        }
+
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("skill-atlas-install-\(UUID().uuidString.prefix(8))")
+        var args = ["clone", "--depth", "1"]
+        if let branch = ref.branch { args += ["--branch", branch] }
+        args += [ref.cloneURL, tmp.path]
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = args
+        // 不存在的仓库 git 会转而要求输入凭据（与私有仓库不可区分）——禁掉交互直接失败
+        var environment = ProcessInfo.processInfo.environment
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+        process.environment = environment
+        let stderrPipe = Pipe()
+        process.standardOutput = Pipe()
+        process.standardError = stderrPipe
+        try process.run()
+        await withCheckedContinuation { continuation in
+            process.terminationHandler = { _ in continuation.resume() }
+        }
+        guard process.terminationStatus == 0 else {
+            let raw = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            try? FileManager.default.removeItem(at: tmp)
+            if raw.contains("could not resolve host") || raw.contains("Could not resolve host") {
+                throw InstallError(L("网络不可用，克隆失败。检查网络后重试。"))
+            }
+            if raw.contains("not found") || raw.contains("Repository not found")
+                || raw.contains("could not read Username") || raw.contains("Authentication failed") {
+                throw InstallError(LF("仓库不存在或无权访问：%@", ref.display))
+            }
+            let brief = raw.split(separator: "\n").last.map(String.init) ?? L("未知错误")
+            throw InstallError(LF("克隆失败：%@", brief))
+        }
+        return tmp
+    }
+
+    // MARK: 检测
+
+    private func detect(in dir: URL, ref: RepoRef) throws -> [InstallCandidate] {
+        let fileManager = FileManager.default
+        let atlasRoot = AtlasPaths.libraryRoot
+
+        func candidate(relative: String, directory: String) -> InstallCandidate? {
+            let base = relative == "." ? dir : dir.appendingPathComponent(relative)
+            let skillFile = base.appendingPathComponent("SKILL.md")
+            guard fileManager.fileExists(atPath: skillFile.path) else { return nil }
+            let meta = SkillScanner.readFrontmatter(skillFile)
+            let conflict = fileManager.fileExists(atPath: atlasRoot.appendingPathComponent(directory).path)
+            return InstallCandidate(
+                relativePath: relative,
+                directory: directory,
+                displayName: meta["name"].flatMap { $0.isEmpty ? nil : $0 } ?? directory,
+                description: (meta["description"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+                conflict: conflict,
+                selected: !conflict
+            )
+        }
+
+        // URL 带子路径 → 直装该子目录
+        if let subpath = ref.subpath {
+            let name = subpath.split(separator: "/").last.map(String.init) ?? ref.repo
+            guard let hit = candidate(relative: subpath, directory: name) else {
+                throw InstallError(LF("子目录 %@ 里没有 SKILL.md。", subpath))
+            }
+            return [hit]
+        }
+        // 仓库根有 SKILL.md → 单技能
+        if let root = candidate(relative: ".", directory: ref.repo) {
+            return [root]
+        }
+        // 扫一层子目录
+        let entries = (try? fileManager.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
+        )) ?? []
+        return entries
+            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
+            .compactMap { candidate(relative: $0.lastPathComponent, directory: $0.lastPathComponent) }
+            .sorted { $0.directory < $1.directory }
+    }
+}

@@ -1,0 +1,10 @@
+.DS_Store
+.swiftpm/
+native/.build/
+native/vendor/FluidGradient/FluidGradientExample/
+native/vendor/FluidGradient/assets/
+Skill Atlas.app/
+dist/
+*.dmg
+*.xcuserstate
+xcuserdata/
