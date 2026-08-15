@@ -21,6 +21,9 @@ enum Theme {
     static let healthy = Color(hex: 0x34C759)
     static let warning = Color(hex: 0xFF9F0A)
     static let error = Color(hex: 0xFF453A)
+    /// 中性语义色（长期未用这类「不是问题、只是没动静」的状态）。
+    /// 健康三色表示要处理，这个表示不必处理，别混用。
+    static let idle = Color(hex: 0x8E8E93)
 
     /// 中性文本：亮色用黑 .85/.55/.35，暗色相应用白
     static let textPrimary = dynamicInk(0.85)
@@ -58,6 +61,15 @@ enum Theme {
         static let s20: CGFloat = 20
         static let s24: CGFloat = 24
         static let s32: CGFloat = 32
+    }
+
+    /// 外壳布局常量（工具条高度与交通灯光学中线必须同源，否则红绿灯错位）
+    enum Layout {
+        /// 工具条高度：标题簇需要呼吸，44pt 会把标题压在窗口上沿
+        static let toolbar: CGFloat = 54
+        static let sidebar: CGFloat = 176
+        /// 工具条标题左缘 = 窗口 inset 12 + 侧栏 176 + 面板间隙 12，与内容面板左边线同线
+        static var contentLeading: CGFloat { Theme.Space.s12 + sidebar + Theme.Space.s12 }
     }
 
     /// 圆角：嵌套递减；胶囊只给大号突出控件
@@ -515,7 +527,7 @@ struct PressableButtonStyle: ButtonStyle {
 
 // MARK: - 窗口配置
 
-/// hiddenTitleBar + 空 NSToolbar + unifiedCompact：交通灯下移到 44pt 工具条光学中线。
+/// hiddenTitleBar + 空 NSToolbar + unifiedCompact：交通灯下移到工具条光学中线（Theme.Layout.toolbar / 2）。
 struct WindowConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let probe = NSView()
@@ -555,7 +567,9 @@ struct WindowConfigurator: NSViewRepresentable {
         for type in buttons {
             guard let button = window.standardWindowButton(type),
                   let titlebar = button.superview else { continue }
-            let y = titlebar.frame.height - 22 - button.frame.height / 2
+            // 目标：按钮中心落在工具条光学中线。系统标题栏容器高度有限，
+            // 工具条抬高后可能算出负值，钳到 0 保证按钮不出界（宁可略高不可错位）
+            let y = max(0, titlebar.frame.height - Theme.Layout.toolbar / 2 - button.frame.height / 2)
             button.setFrameOrigin(NSPoint(x: button.frame.origin.x, y: y))
         }
     }

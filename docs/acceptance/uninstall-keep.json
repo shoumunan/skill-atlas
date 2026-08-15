@@ -1,0 +1,7 @@
+{
+  "ccSwitchUntouched" : true,
+  "directory" : "alpha",
+  "action" : "uninstallKeep",
+  "linkExists" : false,
+  "libraryExists" : true
+}

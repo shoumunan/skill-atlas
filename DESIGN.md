@@ -25,6 +25,16 @@
 | 15 | 迁移引导 sheet 重做 + 四语国际化 | MigrationSheet 换成 Install/Cleanup 同骨架（图标章头部 + 机制图复用 `MigrationFlow` + 三承诺行 + quiet/accentGlass 按钮，替换系统 borderedProminent）；全应用 i18n：`L10n.swift`（`L()/LF()` 显式查表 + `LocalizedBundle` swizzle + `AppLanguage` 五档 跟随系统/简中/EN/JA/KO）、382 词条 × 3 语言（`native/resources/{en,ja,ko}.lproj/Localizable.strings`，键=中文原文，缺译回退中文）、设置页语言选择器即时生效（根视图 `.id(uiLanguage)` 重建）、技能名称与描述等用户内容保持原文；构建脚本打包 lproj，Info.plist 声明 CFBundleLocalizations |
 | 16 | 二期梯队一（2026-08-14 落地并无头验收） | **F1 触发模拟器**：`TriggerLab.swift`——信号=「」短语+名分词+任务别名，250 字符可见窗口口径；⌥⌘K 面板新增「试触发」模式（名次+命中词+丢弃风险/埋深/已停用徽标，点结果跳详情）；体检「描述体检」新增「触发词埋太深」组（`ContextDoctor.buriedTriggers`）。**F3 装前安全扫描**：`SecurityScan.swift` 七类静态规则（动态上下文 !`cmd`、curl\|sh、Base64 解码执行、长 Base64 块、隐藏 Unicode、allowed-tools 全权、硬编码密钥、外链清单）；安装检测后逐候选扫描，关键级强制 `.reviewing` 审阅页（命中行原文 + 「已核对来源，仍要安装」destructive）；已装技能后台复扫（mtime 缓存，CC Switch 只读跳过），结果进体检「需要修复·安全可疑」组与详情「安全扫描」区块。**F2 一键发起器**：`Launcher.swift`——genreMap 映射 Filing 体裁目录，自动建 `projects/<体裁>/<YYYYMMDD_主题>/`，AppleScript 开 Terminal 跑 `claude '请使用 X：主题'`；详情头「发起会话」按钮 + 弹窗（主题/最近主题/目录预览/仅复制），⌥⌘K 回车=发起流程、⌥回车=纯复制。调试探针：`-atlasScanProbe` / `-atlasTriggerProbe`+`-atlasProbeOut` / `-atlasLaunchProbe`+`-atlasLaunchTopic`（dry-run 不开终端）。验收实录：恶意夹具 4 关键级被拦、「做个PPT」第一名 kami 且 pptx 标丢弃风险、hotspot 发起 dry-run 目录与命令合规 |
 | 17 | 二期梯队二/三（2026-08-14 落地并无头验收） | **F4 产出回链**：`OutputLinker.swift` 扫 `projects/<体裁>/YYYYMMDD_主题/`（体裁 ← genreMap 反查），详情页「最近产出」区块（最近 5 次，点击 open、悬停「用同一主题重跑」）；实测回链 hotspot 真实成稿（黄金股/港股医疗CXO/…）。**F5 素材投递箱**：`DropInbox.swift` 规则表（自运营*.xlsx→somd、研报 PDF→research-index、成稿 docx→to-xhs…），主窗口整窗拖放 → 虚线提示浮层 → 投递弹层（首选+备选单选、主题、目录预览、「带素材发起」= 调用语附素材路径）；实测两条规则命中。**F6 生产链路**：`ProductionChain` 静态图（hotspot→to-voiceover→to-xhs；to-xhs 依赖 guizang-social-card-skill），详情「生产链路」区块上游/下游/依赖/被依赖 chips 点击跳转，不做自动编排。**F7 分组视图**：列表「分组」菜单（不分组/套件/类别），套件 = 目录名首段前缀 ≥3 共享，`LazyVStack` pinned section headers，纯逻辑分组不动物理目录。**F8 库 git 化**：`GitSync`（init 含 .gitignore 排除 usage-index 与备份、快照提交、状态行、「在终端打开」做远端与 push——凭据不进 GUI），设置页「多机同步」组。探针：`-atlasOutputsProbe`、`-atlasDropProbe` |
+| 18 | 三期快赢 + 更新源接通（2026-08-14） | **更新前 diff 预览**：`SkillGit.upstreamDiff`（--stat + SKILL.md diff，SKILL.md 无变更时给全量前 400 行），详情管理区/右键「查看变更」→ `DiffSheet`（±行着色、「更新到最新」放行）。**依赖警告**：停用入口统一走 `requestDisable`——被活跃下游依赖（ProductionChain）时弹「仍要停用」确认；卸载确认文案追加依赖警告；批量停用自动跳过被依赖技能。**外链存活复查**：安全复扫收集 info 级外链 → `LinkProber`（HEAD、并发 4、只把 DNS/超时/404/410/5xx 算死，403/405/429 不误报）每周自动 + 体检页「复查外链存活」手动；死链并进安全展示（`securityDisplay`）。**更新源**：appcast 指向 github.com/shoumunan/skill-atlas，未推 appcast 时 404 弹诚实指引；版本 1.3.1。探针：`-atlasUpdateProbe`、`-atlasCheckLinks` |
+| 19 | 本地直装收编（2026-08-14） | 散装在平台目录里的技能（origin == local）此前只展示不可管——PlatformStrip 的 togglable 只认 atlas 来源，DMG 新用户（技能全在 `~/.claude/skills`）平台开关全灰。详情页「管理」区与右键新增**「收进 Skill Atlas 库」**：① `FileClone.cloneDirectory` 拷入 `~/.skill-atlas/skills/<dir>`（拷后核验 SKILL.md，缺失回退）；② 写 catalog record，enabled = scanLocalSkills 发现它所在的各平台；③ 原散装入口替换成指向本库的软链——真实目录只删 resolve 后确为本次源的（防同名异物），软链直接换指向；留普通目录会在重扫后落成 `.directory` 警告态、且被安装流程「同名跳过」逻辑永久绕开。**不写 migration.json**（那是 CC Switch 迁移回滚清单，写入会让无 CC Switch 用户凭空出现「撤销迁移」），反向操作走常规卸载。全程 `pauseWatching` → 完成 `resumeWatching` + rescan，origin 原地变 atlas、平台开关解锁。验收：`-atlasSelect <名> -atlasAction adopt -atlasUninstallProbe`（linkTarget/inCatalog 字段），再 `-atlasToggle gemini` 证明开关已接管 |
+| 20 | 收编补全（2026-08-14，缺口全修并无头验收） | ① **已迁移用户散装可见性**：`scanLocalSkills` 移出 `if !migrated`，平台目录**始终**扫描——此前迁完 CC Switch 后手动新装的散装技能整个隐身（收编不可达，体检/安全扫描对它全盲，平台却照常加载）；实证：同一夹具只翻 `migratedFromCCSwitch` 布尔做对照，true 时 `-atlasSelect` 选不中、false 时收编全流程通过。已收录入口 resolve 后都在 seenPaths，放开不引入 CC 残留噪音。② **收编条**：列表顶部（UpdatesBanner 同款骨架）「n 个本地技能可收进本库」——点文字筛出本地安装来源，右侧「全部收编」`confirmationDialog` 确认后 `adoptAllLocalSkills` 批量执行（一次 pause/rescan，失败聚合报错不中断其余）。③ **外部实体警告**：`SkillActions.isExternalSource`——实体在所有平台根之外（软链指开发目录/CC 源）时，详情收编区橙字提醒「收编是拷贝快照，之后编辑原目录不再生效」，批量确认框附计数提示。④ **安装 sheet 拦截改道**：`InstallerModel.adoptionRedirect`——选到平台技能根内的文件夹 → 拦下引导走收编（避免「库里一份 + 原地普通目录」的 .directory 警告态）；CC Switch 源内 → 引导走迁移；错误路径接 `-atlasScanProbe` 探针。⑤ **setPlatform 占位报错**：开启挂载遇同名普通目录（多半是该平台的旧物理拷贝）→ 明确报错；改为先链后写 catalog，enabled 位不落，不再静默留下「enabled 但挂载 .directory」的警告态。验收：T1 migrated 夹具收编成功；T2 批量 3 收 1 拒、撞名现场（散装/库内异物/catalog）零改动；T3 占位未覆盖且 enabled 未落位；T4 平台根/CC 源双拦截文案落盘；真机只读冒烟（143 atlas · migrated=true）扫描正常 |
+| 21 | v8 外壳与筛选行重排（2026-08-14 晚） | **布局常量集中**：新增 `Theme.Layout`（toolbar 54 / sidebar 176 / contentLeading = 12+176+12），交通灯光学中线由 `toolbar/2` 推导并钳到 ≥0，工具条高度与红绿灯不再各写各的。**工具条**：44→54pt（44 把标题压在窗口上沿）；删掉页面身份图标章（与侧栏当前页图标重复）；标题 13→15 semibold、副文案 10→11。**筛选行**：控件按语法分两类——筛选（类别/平台/状态/来源）未生效时无边框只显标签、生效时换成 accent 值 + 淡底；视图（排序/分组）改 `ViewMenu` 图标打头 + 永远显示当前值。行分工改为「行一：范围切换 ↔ 排序/分组」「行二：筛选条件 ↔ 清除 + 结果计数」，两行左右都有落点，不再右侧真空；计数从行一挪到行二（它是筛选的结果）。**WorkBuddy 芯片**：`Spec.isAppIcon` —— 完整 app 图标（自带底板）直接铺满芯片并共用圆角/发丝，不再「板中板」，饱和度降到 0.82 与一排淡色芯片同重量 |
+| 22 | WorkBuddy 标提炼为线稿（2026-08-14 晚） | 官方给的是**完整 app 图标**（绿底板 + 白线），和另外五个「透明底细笔画标」不是一个物种：自带底板→叠在芯片上成「板中板」，满饱和→一排淡色芯片里独重。铺满芯片只治了「板中板」，墨量仍是别家 3 倍（29% vs 8–10%）。终解是**提炼线稿**：`tools/glyphify.swift` 按白度（三通道最小值，实测绿底 0–101 / 白线 204–255 分离极干净，中间仅 526px 抗锯齿）把白线抠成透明底模板图 → `tools/trimglyph.swift` 裁透明边并居中进正方画布 → 模板渲染上品牌绿渐变、glyphScale **0.60**（实测 0.58/0.62 墨量与家族齐平，0.80 起开始挤）。母版 `workbuddy.png` 保留供重制。**验收手段**：截图权限拿不到时用 `chipfinal.swift` 离线复刻 PlatformLogo 的绘制数学，出明暗两行六芯片对照图判断视觉重量——比肉眼猜可靠 |
+| 23 | 平台筛选带名称 + 筛选行再排（2026-08-14 晚） | **只给图标认不出平台**（首次打开的人尤其），芯片改为「图标 + 名称」，`Claude Code` 全应用统一简称 **Claude**（`displayName` 单一事实来源，详情页两处硬编码一并接管）。带名称的六个芯片实测 471pt，整行需 744pt——详情栏关着任何窗口宽都放得下，展开后 ≤1380 放不下，故做**三档自适应** `ViewThatFits`：图标+名称 → 纯图标 → 退成「平台▾」下拉（复用 `FilterMenu`，菜单里照样逐行列名称）。**筛选行重排**：平台组（最具体、有品牌标）前置 → 1pt 发丝分隔两种交互（一组开关 vs 一组菜单）→ 类别/状态/来源 → 右端清除 + 计数；菜单与右端标 `layoutPriority(1)`，保证它们先拿到宽度、平台组拿到的是真实剩余（否则窄窗口会把菜单挤没）。**筛选态反馈**：未筛选时六个标全点亮（品牌色本身是识别信息），一旦选中则只有它保持点亮 + accent 胶囊 + accent 名称，其余去色降级。平台组容器改为极淡底无描边（原来的发丝边让它像一个控件而非一组开关）。宽度用 `NSFont` 真实指标离线核算，排布用离线渲染器验证（屏幕锁住时的验收手段） |
+| 24 | OpenClaw 撤出界面 + 指南文案人化 + 全应用设计审计（2026-08-14 晚） | **OpenClaw 只留数据层**：`visiblePlatforms` 去掉它，扫描/挂载/安全扫描/已建软链全部照常，界面不再占位（用不上的平台摆着只是噪音）。放出来只需把它加回那个数组。**指南文案过 humanizer-zh**：两个指南文件共 39 处破折号全清（用户写作规范明令禁用，也是 LLM 头号文体拐杖），1 处「它不是外层包装，是房子」否定式排比改为正说，长句按语义拆短。**全应用审计**（design-taste-frontend 第 13 节把原生应用列为 out of scope，只取可迁移条款）：① 破折号全应用清零（17 条可见文案 + 2 条漏网），改文案同步重命名三语表的键，否则英日韩会静默回退中文；② 文案自审扫 12 类 AI 腔词（值得注意的是/赋能/打造/助力…）零命中；③ 形状一致性：小圆角 7/5/4 属 DESIGN.md 已文档化的同心规则（外 8 内 6、外 7 内 5），判定合规不动；④ 配色一致性：唯一游离色值 `0x8E8E93` 收进 `Theme.idle`（中性语义，区别于表示「要处理」的健康三色）；⑤ 对比度：29 处白色文字全部落在强调色底上，零风险；⑥ Reduce Motion：补齐 ReaderView 与设置页两处披露动画的保护。**遗留（已量化未修）**：可见文案 710 条中 275 条无译文，来自三期新增功能（Profile/沙箱/Hook/更新审阅/收编），切英日韩时这些位置回退中文 |
+| 25 | 指南页排印重做（v10，2026-08-14 深夜） | 用户反馈「标题正文字号、排列逻辑都有问题，看起来乱糟糟」。**病根是层级倒挂**：节标题走 `secondaryEmphasis`（11 次级灰），节内条目标题走 `rowTitle`（13 semibold 主色）——容器比它装的东西还轻，六节读下来没有父子关系，只剩满屏等重粗行。全应用 18 处在用的 `panelTitle`（15 semibold，DESIGN.md 第 81 行定义的「面板标题」）在这一页出现 **0 次**；而 `caption`（10pt，系统最小号）出现 **25 次**，成了一个「用来读」的页面里的主力字号。当初躲 panelTitle 的理由是第 311 行「禁止孤立粗体页标题」——那条管的是内容面板顶上再放个大标题去重复工具条页名，不管长滚动文档里的分节标题，套错了。**改法**：锁死五档单一职责——节标题 `panelTitle` 15 semibold 主色／节副句 `secondary` 11 三级色／组标题 `secondaryEmphasis` 11 medium 次级色／条目标题 `rowTitle` 13 semibold 主色／正文 `callout` 12 次级色／注解 `caption` 10 三级色。正文此前一半 11 一半 13（同一种东西两个字号），统一到 12；11 退回元数据身份，13 只留给「内容本身」（可复制的调用语、输入框、FAQ 问句）。**版式**：③④⑤ 原本 14 个几乎相同的 `quietControl` 药丸竖着堆（这是「乱糟糟」的主要来源），改成 macOS 分组列表——`GuideGroup` 一个容器 + `GuideHairline` 条目间发丝，不给每条各画一个框；三条推论／四级证据／六步排查／三个快捷键／常见问题各收一组。组标题从 10 三级升到 11 medium 次级（此前它和节副句完全同款，读者分不清哪个是节哪个是组）；试触发处两个并排同款 caption 合成「组标题 + 旁注」。**节奏**：节头改纵向堆叠 + 上发丝分隔，节间距由 `GuideMetrics.sectionGap` 单点供给（分隔线上下等距 24），节头不再自带下边距，否则 padding 与 spacing 双份累加、六节各算各的。行宽此前 700／760／320／不限四种口径混用，宽窗下 11pt 中文一行能跑 130 字，统一 `GuideMetrics.measure = 640`（≈50 字）。动作按钮 10→11pt、高 22→24（正文抬到 12 之后，10pt 按钮读起来像脚注，而它是本页主要动作出口）。**顺带**：`GuideSectionHead` 由 private 改 internal，删掉 GuideConceptMap 里那份会各自漂移的副本；关系节落点句由 `body` 改 `rowTitle`（原来和普通散文没分别，看不出它是「读完要带走的那句」）。**验收**：截屏权限仍拿不到（`screencapture` 只返回桌面），写 `guidepreview.swift` 离线复刻同一套字号/字重/颜色/内边距/圆角/发丝，出新旧并排图判读——旧版节标题是整栏最淡的一行，新版节标题压住全栏、三条目明确是它的子项。i18n +9 词条（分组标题走 `GuideGroup(label:)` 而非 `L()` 字面量，键沿用整句不拆，避免旧键悬空）|
+| 25 | 应用内自动更新 + 设置页全场景重排（2026-08-14 晚） | **自更新闭环（SelfUpdater.swift）**：此前「检查更新」只会开 GitHub 下载页（appcast 只有落地页 URL，无下载/安装/重启逻辑）。现在有新版弹窗首选「自动更新」：解析直链（appcast `dmg` 字段优先，缺省查 GitHub Releases API 的 .dmg 资产——老 appcast 也能自动更）→ URLSession 下载（AppKit 浮动面板显示进度）→ 可选 sha256 校验 → hdiutil 只读挂载并核对包内版本 ≥ 公告版本 → ditto 暂存 + 去 quarantine（ad-hoc 签名 + 隔离位 = Gatekeeper 拦启动）→ shell 助手等本进程退出后备份旧包、换装、失败原地回滚、`open` 重启，日志 `~/.skill-atlas/update.log`。App Translocation 拒绝并引导；任何失败弹错 + 「打开下载页」逃生门；appcast 新增可选 `dmg`/`sha256` 字段，打包脚本末尾直接打印 sha256 与可粘贴 appcast 片段。验收：本地 file:// appcast + 9.9.9 假 DMG 全链路换装成功（swap ok、版本落 9.9.9、备份清理）；sha256 篡改被拦（exit 1、应用不动）；探针 `-atlasAppcastURL` / `-atlasAutoUpdate`。**设置页全场景重排**：收编上线后「收进本库」有两条来路，设置页原来只陈列 CC Switch 迁移——新增「本地技能收编」组（散装计数 + 去看看 + 全部收编 confirmationDialog，人人可见），`MigrationGroup` 只对有 CC Switch 痕迹（DB/已迁移/有回滚清单）的用户显示，组内「没用过 CC Switch？」段落改为指向收编；侧栏底部信任锚点分场景（CC 用户「CC Switch 数据只读」/ 纯本地用户「收编前不动你的文件」）；指南页 MCP 名词卡去 CC Switch 硬绑定 |
+| 26 | 指南页教学重做（2026-08-15） | 旧版是「三步 + 四个名词并列卡」，四张卡各给一个定义却不给关系，读者读完仍拼不出心智模型，也没有任何进阶内容。重做为**单面板 · 六节纵向长滚动 + 顶部常驻锚点条**（`GuideView.swift` 整体重写 + 新增 `GuideConceptMap.swift`）：① 上手（先跑通一次）→ ② 关系 → ③ 机制 → ④ 排查 → ⑤ SKILL.md → ⑥ 本机数据，顺序是教学顺序不是功能罗列。**核心资产是概念关系图**：四个词不是并列链而是「一条穿越 + 一层包裹 + 两条供给」——客户端画成容器（Agent 住在里面，技能与外部连接也得装进这栋房子），所有箭头都指向 Agent，左边界在横线穿过处断开 16pt（说明容器是通道不是墙）。SwiftUI 原生绘制、零图片、单色系统（accent + 中性灰阶，绝不给四个概念各配颜色——那会退化成禁止的重复分类网格）；节点副句不点也读得到，承担名词速查职责；hover 预览 + 点击锁定，客户端激活时框内三层不压暗（压暗等于否认嵌套）。**页内实时试触发**：`TriggerLab.simulate` 直接调用，读者当场输入一句话看谁抢答第几名——把这一页最抽象的机制变成手上能试的东西，同时绕开菜单栏浮层无法预置模式的限制。**事实纠错（多路查证后落地）**：删掉「装多了会静默失踪」——官方原文 `The listing always contains every skill name`，丢的是描述不是技能；删掉「约 40 个技能开始截断」这类个数上限（`ContextDoctor.listingSoftCap` 连同 DoctorView 的同源文案一并删除，它无官方来源且与本应用 token 算法差约 4 倍）；MCP 从「外部工具」改为「开放协议」；Harness 从主标题降为括注（非 Anthropic 官方术语，官方叫 AI application / MCP Host）；不再拿 pptx 举例（官方明确四个内置文档技能在 Claude Code 不可用）；不再宣称 Grok 装了就能用（无权威来源）。⑥ 本机数据第三格改用 `doctorReport.atRisk.count`，与体检页同源——旧实现「总数 − 40」与同面板下方的预算模拟来自两套算法，会在同一屏互相打脸。**验收**：几何数学单测（三档宽度无重叠/溢出，并据此修正 Agent 中心 y=52→50 的 2pt 偏移）；51 条多维审查发现经对抗验证存活 6 条全部修复（含机制节容量举例与自家算法矛盾、`Text(detail)` 绕过 `L()`、SKILL.md 骨架无法本地化、整段 `onTapGesture` 热区过大）；i18n 194 键 100% 覆盖 × 三语（表增至 680 条，键集一致、格式符零错配）；真机库与空库 × 宽窄窗四路崩溃冒烟通过。注：本机屏幕不可截取，视觉验收未做，几何与降级分支靠数学验算与代码审查兜底。 |
 
 ---
 
@@ -32,7 +42,7 @@
 
 | # | 问题 | 修法 |
 |---|------|------|
-| 1 | 左上角交通灯按钮与侧栏图层重叠 | 窗口顶部划出 44pt 全宽工具条区，左侧 84pt 只留 L0 背景给交通灯；空 `NSToolbar` + `unifiedCompact` 把交通灯下移到工具条视觉中线；侧栏 rail 从工具条之下才开始 |
+| 1 | 左上角交通灯按钮与侧栏图层重叠 | 窗口顶部划出全宽工具条区（v8 为 54pt），左侧 84pt 只留 L0 背景给交通灯；空 `NSToolbar` + `unifiedCompact` 把交通灯下移到工具条视觉中线；侧栏 rail 从工具条之下才开始 |
 | 2 | 顶部搜索框与底部推荐输入框重复设计 | 技能库只有顶部搜索胶囊；推荐输入是总览页主角（点名调用格式在输入旁 `.help`） |
 | 3 | 字号 11 档失控（10/10.5/11/11.5/12/12.5/13/14.5/15.5/19/27…） | 收敛为 8 档字阶（见 ③），写进 `Theme.Fonts`，全应用禁止其他字号 |
 | 4 | 间距无网格，7/9/11/13/14 随手写 | 4pt 网格：只允许 4/8/12/16/20/24/32（`Theme.Space`）；列表行内边距固定 水平12/垂直10 |
@@ -156,9 +166,12 @@
 
 独立总览页已删除。侧栏五级图标轨：技能库 / 更新 / 体检 / 怎么用 / 设置。快捷键 ⌘1–⌘5。窗口是手工 L0/L1/L2 玻璃壳（hiddenTitleBar + 76pt 玻璃 rail + 44pt 工具条），**禁止** `NavigationSplitView`、系统 sidebar List、斑马纹 inset List。空库时内容区换为安装引导。完整功能地图见 ⑩。
 
-### 工具栏页面标题（层级规则）
+### 工具栏页面标题（层级规则，v8 改）
 
-标题不允许是孤立的粗体词。页面身份簇 = **图标章（24pt，accent 12% 圆角方块 + accent 11pt SF Symbol）+ 标题 `rowTitle` + 活副文案 `caption`**（第三级文本色）。副文案随数据变化：总览「129 个技能 · 9 个分类」、技能库「129 个技能，⌘K 直接搜索」（筛选时改为「筛选出 n / 总数 项」）、健康「n 项需要关注 / 所有检查项都正常」。
+标题簇**只有文字**：标题 `panelTitle`（15 semibold）+ 活副文案 `secondary`（11，三级文本色）纵向堆叠。
+**不再有图标章**——它与侧栏当前页的图标是同一个 SF Symbol，画两遍是重复：侧栏高亮行已经回答「我在哪一页」，
+工具条负责「这页现在什么情况」。副文案随数据变化：技能库「145 个技能 · 随处按 ⌥⌘K 快速搜索」（筛选时改为「筛选出 n / 总数 项」）、
+体检「n 项异常需要修复 / 预算余量充足」。
 
 ### 页面框架（填满式）
 
@@ -175,7 +188,7 @@ macOS 原生应用的做法（Finder / 音乐）：每页内容区域 = 工具�
 
 ## ⑥ 组件规范
 
-- **工具条（44pt，L0 上，纳入页面网格）**：交通灯区独占 0–100pt → 页面身份簇（图标章 + 标题 + 活副文案，见 ⑤ 标题层级规则；**左缘 = 100pt**，即窗口 inset 12 + 侧栏 76 + 面板间隙 12，与下方面板左边线严格同线）→ Spacer → 搜索胶囊（宽 300、高 32、玻璃、⌘K 徽标，仅技能库页）→ 刷新圆钮（32、玻璃）→ 「更新于 HH:mm」`caption`（**右侧组右缘 = 窗口宽 − 12**，与面板右边线同线）。**光学中线统一在 22pt**：内容在 44pt 条内自然居中；unifiedCompact 默认把交通灯中心放在 18.75pt，`WindowConfigurator.alignTrafficLights` 把三枚按钮下移到 22pt 与全员归零（窗口 resize 后重新应用）
+- **工具条（54pt，L0 上，纳入页面网格）**：交通灯区独占 0–100pt → 页面身份簇（图标章 + 标题 + 活副文案，见 ⑤ 标题层级规则；**左缘 = 100pt**，即窗口 inset 12 + 侧栏 76 + 面板间隙 12，与下方面板左边线严格同线）→ Spacer → 搜索胶囊（宽 300、高 32、玻璃、⌘K 徽标，仅技能库页）→ 刷新圆钮（32、玻璃）→ 「更新于 HH:mm」`caption`（**右侧组右缘 = 窗口宽 − 12**，与面板右边线同线）。**光学中线统一在 22pt**：内容在 44pt 条内自然居中；unifiedCompact 默认把交通灯中心放在 18.75pt，`WindowConfigurator.alignTrafficLights` 把三枚按钮下移到 22pt 与全员归零（窗口 resize 后重新应用）
 - **侧栏 rail（宽 76、radius 20、玻璃）**：顶部品牌位加载应用包内 `SkillAtlas.icns`（回退 `NSApp.applicationIconImage`），按 1024/824 放大裁掉苹果网格自带的透明边距后铺满 36pt 连续圆角方块（radius 8）——与 Dock/访达永远同一套 artwork，禁止手绘替身；导航五项 60×52（技能库 / 更新 / 体检 / 怎么用 / 设置；SF Symbol 17pt + `caption` 标签），选中态 accent 14% 胶囊 `matchedGeometryEffect` 滑动；底部锁形 `.help`：「不修改 CC Switch 原数据；本应用只管理 ~/.skill-atlas 技能库」
 - **统计带**：单个 L1 面板四格指标，内部 1pt 发丝分隔；数字 `metric`，标签 `secondary` medium，注脚 `caption`；健康格含三色占比条 + 可点图例
 - **列表行（高约 48）**：图标方块 30（`.quiet` 淡底样式，见色彩密度规则）、标题 `rowTitle`、副行 `secondary`；状态点只在非健康时显示；hover 出星标；选中 accent 12%
@@ -229,7 +242,7 @@ macOS 原生应用的做法（Finder / 音乐）：每页内容区域 = 工具�
 
 - **CC Switch 原数据：严格只读**——不写 `~/.cc-switch/cc-switch.db`，不改 `~/.cc-switch/skills` 里的文件。迁出用 APFS clonefile 复制到 `~/.skill-atlas/skills/`，再把平台软链改指新库；回滚清单在 `~/.skill-atlas/migration.json`。
 - **Skill Atlas 库：本应用管理**——平台开关 = 对 Claude（resolve 后可能是 `~/.mirasim/skills`）/ Codex / GrokBuild / Gemini / OpenCode / Hermes 建或删软链；停用 = 移入 `.disabled/`；安装目标 = 该库（保留 `.git`）；有 git 的技能可 `fetch` + `pull --ff-only`。
-- **未迁入的本地直装**：仍允许停用/恢复（所在根的 `.disabled/`）。
+- **本地直装（散装技能）**：平台目录**始终**扫描（含已从 CC Switch 迁移完成的用户），仍允许停用/恢复（所在根的 `.disabled/`）。收编入口三个：列表顶部收编条（「全部收编」批量，确认后执行）、详情页「管理」区、右键——clonefile 拷入本库、写 catalog（enabled = 扫描发现它所在的各平台）、原散装入口替换成指向本库的软链（留普通目录会落成 `.directory` 警告态）。实体在平台根之外（软链指开发目录）的收编前有「拷贝快照、live-edit 断开」提醒。收编不写 `migration.json`（那是 CC Switch 迁移的回滚清单），收编后 origin 变 atlas、平台开关解锁，反向操作走常规卸载。
 - 停用/恢复/迁出期间暂停 FSEvents 监听（写完 1s 后恢复）。
 - 目录自动刷新：FSEvents 监听扫描根 + Atlas 库 + CC Switch DB，事件 2s 防抖后 `rescan(keepSelection: true)`。
 
@@ -286,6 +299,7 @@ Dials: VARIANCE 3（系统外壳可预测）/ MOTION 4 / DENSITY 7（管理器�
 | 卸载 | 右键 → 卸载（确认） | 详情「卸载」 | ✓ | 2 |
 | 安装 | 工具栏 + / ⌘N | 空态主按钮 | — | 1 |
 | 停用/恢复 | 详情管理区 | 健康页长期未用行内 | ✓ | 2 |
+| 收编本地直装 | 列表顶部收编条（全部收编） | 详情管理区「收进 Skill Atlas 库」 | ✓ | 1–2 |
 | 迁移 | 首次启动模态 | 设置页 / 菜单「从 CC Switch 迁入」 | — | 0（自动） |
 | 撤销迁移 | 设置页 / 菜单 | — | — | 2 |
 | 预算体检 | 侧栏「健康」 | — | — | 1 |
@@ -365,7 +379,7 @@ Dials: VARIANCE 3（系统外壳可预测）/ MOTION 4 / DENSITY 7（管理器�
   [迁入…] [撤销迁移]
   说明：不写 CC Switch 数据库与原目录。
 应用
-  版本 1.3.0     [检查更新…]
+  版本 3.0.0     [检查更新…]
 ```
 
 **首次启动迁移弹窗（模态，不可点窗外关掉）**
@@ -380,7 +394,7 @@ Dials: VARIANCE 3（系统外壳可预测）/ MOTION 4 / DENSITY 7（管理器�
 
 ### 10.4 平台真 logo（v7 彩色芯片版，2026-08-14）
 
-嵌入 `native/Resources/logos/`（LobeHub Icons，MIT，github.com/lobehub/lobe-icons）。**UI 只展示四个平台：Claude Code / Codex / Gemini / Grok**；OpenCode、Hermes 仅保留数据兼容（已有软链不动），不再出现在任何界面。
+嵌入 `native/Resources/logos/`（LobeHub Icons，MIT，github.com/lobehub/lobe-icons；WorkBuddy 用官方 app icon 栅格版）。**UI 只展示五个平台：Claude Code / Codex / Gemini / Grok / WorkBuddy**；OpenCode、Hermes 仅保留数据兼容（已有软链不动），不再出现在任何界面。
 
 | 平台 | 资源 | 渲染 |
 |---|---|---|
@@ -388,6 +402,7 @@ Dials: VARIANCE 3（系统外壳可预测）/ MOTION 4 / DENSITY 7（管理器�
 | Codex | `openai.svg` | 模板渲染，黑标随明暗反色 |
 | Gemini | `googlegemini.svg` | 模板 + SwiftUI 渐变上色（#4285F4→#9B72CB→#D96570；NSImage 渲染不了 SVG 渐变 defs，`gemini-color.svg` 留档不用） |
 | Grok | `xai.svg` | xAI 官方 X 标，模板渲染随明暗反色 |
+| WorkBuddy | `workbuddy-trim.png` | 从官方 app icon **提炼的单色线稿**，模板渲染 + 品牌绿渐变（#0FD08F→#00A97A），glyphScale 0.60 |
 
 **芯片样式（`PlatformLogo`）**：连续圆角方块（radius = 尺寸 30%）。点亮 = 品牌色淡底（亮 12% / 暗 20%）+ 品牌色发丝 + 原色 glyph；置灰 = 中性 4% 底 + 去饱和 glyph（模板 55% / 彩标 40% 透明度）。尺寸：列表行 18 / 筛选条 22 / 详情头 26。`label` 仍是 skills.platforms 的存储键（Claude/Codex/GrokBuild…），界面文案一律用 `displayName`。
 
@@ -416,9 +431,20 @@ v3 曾换成 `NavigationSplitView` + 系统 sidebar + 斑马纹 List，观感变
 - 「怎么用」页用库里的真实技能教调用，不是静态原则文案。不做 MCP 管理。
 - 目录对标 CC Switch：全部在 `~/.skill-atlas/`，不再把元数据拆到 Application Support。
 
-### 10.7 怎么用页的目的
+### 10.7 指南页的目的（v9 重做后）
 
-CC Switch 只做开关。本页让不懂 Skill / MCP / Agent 的人真正用起来：三个词配库里的真实例子、可复制的调用语、当前技能卡片、用自己的使用数字接到体检页。
+CC Switch 只做开关。本页负责让不懂 Skill / Agent / MCP 的人**分清这几个词、并真正用起来**。六节是一条教学线，不是功能罗列：
+
+1. **上手**——先跑通一次。成功体感换后面五节的注意力，所以它排在所有解释之前。
+2. **关系**——概念关系图。四个词的关系是「一条穿越 + 一层包裹 + 两条供给」，不是四张并列卡；名词定义唯一落点在图的节点副句上（不点也读得到）。
+3. **机制**——两个时刻（开会话注入清单 / 命中才读正文）+ 三条推论。这是全页底座：不讲它，后面每条都是要背的规则；讲了，后面全是推论。
+4. **排查**——先给四级证据判断「是不是真没用上」，再给六步有序排查；中间嵌页内实时试触发（`TriggerLab.simulate`），让读者当场看谁抢答。
+5. **SKILL.md**——把技能从黑盒变成可读可改的文本文件，附快捷键与常见问题。
+6. **本机数据**——真实数字 + 去体检页，是全页唯一跨页 CTA。
+
+三条硬约束：**所有举例从 `store.skills` 动态取真实技能**（取不到降级成中性说法，宁可不举例也不展示用户没有的技能名）；**所有数字与体检页同源**（不许两页各算各的）；**不对模型行为下绝对断言**（试触发与体检都是离线近似，文案一律用「估算 / 大概率」）。
+
+内容再涨的正确动作是**把内容挪走**（详情页 / 体检页 / sheet），不是加 tab 也不是退回双栏——这套骨架的上限大约就是现在六节再加一节。
 
 ## 附：验收样张与调试参数
 

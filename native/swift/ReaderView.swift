@@ -133,6 +133,7 @@ struct SkillDoc {
 // MARK: 阅读器 sheet
 
 struct ReaderSheet: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
     var skill: Skill
@@ -218,7 +219,7 @@ struct ReaderSheet: View {
     private func frontmatterPanel(_ entries: [(key: String, value: String)]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(Motion.control) { frontmatterExpanded.toggle() }
+                withAnimation(reduceMotion ? nil : Motion.control) { frontmatterExpanded.toggle() }
             } label: {
                 HStack(spacing: Theme.Space.s8) {
                     Image(systemName: "chevron.right")

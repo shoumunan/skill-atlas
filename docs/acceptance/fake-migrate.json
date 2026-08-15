@@ -1,0 +1,8 @@
+{
+  "atlasCount" : 3,
+  "hotspotLink" : "",
+  "library" : "\/tmp\/skill-atlas-migrate-test\/.skill-atlas\/skills",
+  "log" : "\/tmp\/skill-atlas-migrate-test\/.skill-atlas\/migration.json",
+  "migrated" : true,
+  "ok" : true
+}

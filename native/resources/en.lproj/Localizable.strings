@@ -6,9 +6,7 @@
 "%@ 套件" = "%@ suite";
 "%@ 挂载没有指向本库" = "%@ mount does not point to this library";
 "%@ 挂载缺失" = "%@ mount is missing";
-"%@ 的技能目录里已有同名普通目录「%@」，不会覆盖。若它是这技能的旧拷贝，先手动移除再开启。" = "The %@ skills folder already contains a plain folder named “%@”; it won't be overwritten. If it's an old copy of this skill, remove it manually and toggle again.";
 "%@：%@（CC Switch 只读，先迁移）" = "%@: %@ (CC Switch is read-only; migrate first)";
-"%@：%@（详情页「管理」收进本库后可开关）" = "%@: %@ (adopt into the library from Manage in the detail pane to toggle)";
 "%@：已停用技能不参与挂载" = "%@: disabled skills are not mounted";
 "%d 个会话文件（增量解析 %d 个），耗时 %.1f 秒" = "%d session files (%d parsed incrementally), %.1f s";
 "%d 个技能 · %d 个有新版本" = "%d skills · %d updates available";
@@ -21,7 +19,6 @@
 "%lld 个技能校验通过：已在本库、SKILL.md 可读、挂载全部指向本库。" = "%lld skills verified: in the library, SKILL.md readable, all mounts point here.";
 "%lld 个文件" = "%lld files";
 "%lld 个未通过校验，将原样保留（不会动它们）" = "%lld failed verification and will be kept as-is";
-"%lld 个本地技能可收进本库" = "%lld local skills can be adopted into the library";
 "%lld 个目录" = "%lld folders";
 "%lld 关键" = "%lld critical";
 "%lld 处可疑" = "%lld suspicious";
@@ -34,7 +31,7 @@
 "Base64 解码后执行" = "Base64 decoded and executed";
 "CC Switch 数据只读" = "CC Switch data is read-only";
 "CC Switch 源目录里没有发现技能副本，不需要清理。" = "No skill copies found in the CC Switch source folder. Nothing to clean.";
-"Claude Code 启动时会把所有技能的名称和描述注入上下文，预算约为窗口的 1%。超额后，最少使用的技能描述会被静默丢弃——技能还在，但模型看不到它能做什么，触发就会失灵。数字为估算（CJK×0.7 + 其他÷4 + 条目开销）。" = "At launch, Claude Code injects every skill's name and description into context; the budget is about 1%% of the window. Once over budget, the least-used descriptions are silently dropped — the skill remains, but the model can't see what it does, so triggering breaks. Numbers are estimates (CJK×0.7 + others÷4 + per-entry overhead).";
+"Claude Code 启动时会把所有技能的名称和描述注入上下文，预算约为窗口的 1%。超额后，最少使用的技能描述会被静默丢弃。技能还在，但模型看不到它能做什么，触发就会失灵。数字为估算（CJK×0.7 + 其他÷4 + 条目开销）。" = "At launch, Claude Code injects every skill's name and description into context; the budget is about 1%% of the window. Once over budget, the least-used descriptions are silently dropped — the skill remains, but the model can't see what it does, so triggering breaks. Numbers are estimates (CJK×0.7 + others÷4 + per-entry overhead).";
 "Claude Code、Codex、Grok 任一都行（技能挂到哪个 Harness，哪个就能用）。也可以不点名、直接描述任务让它自动匹配——但技能一多自动匹配会失灵，点名最稳。" = "Claude Code, Codex, or Grok all work (a skill is usable wherever it's mounted). You can also just describe the task and let it auto-match — but with many skills auto-match breaks down, so naming is safest.";
 "Claude 启动时大约只能看完 %d 个描述，多出来的会静默失踪。" = "At launch Claude can only read about %d descriptions; the rest silently vanish.";
 "Frontmatter · %lld 项" = "Frontmatter · %lld fields";
@@ -48,18 +45,20 @@
 "git init 失败（本机没有可用的 git？）" = "git init failed (is git available on this Mac?)";
 "git pull --ff-only 未成功" = "git pull --ff-only did not succeed";
 "git pull --ff-only，失败不强制。主入口在「更新」页。" = "git pull --ff-only; never forced.";
-"· %lld 个原目录将从 ~/.cc-switch/skills 移入废纸篓，清空废纸篓后无法恢复\n· 清理后「撤销迁移」失效——回滚目标已不存在，技能从此只由本应用管理\n· CC Switch 应用里这些技能会显示为缺失（它的数据库不受影响）\n· 磁盘空间在清空废纸篓后才真正释放" = "· %lld source folders will move from ~/.cc-switch/skills to the Trash; once the Trash is emptied they cannot be recovered\n· After cleanup, Undo Migration stops working — the rollback targets no longer exist; these skills are managed only by this app from now on\n· In the CC Switch app these skills will show as missing (its database is untouched)\n· Disk space is freed only after you empty the Trash";
+"· %lld 个原目录将从 ~/.cc-switch/skills 移入废纸篓，清空废纸篓后无法恢复\n· 清理后「撤销迁移」失效，回滚目标已不存在，技能从此只由本应用管理\n· CC Switch 应用里这些技能会显示为缺失（它的数据库不受影响）\n· 磁盘空间在清空废纸篓后才真正释放" = "· %lld source folders will move from ~/.cc-switch/skills to the Trash; once the Trash is emptied they cannot be recovered\n· After cleanup, Undo Migration stops working — the rollback targets no longer exist; these skills are managed only by this app from now on\n· In the CC Switch app these skills will show as missing (its database is untouched)\n· Disk space is freed only after you empty the Trash";
 "“%@”" = "“%@”";
 "↑↓ 选择 · ⏎ 复制 · ⌥⌘K 呼出" = "↑↓ select · ⏎ copy · ⌥⌘K summon";
 "⏎ 发起 · ⌥⏎ 仅复制 · Esc 返回" = "⏎ launch · ⌥⏎ copy only · Esc back";
 "⏎ 发起 · ⌥⏎ 复制调用语 · ⌥⌘K 呼出" = "⏎ launch · ⌥⏎ copy invocation · ⌥⌘K summon";
 "「%@」不在 Skill Atlas 库中" = "“%@” is not in the Skill Atlas library";
-"「%@」不是本地直装技能，无需收编。" = "“%@” isn't a directly-installed local skill; nothing to adopt.";
-"「%@」已停用。先恢复，再收进本库。" = "“%@” is disabled. Restore it first, then adopt it into the library.";
 "「%@」由 CC Switch 管理。先执行迁移，再在这里卸载。" = "“%@” is managed by CC Switch. Migrate first, then uninstall here.";
 "「%@」被其他技能依赖" = "“%@” is depended on by other skills";
+"「按模板出月报，数据从公司系统取」，两个都要：Skill 定流程和写法，MCP 负责取数。" = "\"Produce the monthly report from our template, pulling data from the company system\" needs both: the Skill sets the process and the wording, MCP fetches the data.";
+"「提交信息按固定格式写，破坏性改动要单独标出来」，这是做法问题，写成 Skill。" = "\"Commit messages follow a fixed format, and breaking changes get called out separately\" is a how question. Write it as a Skill.";
 "一个带 SKILL.md 的文件夹。比如你库里的 hotspot = 按模板写热点解读。" = "A folder with a SKILL.md inside. E.g. hotspot in your library = write a market-news explainer from a template.";
 "一个带 SKILL.md 的文件夹，写着「这件事按这套流程做」。" = "A folder with a SKILL.md that says “do this job with this procedure.”";
+"三个随手能用的键" = "Three keys worth remembering";
+"三条推论" = "Three consequences";
 "三步把技能用起来" = "Use a Skill in Three Steps";
 "三步把技能用起来（⌘3）" = "Use a skill in three steps (⌘3)";
 "上下文成本" = "Context cost";
@@ -123,12 +122,9 @@
 "全部停用" = "Disable All";
 "全部停用（%lld）" = "Disable All (%lld)";
 "全部技能" = "All Skills";
-"全部收编" = "Adopt All";
 "全部更新" = "Update All";
 "公开市场约 1/4 技能有安全缺陷。以下是命中行原文：确认来源可信再放行，或返回取消勾选。" = "About 1 in 4 public skills has a security flaw. Below are the matched lines verbatim: confirm the source is trustworthy before proceeding, or go back and deselect.";
 "关闭（⌘W / Esc）" = "Close (⌘W / Esc)";
-"其中 %lld 个的实体在平台目录之外，收编后编辑原目录不再生效。" = " %lld of them live outside the platform folders; after adoption, edits to the original folder no longer take effect.";
-"内容拷入 ~/.skill-atlas/skills/，原平台目录替换成指向本库的软链，之后在本应用统一开关平台。" = "Content is copied into ~/.skill-atlas/skills/ and the original platform folders become symlinks to the library; toggle platforms from this app afterwards.";
 "再装一个" = "Install Another";
 "分支 %@ · 未提交改动 %d 项" = "Branch %@ · %d uncommitted changes";
 "分清这四个，就不会装错地方。" = "Keep these four straight and nothing gets installed in the wrong place.";
@@ -155,7 +151,6 @@
 "取消收藏" = "Unfavorite";
 "只看 %@" = "Only %@";
 "只看可更新的技能" = "Show only updatable skills";
-"只看本地安装的技能" = "Show only locally installed skills";
 "只移除平台挂载" = "Remove Mounts Only";
 "只读检查" = "Read-only check";
 "可回收 %@" = "Reclaim %@";
@@ -173,6 +168,7 @@
 "命中：%@" = "Matched: %@";
 "唯一管理点" = "Single point of management";
 "四个名词，30 秒" = "Four Terms in 30 Seconds";
+"四级证据，从弱到强" = "Four levels of evidence, weakest first";
 "回滚清单写入失败，已中止（软链可能部分改动，请用「撤销迁移」恢复）。" = "Failed to write the rollback list; aborted (symlinks may be partially changed — use Undo Migration to restore).";
 "在 CC Switch 中管理（本应用对尚未迁出的 CC Switch 技能保持只读）" = "Managed in CC Switch (this app keeps unmigrated CC Switch skills read-only)";
 "在工作根目录开 Terminal 会话并预填调用语" = "Opens a Terminal session at the work root with the invocation prefilled";
@@ -200,6 +196,7 @@
 "多机同步" = "Multi-Mac Sync";
 "好" = "OK";
 "子目录 %@ 里没有 SKILL.md。" = "No SKILL.md in subfolder %@.";
+"它没理你，按这个顺序查" = "It ignored you? Check in this order";
 "它能帮你做什么" = "What it can do for you";
 "安全可疑（静态复扫，点行去详情看命中原文）" = "Security suspects (static rescan; click a row for the matched lines)";
 "安全扫描" = "Security scan";
@@ -229,12 +226,12 @@
 "已最新" = "Up to date";
 "已核对来源，仍要安装" = "Source Verified — Install Anyway";
 "已清理 %d 个；%d 个移入废纸篓失败：%@" = "Cleaned %d; %d failed to move to Trash: %@";
-"已经装在 ~/.claude/skills 等平台目录里的技能不用重装：它们会出现在技能库列表，选中后在「管理」区一键收进本库接管。" = "Skills already sitting in platform folders like ~/.claude/skills need no reinstall: they show up in the library list — select one and adopt it from the Manage section.";
 "已装入 Skill Atlas 库" = "Installed into the Skill Atlas library";
 "已装入 Skill Atlas 库 + %@ 软链" = "Installed into the library + %@ symlinks";
 "已迁入 %d 个技能" = "%d skills migrated";
 "已迁入或本机没有 CC Switch 数据" = "Already migrated, or no CC Switch data on this Mac";
 "带素材发起" = "Launch with Material";
+"常见问题" = "Common questions";
 "常驻菜单栏图标，在任何应用里按 ⌥⌘K 搜技能、回车复制调用语。" = "Keeps a menu bar icon; press ⌥⌘K in any app to search skills, ⏎ to copy the invocation.";
 "平台分布" = "By platform";
 "库位置" = "Library location";
@@ -250,6 +247,7 @@
 "当前版本 %@。" = "Current version %@.";
 "当前版本 %@。用「构建原生应用.command」重新构建即为最新。\n如需自动更新：把 appcast.json 托管到任意可访问地址后，在终端执行\ndefaults write local.skill-atlas.dashboard atlasAppcastURL \"<地址>\"" = "Current version %@. Rebuild with 构建原生应用.command to get the latest.\nFor auto-updates: host appcast.json anywhere reachable, then run\ndefaults write local.skill-atlas.dashboard atlasAppcastURL \"<url>\"";
 "当前选中的技能" = "Currently selected skill";
+"当场试一句" = "Try a sentence right here";
 "快进更新失败：%@" = "Fast-forward update failed: %@";
 "思考与协作" = "Thinking & Collab";
 "恢复" = "Restore";
@@ -269,7 +267,6 @@
 "扫描范围" = "Scan scope";
 "找不到回滚清单：%@" = "Rollback list not found: %@";
 "找不到技能目录「%@」" = "Skill folder “%@” not found";
-"找不到源目录：%@" = "Source folder not found: %@";
 "承载 Agent 的驾驶舱程序：Claude Code、Codex、Grok 这些「壳」。它决定 Agent 能读到哪些技能、动用哪些工具——所以同一个技能要分别挂到各个 Harness。" = "The cockpit program that hosts the Agent: shells like Claude Code, Codex, Grok. It decides which skills the Agent can read and which tools it can use — which is why one skill must be mounted on each Harness separately.";
 "技能不是独立 App，是给 Agent 看的说明书。整个流程只是一句话的事。" = "A skill isn't a standalone app — it's a manual the Agent reads. The whole flow is one sentence of work.";
 "技能库" = "Library";
@@ -279,18 +276,14 @@
 "技能源目录、卸载备份、迁移回滚清单都在这一个文件夹里。" = "Skill sources, uninstall backups, and the migration rollback list all live in this one folder.";
 "技能由 Skill Atlas 库管理；CC Switch 原数据未做任何修改，可随时在菜单里撤销迁移" = "Skills are managed by the Skill Atlas library; CC Switch data is untouched and migration can be undone from the menu anytime";
 "技能管理" = "Skill Manager";
-"把 %lld 个本地技能收进 Skill Atlas 库？" = "Adopt %lld local skills into the Skill Atlas library?";
 "把 CC Switch 里的技能收进本库" = "Collect CC Switch skills into this library";
 "把下面所有吃灰技能移入 .disabled/，不删任何文件，随时可恢复" = "Move all idle skills below into .disabled/ — no files deleted, restore anytime";
 "把光标移到列表条目上点星标，收藏常用 Skill。" = "Hover a row and click the star to favorite skills you use often.";
-"把全部本地直装技能拷入本库并接管挂载" = "Copy every locally installed skill into the library and take over its mounts";
 "把库变成 Git 仓库" = "Turn the Library into a Git Repo";
 "把技能收到一起" = "Bring Your Skills Together";
 "把目录从 .disabled/ 移回原位，平台恢复加载。" = "Moves the folder out of .disabled/ back in place; platforms load it again.";
 "把目录从 ~/.skill-atlas/skills/.disabled/ 移回库内，并按启用位重建软链。" = "Moves the folder from ~/.skill-atlas/skills/.disabled/ back into the library and rebuilds symlinks per the enabled flags.";
 "把目录移入同根的 .disabled/，平台不再加载；随时可恢复，不删除任何文件。" = "Moves the folder into .disabled/ at the same root; platforms stop loading it. Restore anytime — nothing is deleted.";
-"拷入 ~/.skill-atlas/skills/ 并接管挂载（原目录替换成指向本库的软链）" = "Copies into ~/.skill-atlas/skills/ and takes over the mount (the original folder becomes a symlink to the library)";
-"拷贝校验失败：库内 %@/SKILL.md 缺失，已回退收编。" = "Copy verification failed: %@/SKILL.md is missing in the library — adoption rolled back.";
 "挂载与文件" = "Mounts & files";
 "挂载与文件检查全部通过。" = "All mount and file checks passed.";
 "挂载异常、预算、重叠、长期未用（⌘2）" = "Mount issues, budget, overlaps, long-unused (⌘2)";
@@ -298,6 +291,7 @@
 "挂载状态" = "Mount status";
 "指南" = "Guide";
 "按你常用模型的上下文窗口估算预算（窗口的 1%）" = "Budget estimated from your model's context window (1%% of it)";
+"按你平时会说的话打，看谁会抢答" = "Type it the way you normally would, and see who answers first";
 "按当前使用频率，这份描述有被 listing budget 丢掉的风险。" = "At current usage, this description risks being dropped by the listing budget.";
 "按文件名和类型匹配技能，带路径发起会话" = "Matches a skill by file name and type, then launches with the path";
 "挑一个技能" = "Pick a skill";
@@ -319,12 +313,8 @@
 "操作未完成" = "Action Incomplete";
 "支持 GitHub 仓库、/tree/<分支>/<子目录>，以及本机已有 SKILL.md 的文件夹。" = "Supports GitHub repos, /tree/<branch>/<subfolder>, and local folders that contain SKILL.md.";
 "支持 GitHub 链接，或本机已有 SKILL.md 的文件夹路径" = "Accepts a GitHub URL or the path to a local folder with SKILL.md";
-"收编" = "Adopt";
-"收编后可开关平台、停用、卸载" = "After adoption you can toggle platforms, disable, and uninstall";
-"收编后由本应用管理：内容拷入本库，原平台目录换成指向本库的软链，平台 logo 变成可点开关。" = "After adoption this app manages it: content is copied into the library, the original platform folder becomes a symlink pointing here, and the platform logos become clickable toggles.";
 "收藏" = "Favorite";
 "收起详情栏" = "Collapse detail pane";
-"收进 Skill Atlas 库" = "Adopt into Skill Atlas Library";
 "数据与研究" = "Data & Research";
 "文件超过 200 KB，仅显示开头部分。" = "File exceeds 200 KB; showing the beginning only.";
 "断链" = "Broken link";
@@ -345,7 +335,6 @@
 "最近使用" = "Recently Used";
 "最近更新 %@" = "Updated %@";
 "有 %d 个未能停用：%@" = "%d could not be disabled: %@";
-"有 %d 个未能收编：%@" = "%d could not be adopted: %@";
 "有新版本，右键或详情页更新" = "Update available — use right-click or the detail pane";
 "未关联仓库" = "No linked repository";
 "未发现使用记录" = "No usage found";
@@ -363,7 +352,6 @@
 "本地构建版本，未配置更新源" = "Local build — no update source configured";
 "本地直装" = "Installed directly";
 "本库 + CC Switch 源（只读）+ 各平台技能目录，软链去重后合并展示。" = "This library + the CC Switch source (read-only) + each platform's skills folder, deduplicated across symlinks.";
-"本库已有同名目录「%@」，不会覆盖。先处理库内同名目录再收编。" = "The library already has a folder named “%@”; nothing is overwritten. Resolve the name clash, then adopt again.";
 "本应用不修改 CC Switch 数据；管理动作只对 Skill Atlas 库与本地直装技能生效" = "This app never modifies CC Switch data; management only affects the Skill Atlas library and directly-installed skills";
 "来源" = "Source";
 "来自 projects 目录，点击打开" = "From the projects folder; click to open";
@@ -390,6 +378,7 @@
 "正在索引使用记录… %d%%" = "Indexing usage… %d%%";
 "正在迁移…" = "Migrating…";
 "每跳有人工审校，不自动编排" = "Every hop is human-reviewed; no auto-orchestration";
+"比如：帮我把这份会议记录整理成纪要" = "For example: turn these meeting notes into minutes";
 "沟通与运营" = "Comms & Ops";
 "没有匹配「%@」的技能" = "No skills match “%@”";
 "没有匹配的投递规则。挑一个技能，素材路径会附在调用语里：" = "No delivery rule matched. Pick a skill — the file path will be attached to the invocation:";
@@ -398,11 +387,10 @@
 "没有可用的 git。请先安装命令行工具：终端里执行 xcode-select --install" = "git is unavailable. Install the command line tools first: run xcode-select --install in Terminal";
 "没有吃灰的技能" = "No idle skills";
 "没有找到匹配的 Skill" = "No matching skills";
-"没有技能会响应这句话——要么点名调用，要么去改描述" = "No skill would respond to this — either invoke by name or fix a description";
+"没有技能会响应这句话。要么点名调用，要么去改描述" = "No skill would respond to this — either invoke by name or fix a description";
 "没有改动" = "No changes";
 "没有校验通过的副本可清理。" = "No verified copies to clean.";
 "没用过 CC Switch？不需要这一步：用「安装技能」直接装进本库；已经散装在各平台目录里的技能会被自动收录展示，随时可选择收进库统一管理。" = "Never used CC Switch? Skip this step: use Install Skill to add directly to the library. Skills scattered in platform folders are auto-detected and shown, and you can collect them into the library anytime.";
-"注意：此技能的实体在平台目录之外（%@）。收编会拷贝一份进库，之后编辑原目录不再对平台生效。" = "Note: this skill's files live outside the platform folders (%@). Adoption copies a snapshot into the library; edits to the original folder no longer reach the platforms.";
 "清单超预算，%d 个技能的描述有被丢弃风险" = "Listing over budget — %d skill descriptions at risk of being dropped";
 "清理 CC Switch 副本" = "Clean CC Switch Copies";
 "清空搜索" = "Clear search";
@@ -411,6 +399,7 @@
 "清除筛选" = "Clear Filters";
 "演示与文档" = "Slides & Docs";
 "点上方 logo 开关平台挂载（建/删软链）。有新版本时列表顶部会出现更新条。" = "Click the logos above to toggle mounts (create/remove symlinks). When updates exist, a banner appears atop the list.";
+"点开看答案" = "Open for the answer";
 "点结果跳到主窗口详情 · ⌥⌘K 呼出" = "Click a result to open its detail · ⌥⌘K summon";
 "状态" = "Status";
 "独立技能" = "Standalone";
@@ -428,7 +417,6 @@
 "目标位置已有同名目录「%@」，不会覆盖。" = "“%@” already exists at the destination; will not overwrite.";
 "目标错误" = "Wrong target";
 "直接安装在平台技能目录" = "Installed directly in the platform's skills folder";
-"直接安装在平台技能目录。可在下方「管理」区收进本库接管" = "Installed directly in the platform's skills folder. Adopt it into the library from the Manage section below";
 "研报归档进投研问答库" = "Archive report into the research Q&A library";
 "确认一切正常后，清空废纸篓即可释放空间。技能现在只由 Skill Atlas 库提供。" = "Once everything looks good, empty the Trash to free the space. Skills are now served only from the Skill Atlas library.";
 "示例说法" = "Example prompts";
@@ -489,8 +477,6 @@
 "还没有可用的技能" = "No skills available yet";
 "还没有收藏" = "No favorites yet";
 "这一步不可逆，请看清后果" = "This step is irreversible — read the consequences";
-"这个文件夹已经在 %@ 的技能目录里，不用重装：回到技能库列表选中它，在「管理」区收进本库接管（列表顶部也有「全部收编」）。" = "This folder is already inside the %@ skills directory — no reinstall needed: select it in the library list and adopt it from the Manage section (the list header also has “Adopt All”).";
-"这个文件夹由 CC Switch 管理。请在设置页执行「从 CC Switch 迁入」，不要重复安装。" = "This folder is managed by CC Switch. Use “Migrate from CC Switch” in Settings instead of installing it again.";
 "这些技能对同类任务都会响应，调用时建议点名。" = "These skills all respond to similar tasks; name one explicitly when invoking.";
 "选择一个 Skill 查看详情" = "Select a skill to see details";
 "选择包含 SKILL.md 的技能文件夹，或含多个技能子目录的文件夹" = "Choose a skill folder containing SKILL.md, or a folder of multiple skill subfolders";
@@ -498,6 +484,7 @@
 "逐个 git pull --ff-only，失败不强制（⇧⌘U）" = "git pull --ff-only one by one; never forced (⇧⌘U)";
 "通用工具" = "General Tools";
 "部分技能未能快进更新：" = "Some skills couldn't fast-forward:";
+"都是上面两个时刻推出来的" = "All follow from the two moments above";
 "重新扫描" = "Rescan";
 "重新扫描全部目录（⌘R）" = "Rescan all folders (⌘R)";
 "重新扫描（⌘R）" = "Rescan (⌘R)";

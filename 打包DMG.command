@@ -46,3 +46,20 @@ EOF
 hdiutil create -volname "Skill Atlas $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
 rm -rf "$STAGE"
 echo "已生成：$DMG（$(du -h "$DMG" | cut -f1 | tr -d ' ')）"
+
+# 发布助手：应用内自动更新需要 appcast 里有直链 + sha256，这里直接给出可粘贴片段。
+# GitHub 上传资产时会把文件名里的空格改成点（Skill Atlas → Skill.Atlas）。
+SHA256=$(shasum -a 256 "$DMG" | cut -d' ' -f1)
+ASSET="Skill.Atlas-$VERSION.dmg"
+echo ""
+echo "―― 发布三步 ――"
+echo "1. DMG 上传到 GitHub Release（tag v$VERSION）"
+echo "2. appcast.json 改成下面内容后推到 main："
+echo "{"
+echo "  \"version\": \"$VERSION\","
+echo "  \"notes\": \"<这次改了什么>\","
+echo "  \"download\": \"https://github.com/shoumunan/skill-atlas/releases\","
+echo "  \"dmg\": \"https://github.com/shoumunan/skill-atlas/releases/download/v$VERSION/$ASSET\","
+echo "  \"sha256\": \"$SHA256\""
+echo "}"
+echo "3. 旧版应用「检查更新」→「自动更新」即可应用内换装"

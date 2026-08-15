@@ -92,8 +92,10 @@ enum SecurityScanner {
     private static let urlPattern = try! NSRegularExpression(
         pattern: #"https?://[A-Za-z0-9.\-]+(:\d+)?[^\s"'`)\]>，。）]*"#
     )
+    // 三种全权形态：裸星号（allowed-tools: *）、Bash(*) / Bash(*:*)、清单里夹裸星号（[Read, *]）。
+    // 旧版 bug：前缀 \s*:\s* 吃掉唯一冒号后，各分支再要求行首/逗号/二次冒号，裸星号反而漏报。
     private static let fullGrant = try! NSRegularExpression(
-        pattern: #"allowed-tools\s*:\s*.*(Bash\(\*(\:\*)?\)|^\s*\*\s*$|,\s*\*|:\s*\*\s*$)"#,
+        pattern: #"allowed-tools\s*:\s*(\*\s*$|.*Bash\(\*(\:\*)?\)|.*[,\[]\s*\*\s*([,\]]|$))"#,
         options: [.anchorsMatchLines]
     )
 
@@ -147,14 +149,20 @@ enum SecurityScanner {
             }
         }
 
-        // 1. 隐藏 Unicode（任何文件都算关键级）
+        // 1. 隐藏 Unicode（任何文件都算关键级）。
+        // 良性格式字符不计：U+200C/200D（ZWNJ/ZWJ，组合 emoji 与部分文种的正常成分）；
+        // U+FEFF 仅在非文件开头才算（开头是 UTF-8 BOM，良性）——否则干净技能被误拦。
         var hiddenScalars: Set<UInt32> = []
+        var isFirstScalar = true
         for scalar in content.unicodeScalars {
             switch scalar.value {
-            case 0x200B...0x200F, 0x202A...0x202E, 0x2060...0x2064, 0xFEFF, 0xE0000...0xE007F:
+            case 0x200B, 0x200E, 0x200F, 0x202A...0x202E, 0x2060...0x2064, 0xE0000...0xE007F:
+                hiddenScalars.insert(scalar.value)
+            case 0xFEFF where !isFirstScalar:
                 hiddenScalars.insert(scalar.value)
             default: break
             }
+            isFirstScalar = false
         }
         if !hiddenScalars.isEmpty {
             let codes = hiddenScalars.sorted().prefix(6)

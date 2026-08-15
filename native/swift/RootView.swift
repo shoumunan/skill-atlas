@@ -35,8 +35,71 @@ struct RootView: View {
         .sheet(item: $store.droppedMaterial) { material in
             DropSheet(fileURL: material.url, matches: material.matches)
         }
-        .sheet(item: $store.diffTarget) { skill in
-            DiffSheet(skill: skill)
+        .sheet(isPresented: Binding(
+            get: { store.updateReview != nil },
+            set: { if !$0 { store.updateReview = nil } }
+        )) {
+            UpdateReviewSheet()
+        }
+        .sheet(isPresented: Binding(
+            get: { store.batchReviews != nil },
+            set: { if !$0 { store.batchReviews = nil } }
+        )) {
+            BatchUpdateSheet()
+        }
+        // 描述开药（三期 G2）
+        .sheet(isPresented: Binding(
+            get: { store.prescription != nil },
+            set: { if !$0 { store.prescription = nil } }
+        )) {
+            PrescriptionSheet()
+        }
+        // 场景 Profile（三期 G8）
+        .sheet(isPresented: $store.profileSheetPresented) {
+            ProfileSheet()
+        }
+        // 单技能试跑（三期 G3）
+        .sheet(isPresented: Binding(
+            get: { store.sandboxTarget != nil },
+            set: { if !$0 { store.sandboxTarget = nil } }
+        )) {
+            SandboxSheet()
+        }
+        .sheet(isPresented: Binding(
+            get: { store.profileRequest != nil },
+            set: { if !$0 { store.profileRequest = nil } }
+        )) {
+            ProfileApplySheet()
+        }
+        .alert(L("场景已更新"), isPresented: Binding(
+            get: { store.profileNotice != nil },
+            set: { if !$0 { store.profileNotice = nil } }
+        )) {
+            Button(L("好"), role: .cancel) { store.profileNotice = nil }
+        } message: {
+            Text(store.profileNotice ?? "")
+        }
+        // 回滚确认（G1）：明说恢复到哪个备份、当前状态也会拍快照
+        .confirmationDialog(
+            LF("把「%@」回滚到备份？", store.rollbackRequest?.skill.name ?? ""),
+            isPresented: Binding(
+                get: { store.rollbackRequest != nil },
+                set: { if !$0 { store.rollbackRequest = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(L("回滚"), role: .destructive) { store.confirmRollback() }
+            Button(L("取消"), role: .cancel) { store.rollbackRequest = nil }
+        } message: {
+            Text(LF("恢复到 %@。回滚前会先给当前状态拍快照，这一步本身也可回滚。", store.rollbackRequest?.backupName ?? ""))
+        }
+        .alert(L("更新结果"), isPresented: Binding(
+            get: { store.updateNotice != nil },
+            set: { if !$0 { store.updateNotice = nil } }
+        )) {
+            Button(L("好"), role: .cancel) { store.updateNotice = nil }
+        } message: {
+            Text(store.updateNotice ?? "")
         }
         // 停用被依赖技能的警告（F6 链路数据接管理动作）
         .confirmationDialog(
@@ -172,25 +235,17 @@ struct ToolbarStrip: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.s12) {
-            HStack(spacing: Theme.Space.s8) {
-                Image(systemName: store.nav.symbol)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 24, height: 24)
-                    .background {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(Theme.accent.opacity(0.12))
-                    }
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(store.nav.title)
-                        .font(Theme.Fonts.rowTitle)
-                        .foregroundStyle(Theme.textPrimary)
-                    Text(store.pageSubtitle)
-                        .font(Theme.Fonts.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.textTertiary)
-                        .contentTransition(.opacity)
-                }
+            // 页面身份：只留文字。图标章与侧栏当前页图标是同一个符号，画两遍纯属重复；
+            // 侧栏高亮行已经回答了「我在哪一页」，这里负责「这页现在什么情况」。
+            VStack(alignment: .leading, spacing: 1) {
+                Text(store.nav.title)
+                    .font(Theme.Fonts.panelTitle)
+                    .foregroundStyle(Theme.textPrimary)
+                Text(store.pageSubtitle)
+                    .font(Theme.Fonts.secondary)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textTertiary)
+                    .contentTransition(.opacity)
             }
             .id(store.nav)
             .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 4)))
@@ -226,10 +281,9 @@ struct ToolbarStrip: View {
                 }
             }
         }
-        // 左缘 = 窗口 inset 12 + 侧栏 176 + 面板间隙 12，与内容面板左边线同线
-        .padding(.leading, 200)
+        .padding(.leading, Theme.Layout.contentLeading)
         .padding(.trailing, Theme.Space.s12)
-        .frame(height: 44)
+        .frame(height: Theme.Layout.toolbar)
         .animation(reduceMotion ? nil : Motion.standard, value: store.nav)
     }
 }
@@ -353,6 +407,11 @@ struct SidebarRail: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var navSpace
 
+    /// 本机是否有 CC Switch 痕迹（决定底部信任锚点讲哪句承诺）
+    private var hasCCSwitchTrace: Bool {
+        store.data?.summary.hasCCSwitch == true || store.data?.summary.migrated == true
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             BrandRow()
@@ -369,19 +428,23 @@ struct SidebarRail: View {
 
             Spacer()
 
+            // 信任锚点按用户场景给：CC Switch 用户看「数据只读」承诺；
+            // 纯本地用户看「收编须确认」承诺——各自最关心的边界
             HStack(spacing: Theme.Space.s8) {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.healthy)
-                Text(L("CC Switch 数据只读"))
+                Text(hasCCSwitchTrace ? L("CC Switch 数据只读") : L("收编前不动你的文件"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
             }
             .padding(.horizontal, Theme.Space.s16)
             .padding(.bottom, Theme.Space.s16)
-            .help(L("不改动 CC Switch 原文件。本应用只管理自己的技能库，随时可撤销迁移。"))
+            .help(hasCCSwitchTrace
+                ? L("不改动 CC Switch 原文件。本应用只管理自己的技能库，随时可撤销迁移。")
+                : L("散装技能只读展示；收进本库须你确认，收编后由本应用统一管理。"))
         }
-        .frame(width: 176)
+        .frame(width: Theme.Layout.sidebar)
         .frame(maxHeight: .infinity)
         .glassChrome(RoundedRectangle(cornerRadius: Theme.Radius.rail, style: .continuous))
         .animation(reduceMotion ? nil : Motion.control, value: store.nav)

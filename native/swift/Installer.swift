@@ -22,6 +22,7 @@ struct RepoRef: Equatable {
     var display: String { "\(owner)/\(repo)" + (subpath.map { " → \($0)" } ?? "") }
     var isLocalFolder: Bool { localDirectory != nil }
 }
+
 struct InstallCandidate: Identifiable {
     var id: String { directory }
     /// 克隆目录内的相对路径（"." = 仓库根）
@@ -240,13 +241,26 @@ final class InstallerModel: ObservableObject {
                 : cloneDir.appendingPathComponent(candidate.relativePath)
             let target = atlasRoot.appendingPathComponent(candidate.directory)
             do {
+                // 落盘兜底：directory 来自第三方仓库里的目录名，appendingPathComponent
+                // 不做规范化，`..` 或内嵌斜杠能把拷贝写到库外；点开头的目录还会被
+                // scanAtlasLibrary 的隐藏项过滤吃掉——装进去了却在列表里看不见、卸不掉。
+                let insideLibrary = target.standardizedFileURL.path
+                    .hasPrefix(atlasRoot.standardizedFileURL.path + "/")
+                guard insideLibrary,
+                      !candidate.directory.hasPrefix("."),
+                      !candidate.directory.contains("/") else {
+                    outcome.append(.init(directory: candidate.directory, installed: false,
+                                         note: L("目录名不合法，已拒绝安装")))
+                    continue
+                }
                 try fileManager.createDirectory(at: atlasRoot, withIntermediateDirectories: true)
                 guard !fileManager.fileExists(atPath: target.path) else {
                     outcome.append(.init(directory: candidate.directory, installed: false,
                                          note: L("已存在同名目录，跳过")))
                     continue
                 }
-                try fileManager.copyItem(at: source, to: target)
+                // clonefile 而非逐字节拷贝：同盘近乎零成本，与收编走同一条路径
+                try FileClone.cloneDirectory(from: source, to: target)
 
                 var enabled: [String: Bool] = [:]
                 for platform in AgentPlatform.allCases {
@@ -284,7 +298,7 @@ final class InstallerModel: ObservableObject {
         }
         for skipped in skippedConflicts {
             outcome.append(.init(directory: skipped.directory, installed: false,
-                                 note: "已存在同名目录，跳过"))
+                                 note: L("已存在同名目录，跳过")))
         }
         store.resumeWatching()
 
@@ -442,3 +456,4 @@ final class InstallerModel: ObservableObject {
             .sorted { $0.directory < $1.directory }
     }
 }
+

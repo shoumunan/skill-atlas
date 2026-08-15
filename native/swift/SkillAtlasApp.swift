@@ -123,7 +123,7 @@ struct SkillAtlasApp: App {
                 }
                 .keyboardShortcut("u", modifiers: .command)
                 .disabled(store.skills.isEmpty)
-                Button(L("全部更新")) { store.updateAllSkills() }
+                Button(L("审阅并更新全部…")) { store.requestUpdateAll() }
                     .keyboardShortcut("u", modifiers: [.command, .shift])
                     .disabled(store.updatableSkills.isEmpty)
             }

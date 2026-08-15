@@ -49,7 +49,11 @@ struct DoctorReport {
 
 enum ContextDoctor {
     static let perEntryCap = 1536
-    static let listingSoftCap = 40
+    // 曾有 listingSoftCap = 40（「约 40 个技能开始截断」）。该数字没有任何官方来源，
+    // 且与本文件的 token 预算算法不自洽：200k 窗口预算 ≈ 2000 token，一条 260 字
+    // 中文描述 ≈ 260×0.7+15 ≈ 197 token，约 10 条就撑满。官方口径是字符/token 预算
+    // 加单条上限两道闸，不是「最多能装几个」。所有「还能装几个」的话术已删除，
+    // 一律改为按 budgetTokens 反算或只给百分比。
     static let verboseCharLimit = 200
 
     /// token 估算：CJK 字符 ×0.7，其余 ÷4，再加每条 ~15 token 的名称与格式开销

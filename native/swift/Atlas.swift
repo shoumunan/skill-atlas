@@ -19,7 +19,7 @@ struct AtlasError: LocalizedError {
 }
 
 enum AgentPlatform: String, CaseIterable, Identifiable, Codable {
-    case claude, codex, gemini, opencode, hermes, grokbuild, workbuddy
+    case claude, codex, gemini, opencode, hermes, grokbuild, workbuddy, openclaw
 
     var id: String { rawValue }
 
@@ -32,6 +32,7 @@ enum AgentPlatform: String, CaseIterable, Identifiable, Codable {
         case .hermes: return "Hermes"
         case .grokbuild: return "GrokBuild"
         case .workbuddy: return "WorkBuddy"
+        case .openclaw: return "OpenClaw"
         }
     }
 
@@ -49,6 +50,7 @@ enum AgentPlatform: String, CaseIterable, Identifiable, Codable {
         case .hermes: return home.appendingPathComponent(".hermes/skills")
         case .grokbuild: return home.appendingPathComponent(".grok/skills")
         case .workbuddy: return home.appendingPathComponent(".workbuddy/skills")
+        case .openclaw: return home.appendingPathComponent(".openclaw/skills")
         }
     }
 
@@ -86,6 +88,11 @@ enum AtlasPaths {
         root.appendingPathComponent("migration.json")
     }
 
+    /// 更新时本地改动的补丁存档（G1：本地补丁保护的审计留痕）
+    static var patchesRoot: URL {
+        root.appendingPathComponent("skill-patches")
+    }
+
     static var catalogURL: URL {
         root.appendingPathComponent("atlas.json")
     }
@@ -107,6 +114,10 @@ enum AtlasPaths {
     }
 }
 
+/// **改这个结构体前必读**：新增字段一律用 Optional（或手写 decodeIfPresent）。
+/// Swift 合成的 init(from:) 不使用属性默认值——加一个非 Optional 字段，老 atlas.json
+/// 解码就抛 keyNotFound，而 AtlasCatalog.load() 是 `try?` 兜底成空目录：
+/// 结果是全库 enabled 位当场清零，下一次 save() 把空表落盘固化。数据毁灭级。
 struct AtlasSkillRecord: Codable, Equatable {
     var directory: String
     var enabled: [String: Bool]
@@ -252,12 +263,17 @@ enum LinkTool {
     static func removeOurSymlink(at link: URL) throws {
         let dest = destination(of: link)
         guard !dest.isEmpty else { return }
-        let resolved = URL(fileURLWithPath: dest).resolvingSymlinksInPath().standardizedFileURL.path
+        // 相对目标必须按软链所在目录解析——fileURLWithPath 裸解析基于进程 CWD，会误判。
+        // 归属只认解析后落在本库/停用区前缀内的；不做子串兜底（"contains(.skill-atlas/skills)"
+        // 会把指向 /Volumes/Backup/.skill-atlas/skills-old/x 之类的用户软链也删掉）。
+        let target = dest.hasPrefix("/")
+            ? URL(fileURLWithPath: dest)
+            : URL(fileURLWithPath: dest, relativeTo: link.deletingLastPathComponent())
+        let resolved = target.resolvingSymlinksInPath().standardizedFileURL.path
         let library = AtlasPaths.libraryRoot.resolvingSymlinksInPath().standardizedFileURL.path
         let parked = AtlasPaths.disabledRoot.resolvingSymlinksInPath().standardizedFileURL.path
         let ours = resolved == library || resolved.hasPrefix(library + "/")
             || resolved == parked || resolved.hasPrefix(parked + "/")
-            || dest.contains(".skill-atlas/skills")
         if ours { try FileManager.default.removeItem(at: link) }
     }
 }
@@ -756,17 +772,127 @@ enum SkillActions {
             try fileManager.trashItem(at: source, resultingItemURL: nil)
         }
     }
+
+    // MARK: 带保护的更新（G1）
+    //
+    // 顺序固定：① 全量备份 → ② 本地 tracked 改动导出补丁并还原工作区 →
+    // ③ git pull --ff-only → ④ git apply --check 通过才重放补丁。
+    // 重放不干净时保持纯上游状态——绝不留冲突标记；本地版本三处可寻：
+    // 备份（可回滚）、补丁文件（可审计）、报告文案（明说没重放）。
+    // untracked 新文件 pull 本就不动，不进补丁流程。
+    struct UpdateApplyResult {
+        var dirtyFiles: [String]
+        var patchFile: String?
+        /// 本地补丁是否已重放回工作区（false = 补丁存档但未重放）
+        var replayed: Bool
+        var backupName: String
+    }
+
+    static func applyUpdate(skill: Skill) throws -> UpdateApplyResult {
+        guard skill.origin == .atlas else {
+            throw AtlasError(LF("「%@」不由本库管理，不能在这里更新。", skill.name))
+        }
+        let source = URL(fileURLWithPath: skill.sourcePath, isDirectory: true)
+        let dirty = SkillGit.localChanges(source: source)
+        let backupName = try SkillBackup.snapshot(source: source, directory: skill.directory)
+
+        var patchFile: String? = nil
+        let trackedPatch = SkillGit.trackedDiff(source: source)
+        if !trackedPatch.isEmpty {
+            let fileManager = FileManager.default
+            try fileManager.createDirectory(at: AtlasPaths.patchesRoot, withIntermediateDirectories: true)
+            let url = AtlasPaths.patchesRoot.appendingPathComponent("\(backupName).patch")
+            let header = dirty.map { "# \($0)" }.joined(separator: "\n")
+            try "# Skill Atlas 更新前本地改动（\(skill.directory)）\n\(header)\n\(trackedPatch)\n"
+                .write(to: url, atomically: true, encoding: .utf8)
+            patchFile = url.path
+            SkillGit.discardTracked(source: source)
+        }
+
+        do {
+            try SkillGit.pullFF(source: source)
+        } catch {
+            // pull 失败则把刚还原的本地改动补回去，保持更新前原状；
+            // 补不回去必须明说（此时工作区没有本地改动，只有备份和补丁文件里有）
+            if patchFile != nil, !SkillGit.applyPatch(source: source, diff: trackedPatch) {
+                throw AtlasError(LF(
+                    "快进更新失败，且本地改动未能自动恢复到工作区。完整快照在备份 %@，补丁在 skill-patches。原始错误：%@",
+                    backupName, error.localizedDescription
+                ))
+            }
+            throw error
+        }
+
+        var replayed = true
+        if patchFile != nil {
+            replayed = SkillGit.applyPatch(source: source, diff: trackedPatch)
+        }
+        return UpdateApplyResult(
+            dirtyFiles: dirty, patchFile: patchFile, replayed: replayed, backupName: backupName
+        )
+    }
+
+    /// 回滚到最近一次备份（更新前/卸载前快照同源）。
+    /// 先给当前状态拍快照再换装，回滚本身可再回滚；临时目录就位校验后才动源目录。
+    static func rollback(skill: Skill) throws -> String {
+        guard skill.origin == .atlas else {
+            throw AtlasError(LF("「%@」不由本库管理，不能回滚。", skill.name))
+        }
+        guard let backup = SkillBackup.latest(directory: skill.directory) else {
+            throw AtlasError(LF("「%@」没有可用备份。", skill.name))
+        }
+        let fileManager = FileManager.default
+        let source = URL(fileURLWithPath: skill.sourcePath, isDirectory: true)
+        let staging = source.deletingLastPathComponent()
+            .appendingPathComponent(".\(skill.directory).rollback-tmp")
+        if fileManager.fileExists(atPath: staging.path) { try? fileManager.removeItem(at: staging) }
+        do {
+            try FileClone.cloneDirectory(from: backup, to: staging)
+        } catch {
+            try? fileManager.removeItem(at: staging)
+            try fileManager.copyItem(at: backup, to: staging)
+        }
+        guard fileManager.fileExists(atPath: staging.appendingPathComponent("SKILL.md").path) else {
+            try? fileManager.removeItem(at: staging)
+            throw AtlasError(LF("备份 %@ 校验失败（SKILL.md 缺失），已放弃回滚。", backup.lastPathComponent))
+        }
+        _ = try SkillBackup.snapshot(source: source, directory: skill.directory)
+        // 换装用「移开而非删除」：staging 就位失败时把原目录移回去，任何一步失败都不留空洞
+        let displaced = source.deletingLastPathComponent()
+            .appendingPathComponent(".\(skill.directory).pre-rollback")
+        if fileManager.fileExists(atPath: displaced.path) { try? fileManager.removeItem(at: displaced) }
+        try fileManager.moveItem(at: source, to: displaced)
+        do {
+            try fileManager.moveItem(at: staging, to: source)
+        } catch {
+            try? fileManager.moveItem(at: displaced, to: source)
+            try? fileManager.removeItem(at: staging)
+            throw error
+        }
+        try? fileManager.removeItem(at: displaced)
+        return backup.lastPathComponent
+    }
 }
 
 enum SkillBackup {
     static let keep = 20
 
-    /// 卸载前备份到 ~/.skill-atlas/skill-backups/，保留最近 20 个。
-    static func snapshot(source: URL, directory: String) throws {
+    /// 卸载/更新/回滚前备份到 ~/.skill-atlas/skill-backups/，保留最近 20 个。
+    /// 返回备份目录名（<directory>-yyyyMMdd-HHmmss），补丁文件与其同名配对。
+    @discardableResult
+    static func snapshot(source: URL, directory: String) throws -> String {
         let fileManager = FileManager.default
         try fileManager.createDirectory(at: AtlasPaths.backupsRoot, withIntermediateDirectories: true)
+        // 备份戳只有秒级精度；同秒二次备份必须换名——cloneDirectory 对已存在目标
+        // 静默跳过，同名会让「更新后马上回滚」丢掉当前状态的快照（回滚不可再回滚）。
         let stamp = backupStamp.string(from: Date())
-        let dest = AtlasPaths.backupsRoot.appendingPathComponent("\(directory)-\(stamp)")
+        var name = "\(directory)-\(stamp)"
+        var sequence = 2
+        while fileManager.fileExists(atPath: AtlasPaths.backupsRoot.appendingPathComponent(name).path) {
+            name = "\(directory)-\(stamp)-\(sequence)"
+            sequence += 1
+        }
+        let dest = AtlasPaths.backupsRoot.appendingPathComponent(name)
         do {
             try FileClone.cloneDirectory(from: source, to: dest)
         } catch {
@@ -774,6 +900,29 @@ enum SkillBackup {
             try fileManager.copyItem(at: source, to: dest)
         }
         prune()
+        return dest.lastPathComponent
+    }
+
+    /// 该技能最近一次备份（yyyyMMdd-HHmmss 时间戳 + 可选同秒序号 -n，字典序即时间序）。
+    /// 目录名本身可含连字符，所以校验后缀格式而不是简单前缀切分。
+    static func latest(directory: String) -> URL? {
+        let fileManager = FileManager.default
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: AtlasPaths.backupsRoot, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ) else { return nil }
+        let prefix = directory + "-"
+        return entries.filter { url in
+            let name = url.lastPathComponent
+            guard name.hasPrefix(prefix) else { return false }
+            let rest = name.dropFirst(prefix.count)
+            let stamp = rest.prefix(15)
+            guard stamp.count == 15, stamp.dropFirst(8).first == "-",
+                  stamp.allSatisfy({ $0.isNumber || $0 == "-" }) else { return false }
+            let suffix = rest.dropFirst(15)
+            return suffix.isEmpty
+                || (suffix.first == "-" && suffix.count >= 2 && suffix.dropFirst().allSatisfy(\.isNumber))
+        }
+        .max { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     private static let backupStamp: DateFormatter = {
@@ -850,7 +999,42 @@ enum SkillGit {
         }
     }
 
-    private static func run(_ arguments: [String], in directory: URL) -> (status: Int32, stdout: String, stderr: String) {
+    /// 本地改动清单（git status --porcelain；含 untracked）。空数组 = 工作区干净。
+    static func localChanges(source: URL) -> [String] {
+        guard FileManager.default.fileExists(atPath: source.appendingPathComponent(".git").path) else { return [] }
+        let result = run(["status", "--porcelain"], in: source)
+        guard result.status == 0, !result.stdout.isEmpty else { return [] }
+        return result.stdout.split(separator: "\n").map(String.init)
+    }
+
+    /// tracked 文件的本地未提交改动（更新前导出为补丁）。
+    /// 必须走 raw 输出：run() 的 trim 会剪掉 diff 末尾的空白上下文行，让补丁 corrupt。
+    static func trackedDiff(source: URL) -> String {
+        run(["diff"], in: source, trimStdout: false).stdout
+    }
+
+    /// 丢弃 tracked 文件的工作区改动（调用前必须已备份 + 已导出补丁）
+    static func discardTracked(source: URL) {
+        _ = run(["checkout", "--", "."], in: source)
+    }
+
+    /// 把补丁重放回工作区：--check 预检通过才真正 apply，绝不留冲突标记。
+    /// run() 的输出统一 trim 过，diff 末尾换行会被剪掉——git apply 会判 corrupt，必须补回。
+    static func applyPatch(source: URL, diff: String) -> Bool {
+        guard !diff.isEmpty else { return true }
+        let content = diff.hasSuffix("\n") ? diff : diff + "\n"
+        let fileManager = FileManager.default
+        let temp = fileManager.temporaryDirectory
+            .appendingPathComponent("skill-atlas-replay-\(UUID().uuidString).patch")
+        defer { try? fileManager.removeItem(at: temp) }
+        guard (try? content.write(to: temp, atomically: true, encoding: .utf8)) != nil else { return false }
+        guard run(["apply", "--check", temp.path], in: source).status == 0 else { return false }
+        return run(["apply", temp.path], in: source).status == 0
+    }
+
+    private static func run(
+        _ arguments: [String], in directory: URL, trimStdout: Bool = true
+    ) -> (status: Int32, stdout: String, stderr: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = arguments
@@ -868,10 +1052,10 @@ enum SkillGit {
         } catch {
             return (1, "", error.localizedDescription)
         }
-        func read(_ pipe: Pipe) -> String {
-            String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        func read(_ pipe: Pipe, trim: Bool) -> String {
+            let text = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            return trim ? text.trimmingCharacters(in: .whitespacesAndNewlines) : text
         }
-        return (process.terminationStatus, read(out), read(err))
+        return (process.terminationStatus, read(out, trim: trimStdout), read(err, trim: true))
     }
 }

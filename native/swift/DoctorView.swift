@@ -122,7 +122,7 @@ private struct BudgetBand: View {
                     Image(systemName: "questionmark.circle")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.textTertiary)
-                        .help(L("Claude Code 启动时会把所有技能的名称和描述注入上下文，预算约为窗口的 1%。超额后，最少使用的技能描述会被静默丢弃——技能还在，但模型看不到它能做什么，触发就会失灵。数字为估算（CJK×0.7 + 其他÷4 + 条目开销）。"))
+                        .help(L("Claude Code 启动时会把所有技能的名称和描述注入上下文，预算约为窗口的 1%。超额后，最少使用的技能描述会被静默丢弃。技能还在，但模型看不到它能做什么，触发就会失灵。数字为估算（CJK×0.7 + 其他÷4 + 条目开销）。"))
                     Spacer()
                     windowPicker
                 }
@@ -158,7 +158,11 @@ private struct BudgetBand: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             hairline
-            metric(number: report.entries.count, label: L("上架技能"), note: LF("约 %d 个 × 260 字开始截断", ContextDoctor.listingSoftCap))
+            // 官方口径：清单永远保留每个技能的名字，超预算时丢的是描述。
+            // 旧文案「约 40 个 × 260 字开始截断」既无官方来源，也与本页的 token
+            // 预算算法不自洽（200k 窗口 ≈ 2000 token，一条 260 字中文描述 ≈ 197
+            // token，约 10 条就满，不是 40 条），已删。
+            metric(number: report.entries.count, label: L("上架技能"), note: L("名字始终在清单里"))
             hairline
             metric(number: report.atRisk.count, label: L("描述丢弃风险"), note: report.overBudget ? L("最少用的先被丢") : L("预算内，无风险"), tint: report.atRisk.isEmpty ? nil : Theme.warning)
             hairline
@@ -364,7 +368,10 @@ private struct DescriptionPanel: View {
                                 DoctorRow(
                                     skill: entry.skill,
                                     note: entry.phrases.prefix(4).joined(separator: "、"),
-                                    trailing: { AnyView(miniBadge(L("埋深"), tint: Theme.warning)) }
+                                    trailing: { AnyView(HStack(spacing: Theme.Space.s4) {
+                                        miniBadge(L("埋深"), tint: Theme.warning)
+                                        RxButton(skill: entry.skill)
+                                    }) }
                                 )
                             }
                         }
@@ -374,7 +381,10 @@ private struct DescriptionPanel: View {
                                 DoctorRow(
                                     skill: entry.skill,
                                     note: LF("描述 %d 字符，超出部分对模型不可见", entry.skill.description.count),
-                                    trailing: { AnyView(miniBadge(L("会被截断"), tint: Theme.error)) }
+                                    trailing: { AnyView(HStack(spacing: Theme.Space.s4) {
+                                        miniBadge(L("会被截断"), tint: Theme.error)
+                                        RxButton(skill: entry.skill)
+                                    }) }
                                 )
                             }
                         }
@@ -385,14 +395,17 @@ private struct DescriptionPanel: View {
                                     DoctorRow(
                                         skill: entry.skill,
                                         note: LF("%d 字 · %d 句", entry.chars, entry.sentences),
-                                        trailing: { AnyView(miniBadge(L("建议缩短"), tint: Theme.warning)) }
+                                        trailing: { AnyView(HStack(spacing: Theme.Space.s4) {
+                                            miniBadge(L("建议缩短"), tint: Theme.warning)
+                                            RxButton(skill: entry.skill)
+                                        }) }
                                     )
                                     HStack(alignment: .top, spacing: Theme.Space.s8) {
                                         Text(entry.suggestion)
                                             .font(Theme.Fonts.secondary)
                                             .foregroundStyle(Theme.textSecondary)
                                             .textSelection(.enabled)
-                                        CopyIconButton(text: entry.suggestion, help: "复制缩短建议")
+                                        CopyIconButton(text: entry.suggestion, help: L("复制缩短建议"))
                                     }
                                     .padding(.leading, 32)
                                 }
@@ -434,7 +447,7 @@ private struct StalePanel: View {
         let batchable = stale.filter { $0.origin != .ccSwitch }
         DoctorPanel(
             symbol: "zzz",
-            tint: Color(hex: 0x8E8E93),
+            tint: Theme.idle,
             title: "长期未用",
             count: stale.count,
             subtitle: stale.isEmpty
@@ -686,4 +699,230 @@ private func emptyHint(symbol: String, tint: Color, text: String) -> some View {
             .foregroundStyle(Theme.textSecondary)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+}
+
+// MARK: - 描述开药（三期 G2）
+
+/// 体检行尾的「开药」入口
+struct RxButton: View {
+    @EnvironmentObject private var store: AppStore
+    var skill: Skill
+
+    var body: some View {
+        Button {
+            store.requestPrescription(skill)
+        } label: {
+            Label(L("开药"), systemImage: "pills")
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.accent)
+                .padding(.horizontal, Theme.Space.s8)
+                .frame(height: 22)
+                .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+        }
+        .buttonStyle(PressableButtonStyle())
+        .quietControl()
+        .help(L("生成改写建议：触发词句子前置进 250 字符可见窗，试触发对比疗效后可写回"))
+    }
+}
+
+/// 处方 sheet：改法说明 + 前后对照（250 字符可见线）+ 试触发疗效 + 写回
+struct PrescriptionSheet: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var probePhrase = ""
+    @State private var promptCopied = false
+
+    private var rx: DescriptionPrescription? { store.prescription }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 1)
+            content.padding(Theme.Space.s20)
+        }
+        .frame(width: 680, height: 620)
+        .background(.regularMaterial)
+        .onAppear {
+            probePhrase = rx?.beforeBuried.first ?? ""
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: Theme.Space.s12) {
+            Image(systemName: "pills")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 28, height: 28)
+                .background {
+                    RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                        .fill(Theme.accent.opacity(0.12))
+                }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(rx?.skill.name ?? "")
+                    .font(Theme.Fonts.panelTitle)
+                    .foregroundStyle(Theme.textPrimary)
+                Text(L("描述开药 · 只重排句子不增删一字，写回前先看疗效"))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            Spacer()
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 28, height: 28)
+                    .quietControl()
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+        }
+        .padding(.horizontal, Theme.Space.s20)
+        .padding(.vertical, Theme.Space.s16)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let rx {
+            VStack(alignment: .leading, spacing: Theme.Space.s12) {
+                movesBlock(rx)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Space.s12) {
+                        descriptionBlock(title: L("改前"), text: rx.original, buried: rx.beforeBuried)
+                        if !rx.noop {
+                            descriptionBlock(title: L("改后"), text: rx.rewritten, buried: rx.afterBuried)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .panelScroll()
+                if !rx.noop { efficacyRow(rx) }
+                footer(rx)
+            }
+        }
+    }
+
+    private func movesBlock(_ rx: DescriptionPrescription) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s4) {
+            ForEach(Array(rx.moves.enumerated()), id: \.offset) { _, move in
+                Label(move, systemImage: "arrow.turn.down.right")
+                    .font(Theme.Fonts.secondary)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+        }
+        .padding(Theme.Space.s8 + 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .quietControl(cornerRadius: Theme.Radius.control)
+    }
+
+    /// 描述展示：前 250 字符正常色，之后调暗——可见线肉眼可辨
+    private func descriptionBlock(title: String, text: String, buried: [String]) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s4) {
+            HStack(spacing: Theme.Space.s8) {
+                Text(title)
+                    .font(Theme.Fonts.secondaryEmphasis)
+                    .foregroundStyle(Theme.textPrimary)
+                Text(LF("%d 字符", text.count))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                if buried.isEmpty {
+                    Text(L("无埋深触发词"))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.healthy)
+                } else {
+                    Text(LF("埋深：%@", buried.prefix(4).joined(separator: "、")))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.warning)
+                }
+            }
+            (Text(String(text.prefix(TriggerLab.visibleWindow)))
+                .foregroundColor(Theme.textPrimary)
+             + Text(text.count > TriggerLab.visibleWindow ? "⟨250⟩" : "")
+                .foregroundColor(Theme.accent)
+             + Text(String(text.dropFirst(TriggerLab.visibleWindow)))
+                .foregroundColor(Theme.textTertiary))
+                .font(Theme.Fonts.secondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(Theme.Space.s8 + 2)
+                .quietControl(cornerRadius: Theme.Radius.control)
+        }
+    }
+
+    /// 疗效行：同一句话，改前/改后各排第几
+    private func efficacyRow(_ rx: DescriptionPrescription) -> some View {
+        let ranks = store.rxRankComparison(phrase: probePhrase)
+        return HStack(spacing: Theme.Space.s8) {
+            Text(L("疗效试触发"))
+                .font(Theme.Fonts.secondaryEmphasis)
+                .foregroundStyle(Theme.textPrimary)
+            TextField(L("输入你会说的话（预填第一个埋深触发词）"), text: $probePhrase)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 260)
+            rankBadge(label: L("改前"), rank: ranks.before)
+            Image(systemName: "arrow.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
+            rankBadge(label: L("改后"), rank: ranks.after)
+            Spacer()
+        }
+    }
+
+    private func rankBadge(label: String, rank: Int?) -> some View {
+        HStack(spacing: Theme.Space.s4) {
+            Text(label)
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textTertiary)
+            Text(rank.map { LF("第 %d 名", $0) } ?? L("未进前 8"))
+                .font(Theme.Fonts.calloutEmphasis)
+                .foregroundStyle(rank == 1 ? Theme.healthy : (rank == nil ? Theme.error : Theme.textPrimary))
+        }
+        .padding(.horizontal, Theme.Space.s8)
+        .frame(height: 24)
+        .quietControl()
+    }
+
+    private func footer(_ rx: DescriptionPrescription) -> some View {
+        HStack(spacing: Theme.Space.s8) {
+            Button {
+                store.copyToPasteboard(DescriptionRx.rewritePrompt(skill: rx.skill))
+                promptCopied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { promptCopied = false }
+            } label: {
+                Label(promptCopied ? L("已复制") : L("复制 Claude 改写指令"), systemImage: promptCopied ? "checkmark" : "doc.on.doc")
+                    .font(Theme.Fonts.calloutEmphasis)
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(.horizontal, Theme.Space.s12)
+                    .frame(height: 28)
+                    .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+            }
+            .buttonStyle(PressableButtonStyle())
+            .quietControl()
+            .help(L("机器只重排；要真正精简/重写，把指令贴给 Claude 按 Trigger Triad 改，改完手动替换"))
+            Spacer()
+            Button {
+                store.adoptPrescription()
+            } label: {
+                HStack(spacing: Theme.Space.s4) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(L("采纳并写回"))
+                        .font(Theme.Fonts.calloutEmphasis)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, Theme.Space.s16)
+                .frame(height: 28)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(PressableButtonStyle())
+            .accentGlass(Capsule(style: .continuous))
+            .keyboardShortcut(.defaultAction)
+            .disabled(rx.noop || rx.skill.origin == .ccSwitch)
+            .help(rx.skill.origin == .ccSwitch
+                  ? L("CC Switch 技能只读。先迁移进本库，再开药写回。")
+                  : L("写回 SKILL.md 的 description；git 技能算一次本地改动，更新时受补丁保护"))
+        }
+    }
 }

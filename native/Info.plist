@@ -2,28 +2,41 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Skill Atlas</string>
-  <key>CFBundleDisplayName</key><string>Skill Atlas</string>
-  <key>CFBundleIdentifier</key><string>local.skill-atlas.dashboard</string>
-  <key>CFBundleExecutable</key><string>SkillAtlas</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleIconFile</key><string>SkillAtlas</string>
-  <key>CFBundleShortVersionString</key><string>1.4.0</string>
-  <key>CFBundleVersion</key><string>140</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
-  <key>CFBundleDevelopmentRegion</key><string>zh-Hans</string>
-  <key>CFBundleLocalizations</key>
-  <array>
-    <string>zh-Hans</string>
-    <string>en</string>
-    <string>ja</string>
-    <string>ko</string>
-  </array>
-  <key>NSHighResolutionCapable</key><true/>
-  <key>NSAppTransportSecurity</key>
-  <dict>
-    <key>NSAllowsLocalNetworking</key><true/>
-  </dict>
-  <key>NSHumanReadableCopyright</key><string>本地技能管理器 · 不修改 CC Switch 原数据</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh-Hans</string>
+	<key>CFBundleDisplayName</key>
+	<string>Skill Atlas</string>
+	<key>CFBundleExecutable</key>
+	<string>SkillAtlas</string>
+	<key>CFBundleIconFile</key>
+	<string>SkillAtlas</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.skill-atlas.dashboard</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>zh-Hans</string>
+		<string>en</string>
+		<string>ja</string>
+		<string>ko</string>
+	</array>
+	<key>CFBundleName</key>
+	<string>Skill Atlas</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.6.0</string>
+	<key>CFBundleVersion</key>
+	<string>160</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>本地技能管理器 · 不修改 CC Switch 原数据</string>
 </dict>
 </plist>

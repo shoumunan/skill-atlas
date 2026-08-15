@@ -283,7 +283,7 @@ struct MenuBarPalette: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Theme.Space.s20)
             } else if candidates.isEmpty {
-                Text(L("没有技能会响应这句话——要么点名调用，要么去改描述"))
+                Text(L("没有技能会响应这句话。要么点名调用，要么去改描述"))
                     .font(Theme.Fonts.secondary)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)

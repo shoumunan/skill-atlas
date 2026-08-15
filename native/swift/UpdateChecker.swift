@@ -7,11 +7,17 @@ import Foundation
 // 超时 5 秒；后台失败静默。菜单「检查更新…」走三条可见路径：
 // 有新版 / 已最新 / 暂时无法检查更新。
 // 启动 10 秒后若距上次成功检查 ≥7 天则静默查一次；有新版时工具栏亮点。
+// 有新版时首选「自动更新」（SelfUpdater 应用内下载换装重启），
+// 「打开下载页」降级为手动逃生门。
 
 struct Appcast: Equatable {
     var version: String
     var notes: String
     var download: String
+    /// DMG 直链（可选；缺省时 SelfUpdater 查 GitHub Releases API 兜底）
+    var dmg: String = ""
+    /// DMG 的 sha256（可选；给了就在安装前校验）
+    var sha256: String = ""
 }
 
 enum UpdateOutcome: Equatable {
@@ -47,6 +53,17 @@ final class UpdateChecker: ObservableObject {
     func bootstrap() {
         if UserDefaults.standard.string(forKey: "atlasUpdateProbe") != nil {
             Task { await probeAndMaybeQuit() }
+            return
+        }
+        // 调试钩子：-atlasAutoUpdate 1 启动即拉 appcast，有新版直接走应用内换装（验收用）
+        if LaunchArgs.flag("atlasAutoUpdate") {
+            Task {
+                let outcome = await Self.fetch()
+                apply(outcome)
+                if case .available(let feed) = outcome {
+                    SelfUpdater.shared.install(feed)
+                }
+            }
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
@@ -97,12 +114,18 @@ final class UpdateChecker: ObservableObject {
               let download = object["download"] as? String, !download.isEmpty else {
             return nil
         }
-        let notes = (object["notes"] as? String) ?? ""
-        return Appcast(version: version, notes: notes, download: download)
+        return Appcast(
+            version: version,
+            notes: (object["notes"] as? String) ?? "",
+            download: download,
+            dmg: (object["dmg"] as? String) ?? "",
+            sha256: (object["sha256"] as? String) ?? ""
+        )
     }
 
-    /// 语义化比较：1.2.0 < 1.10.0 < 2.0.0；缺段按 0
-    static func compareVersions(_ lhs: String, _ rhs: String) -> ComparisonResult {
+    /// 语义化比较：1.2.0 < 1.10.0 < 2.0.0；缺段按 0。
+    /// 纯字符串运算不碰任何 actor 状态，标 nonisolated 供后台的自更新校验调用。
+    nonisolated static func compareVersions(_ lhs: String, _ rhs: String) -> ComparisonResult {
         func parts(_ raw: String) -> [Int] {
             raw.split(separator: ".").map { Int($0.filter(\.isNumber)) ?? 0 }
         }
@@ -179,14 +202,19 @@ final class UpdateChecker: ObservableObject {
         switch outcome {
         case .available(let feed):
             alert.messageText = LF("发现新版本 %@", feed.version)
-            alert.informativeText = feed.notes.isEmpty
-                ? LF("当前版本 %@。", currentVersion)
-                : feed.notes
-            alert.addButton(withTitle: L("打开下载页"))
+            let notes = feed.notes.isEmpty ? LF("当前版本 %@。", currentVersion) : feed.notes
+            alert.informativeText = notes + "\n\n" + L("「自动更新」会下载、校验并原地换装，然后自动重启。")
+            alert.addButton(withTitle: L("自动更新"))
             alert.addButton(withTitle: L("稍后"))
+            alert.addButton(withTitle: L("打开下载页"))
             NSApp.activate(ignoringOtherApps: true)
-            if alert.runModal() == .alertFirstButtonReturn, let url = URL(string: feed.download) {
-                NSWorkspace.shared.open(url)
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                SelfUpdater.shared.install(feed)
+            case .alertThirdButtonReturn:
+                if let url = URL(string: feed.download) { NSWorkspace.shared.open(url) }
+            default:
+                break
             }
         case .upToDate:
             alert.messageText = L("已是最新版本")

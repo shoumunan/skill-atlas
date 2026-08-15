@@ -1,6 +1,143 @@
 import SwiftUI
 import AppKit
 
+// MARK: - 注册表发现（三期 G6-lite）
+//
+// 只把仓库地址填进上面的输入框，装的动作仍走既有管线（含装前安全扫描与
+// critical 强制审阅）。搜索词会发往第三方服务 skills.sh，所以默认折叠、可关。
+
+private struct RegistryFinder: View {
+    @Binding var urlText: String
+    @State private var query = ""
+    @State private var results: [RegistrySkill] = []
+    @State private var searching = false
+    @State private var expanded = false
+    @State private var errorText: String?
+    @State private var searchTask: Task<Void, Never>?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s8) {
+            Button {
+                expanded.toggle()
+            } label: {
+                HStack(spacing: Theme.Space.s4) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text(L("不知道装什么？搜公开注册表"))
+                        .font(Theme.Fonts.secondary)
+                }
+                .foregroundStyle(Theme.accent)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                HStack(spacing: Theme.Space.s8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary)
+                    TextField(L("按用途搜，如 pdf、excel、changelog"), text: $query)
+                        .textFieldStyle(.plain)
+                        .font(Theme.Fonts.secondary)
+                        .onChange(of: query) { _, _ in scheduleSearch() }
+                    if searching { ProgressView().controlSize(.mini) }
+                }
+                .padding(.horizontal, Theme.Space.s8)
+                .frame(height: 28)
+                .quietControl(cornerRadius: Theme.Radius.control)
+
+                Text(L("搜索词会发往第三方服务 skills.sh。选中只是把仓库地址填进上面的输入框，装不装、装之前扫不扫，仍由你决定。"))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let errorText {
+                    Text(errorText)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.warning)
+                }
+
+                if !results.isEmpty {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 1) {
+                            ForEach(results) { skill in
+                                resultRow(skill)
+                            }
+                        }
+                    }
+                    .frame(height: 150)
+                    .quietControl(cornerRadius: Theme.Radius.control)
+                }
+            }
+        }
+    }
+
+    private func resultRow(_ skill: RegistrySkill) -> some View {
+        Button {
+            guard skill.isGitHubBacked else { return }
+            urlText = skill.repoURL
+        } label: {
+            HStack(spacing: Theme.Space.s8) {
+                Text(skill.name)
+                    .font(Theme.Fonts.secondaryEmphasis)
+                    .foregroundStyle(skill.isGitHubBacked ? Theme.textPrimary : Theme.textTertiary)
+                Text(skill.source)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                if skill.isGitHubBacked {
+                    Text(LF("%d 次安装", skill.installs))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                        .monospacedDigit()
+                } else {
+                    Text(L("外部来源，装不了"))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.warning)
+                }
+            }
+            .padding(.horizontal, Theme.Space.s8)
+            .frame(height: 26)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!skill.isGitHubBacked)
+        .help(skill.isGitHubBacked
+              ? LF("填入 %@，再按「安装」走正常流程（含装前安全扫描）", skill.repoURL)
+              : L("这条来自 GitHub 之外的来源，本应用只装 GitHub 仓库"))
+    }
+
+    /// 400ms 防抖：每敲一个字都发请求既慢又不礼貌
+    private func scheduleSearch() {
+        searchTask?.cancel()
+        let current = query
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            guard current.trimmingCharacters(in: .whitespaces).count >= 2 else {
+                results = []
+                return
+            }
+            searching = true
+            errorText = nil
+            do {
+                let found = try await SkillRegistry.search(current)
+                guard !Task.isCancelled else { return }
+                results = Array(found.prefix(20))
+                if results.isEmpty { errorText = L("没搜到，换个词试试。") }
+            } catch {
+                guard !Task.isCancelled else { return }
+                results = []
+                errorText = error.localizedDescription
+            }
+            searching = false
+        }
+    }
+}
+
 // MARK: - 安装技能 sheet（宽 560）
 
 struct InstallSheet: View {
@@ -38,6 +175,9 @@ struct InstallSheet: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { model.install(store: store) }
             }
         }
+        // ESC 关窗只 dismiss，走不到右上角 ✕ 的 reset()——临时克隆目录会留在 /var/folders。
+        // 被审阅页的 critical 吓退而按 ESC 的用户，正是最不该在盘上留一份完整仓库副本的人。
+        .onDisappear { model.reset() }
     }
 
     private var header: some View {
@@ -145,6 +285,9 @@ struct InstallSheet: View {
             Text(L("支持 GitHub 仓库、/tree/<分支>/<子目录>，以及本机已有 SKILL.md 的文件夹。"))
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textTertiary)
+            if SkillRegistry.enabled {
+                RegistryFinder(urlText: $model.urlText)
+            }
             Text(L("已经装在 ~/.claude/skills 等平台目录里的技能不用重装：它们会出现在技能库列表，选中后在「管理」区一键收进本库接管。"))
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textTertiary)

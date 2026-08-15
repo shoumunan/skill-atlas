@@ -1,5 +1,7 @@
 {
-  "version": "1.4.0",
-  "notes": "v1.4.0：本地技能收编——散装在 ~/.claude/skills 等平台目录的技能可一键收进本库接管（单个或「全部收编」），收编后平台开关解锁；已迁移用户新装的散装技能也会被发现；安装时误选平台目录/CC Switch 源会拦下改道；新增 WorkBuddy 平台。包含 1.3.x 全部功能。",
-  "download": "https://github.com/shoumunan/skill-atlas/releases"
+  "version": "1.6.0",
+  "notes": "v1.6.0：场景 Profile——按场景勾选「这个场景真正要用的技能」，落地走 Claude Code 自己的 skillOverrides；可设为全局默认，也可绑定到某个项目目录（App 关掉照样生效），写盘前必过确认页、原文按来源分域备份、撤销只删本应用写过的键。单技能试跑——在只加载这一个技能的干净会话里验证它到底会不会被触发（配置根重定位 + 技能拷贝而非软链，登录态不用重来）；确认页明写它不是安全沙箱。注册表发现（轻量版）——安装 sheet 里可搜 skills.sh，选中只把仓库地址填进输入框，仍走既有的装前扫描与勾选流程。安全修复：allowed-tools 裸星号全权声明此前完全漏报；hook 脚本路径不再内插（消除注入面）；软链归属判定去掉子串兜底、按软链所在目录解析相对目标（防误删用户软链）；同秒二次备份不再静默覆盖；隐藏 Unicode 不再把组合 emoji 与 BOM 误判为 critical。流畅度：体检报告记忆化（侧栏角标不再每帧对 143 条描述跑正则）、设置页不再每次渲染重读事件日志、安装改用 clonefile。另修既存问题：安装 sheet 按 ESC 关闭会留下临时克隆目录、刚装好的技能立刻被判「长期未用」。含 v1.5.x 全部功能。",
+  "download": "https://github.com/shoumunan/skill-atlas/releases",
+  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v1.6.0/Skill.Atlas-1.6.0.dmg",
+  "sha256": "978e6448af8e9512a997d0cfee5b5b956875cd700a07eeb9a7f5b3f4a714912f"
 }

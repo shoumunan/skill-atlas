@@ -34,25 +34,23 @@ struct SkillBrowser: View {
             UpdatesBanner()
             AdoptBanner()
 
-            // 第一行：视图切换（全部/收藏）＋ 排序 ＋ 计数——「怎么看」的控件
+            // 行一「看哪一批 + 怎么排」：左=范围切换，右=视图控件（图标打头）
             HStack(spacing: Theme.Space.s12) {
                 FavoritesTabs()
                 Spacer()
-                FilterMenu(label: "分组", selection: $store.groupBy,
-                           options: ["不分组", "套件", "类别"], defaultOption: "不分组")
-                FilterMenu(label: "排序", selection: $store.sortOrder,
-                           options: ["名称", "使用频率", "最近使用"], defaultOption: "名称")
-                Text(LF("%lld 项", skills.count))
-                    .font(Theme.Fonts.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.textTertiary)
+                ViewMenu(symbol: "arrow.up.arrow.down", label: "排序",
+                         selection: $store.sortOrder,
+                         options: ["名称", "使用频率", "最近使用"], defaultOption: "名称")
+                ViewMenu(symbol: "rectangle.3.group", label: "分组",
+                         selection: $store.groupBy,
+                         options: ["不分组", "套件", "类别"], defaultOption: "不分组")
             }
             .padding(.horizontal, Theme.Space.s16)
             .padding(.top, Theme.Space.s16)
-            .padding(.bottom, Theme.Space.s12)
+            .padding(.bottom, Theme.Space.s8)
 
-            // 第二行：筛选（类别/平台/状态）——「筛哪些」的控件，与第一行分工
-            FilterRow()
+            // 行二「筛哪些 + 剩多少」：左=筛选条件，右=清除 + 结果计数
+            FilterRow(resultCount: skills.count)
                 .padding(.horizontal, Theme.Space.s16)
                 .padding(.bottom, Theme.Space.s12)
 
@@ -161,7 +159,7 @@ private struct UpdatesBanner: View {
                         .disabled(store.checkingSkillUpdates)
                         .help(L("git fetch 对照 origin 分支（⌘U）"))
                         Button {
-                            store.updateAllSkills()
+                            store.requestUpdateAll()
                         } label: {
                             HStack(spacing: Theme.Space.s4) {
                                 if store.updatingDirectories.isEmpty {
@@ -170,7 +168,7 @@ private struct UpdatesBanner: View {
                                 } else {
                                     ProgressView().controlSize(.mini).tint(.white)
                                 }
-                                Text(store.updatingDirectories.isEmpty ? L("全部更新") : L("更新中…"))
+                                Text(store.updatingDirectories.isEmpty ? L("审阅并更新…") : L("更新中…"))
                                     .font(Theme.Fonts.calloutEmphasis)
                             }
                             .foregroundStyle(.white)
@@ -181,7 +179,7 @@ private struct UpdatesBanner: View {
                         .buttonStyle(PressableButtonStyle())
                         .accentGlass(Capsule(style: .continuous))
                         .disabled(!store.updatingDirectories.isEmpty)
-                        .help(L("逐个 git pull --ff-only，失败不强制（⇧⌘U）"))
+                        .help(L("先逐个审阅 diff 再更新；更新前自动备份，本地改过的默认跳过（⇧⌘U）"))
                     }
                 }
                 .padding(.horizontal, Theme.Space.s16)
@@ -314,31 +312,66 @@ private struct FavoritesTabs: View {
 
 private struct FilterRow: View {
     @EnvironmentObject private var store: AppStore
+    /// 当前筛选后的条数——计数是筛选的结果，跟筛选放同一行才对得上
+    var resultCount: Int
 
     var body: some View {
+        // 排布逻辑：具体 → 抽象 → 结果。
+        // 平台是最好认的（品牌标 + 名称）放最左；发丝把「一组开关」和「一组菜单」
+        // 两种交互分开；右端是清除与结果计数。
+        // 菜单与右端标 layoutPriority(1)：它们先拿到宽度，平台组拿到的才是真实剩余，
+        // ViewThatFits 据此决定带不带名称——否则窄窗口下会把菜单挤没。
+        let origins = Array(Set(store.skills.map(\.origin.label))).sorted()
         HStack(spacing: Theme.Space.s8 + 2) {
-            FilterMenu(label: "类别", selection: $store.category, options: ["全部"] + store.categories)
             PlatformFilterStrip()
-            // 健康状态不在列表里标注（入口统一在体检页）；这里只筛安装状态
-            FilterMenu(
-                label: "状态",
-                selection: $store.stateFilter,
-                options: ["全部", "可更新"]
-                    + (store.skills.contains(where: \.disabled) ? ["已停用"] : [])
-            )
-            // 只有两种来源并存时才需要来源筛选
-            let origins = Array(Set(store.skills.map(\.origin.label))).sorted()
-            if origins.count > 1 {
-                FilterMenu(label: "来源", selection: $store.sourceFilter,
-                           options: ["全部"] + origins)
+
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 1, height: 16)
+                .layoutPriority(1)
+
+            HStack(spacing: Theme.Space.s4) {
+                FilterMenu(label: "类别", selection: $store.category, options: ["全部"] + store.categories)
+                // 健康状态不在列表里标注（入口统一在体检页）；这里只筛安装状态
+                FilterMenu(
+                    label: "状态",
+                    selection: $store.stateFilter,
+                    options: ["全部", "可更新"]
+                        + (store.skills.contains(where: \.disabled) ? ["已停用"] : [])
+                )
+                // 只有两种来源并存时才需要来源筛选
+                if origins.count > 1 {
+                    FilterMenu(label: "来源", selection: $store.sourceFilter,
+                               options: ["全部"] + origins)
+                }
             }
-            Spacer()
-            if store.hasActiveFilters {
-                Button(L("清除")) { store.clearFilters() }
+            .layoutPriority(1)
+
+            Spacer(minLength: Theme.Space.s8)
+
+            HStack(spacing: Theme.Space.s8 + 2) {
+                if store.hasActiveFilters {
+                    Button {
+                        store.clearFilters()
+                    } label: {
+                        HStack(spacing: Theme.Space.s4) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 10))
+                            Text("清除")
+                                .font(Theme.Fonts.calloutEmphasis)
+                        }
+                        .foregroundStyle(Theme.accent)
+                        .contentShape(Rectangle())
+                    }
                     .buttonStyle(.plain)
-                    .font(Theme.Fonts.calloutEmphasis)
-                    .foregroundStyle(Theme.accent)
+                    .help(L("清除全部筛选条件"))
+                }
+                Text(LF("%lld 项", resultCount))
+                    .font(Theme.Fonts.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textTertiary)
             }
+            .layoutPriority(1)
         }
     }
 }
@@ -365,18 +398,71 @@ struct FilterMenu: View {
                 }
             }
         } label: {
+            // 未筛选只显示标签（默认值「全部」不带信息，纯占宽）；
+            // 一旦筛选，标签让位给选中值并点亮，一眼看出「哪几条在起作用」
             HStack(spacing: Theme.Space.s4) {
-                Text(L(label))
-                    .font(Theme.Fonts.callout)
-                    .foregroundStyle(Theme.textTertiary)
-                Text(L(display(selection)))
-                    .font(Theme.Fonts.calloutEmphasis)
-                    .foregroundStyle(active ? Theme.accent : Theme.textPrimary)
-                Image(systemName: "chevron.up.chevron.down")
+                Text(active ? L(display(selection)) : L(label))
+                    .font(active ? Theme.Fonts.calloutEmphasis : Theme.Fonts.callout)
+                    .foregroundStyle(active ? Theme.accent : Theme.textSecondary)
+                Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(Theme.textTertiary)
+                    .foregroundStyle(active ? Theme.accent.opacity(0.7) : Theme.textTertiary)
             }
-            .padding(.horizontal, Theme.Space.s8)
+            .padding(.horizontal, active ? Theme.Space.s8 + 2 : Theme.Space.s8)
+            .frame(height: 28)
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .background {
+            if active {
+                RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                    .fill(Theme.accent.opacity(0.12))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                            .strokeBorder(Theme.accent.opacity(0.24), lineWidth: 0.5)
+                    }
+            }
+        }
+        .help(L(label))
+    }
+}
+
+/// 视图控件（排序 / 分组）：图标打头 + 当前值，和「文字打头」的筛选控件区分开。
+/// 它们永远在起作用，所以永远显示当前值。
+struct ViewMenu: View {
+    var symbol: String
+    var label: String
+    @Binding var selection: String
+    var options: [String]
+    var defaultOption: String
+
+    var body: some View {
+        let active = selection != defaultOption
+        Menu {
+            ForEach(options, id: \.self) { option in
+                Button {
+                    selection = option
+                } label: {
+                    if option == selection {
+                        Label(L(option), systemImage: "checkmark")
+                    } else {
+                        Text(L(option))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: Theme.Space.s4 + 1) {
+                Image(systemName: symbol)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(active ? Theme.accent : Theme.textTertiary)
+                Text(L(selection))
+                    .font(Theme.Fonts.callout)
+                    .foregroundStyle(active ? Theme.accent : Theme.textSecondary)
+            }
+            .padding(.horizontal, Theme.Space.s8 + 2)
             .frame(height: 28)
             .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
         }
@@ -385,6 +471,7 @@ struct FilterMenu: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .quietControl(tint: active ? Theme.accent : nil)
+        .help(L(label))
     }
 }
 
@@ -412,7 +499,7 @@ private struct SkillRowView: View {
             }
             Spacer(minLength: Theme.Space.s4)
             if hovering || selected {
-                CopyIconButton(text: AppStore.callPhrase(for: skill), help: "复制调用语")
+                CopyIconButton(text: AppStore.callPhrase(for: skill), help: L("复制调用语"))
             }
             if hovering || favorite || selected {
                 Button {
@@ -507,8 +594,7 @@ struct SkillContextMenu: View {
             Button(L("收进 Skill Atlas 库")) { store.adoptLocalSkill(skill) }
         }
         if skill.origin == .atlas && skill.updateAvailable {
-            Button(L("查看变更")) { store.showDiff(for: skill) }
-            Button(L("更新到最新")) { store.pullSkill(skill) }
+            Button(L("审阅并更新…")) { store.requestUpdate(skill) }
         }
         Button(store.favorites.contains(skill.name) ? L("取消收藏") : L("收藏")) {
             store.toggleFavorite(skill.name)
@@ -640,7 +726,7 @@ struct InspectorPanel: View {
                                         HStack(spacing: Theme.Space.s8) {
                                             StatusDot(tint: Theme.healthy)
                                             VStack(alignment: .leading, spacing: 2) {
-                                                Text(platform == "Claude" ? "Claude Code" : platform)
+                                                Text(platform == "Claude" ? AgentPlatform.claude.displayName : platform)
                                                     .font(Theme.Fonts.calloutEmphasis)
                                                     .foregroundStyle(Theme.textPrimary)
                                                 Text(L("本地安装"))
@@ -655,7 +741,7 @@ struct InspectorPanel: View {
                             DetailSection(title: "挂载状态") {
                                 HStack(alignment: .top, spacing: Theme.Space.s24) {
                                     MountLine(label: "Codex", mount: skill.mountCodex)
-                                    MountLine(label: "Claude Code", mount: skill.mountClaude)
+                                    MountLine(label: AgentPlatform.claude.displayName, mount: skill.mountClaude)
                                 }
                             }
                         }
@@ -869,7 +955,7 @@ private struct ContextCostSection: View {
                             .font(Theme.Fonts.body)
                             .foregroundStyle(Theme.textPrimary)
                             .textSelection(.enabled)
-                        CopyIconButton(text: verbose.suggestion, help: "复制缩短建议")
+                        CopyIconButton(text: verbose.suggestion, help: L("复制缩短建议"))
                     }
                     .padding(Theme.Space.s8)
                     .quietControl(cornerRadius: Theme.Radius.tile)
@@ -953,30 +1039,43 @@ private struct ManageSection: View {
             Text(L("点上方 logo 开关平台挂载（建/删软链）。有新版本时列表顶部会出现更新条。"))
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textTertiary)
-            if skill.updateAvailable {
-                HStack(spacing: Theme.Space.s8) {
+            HStack(spacing: Theme.Space.s8) {
+                if skill.updateAvailable {
                     Button {
-                        store.showDiff(for: skill)
+                        store.requestUpdate(skill)
                     } label: {
-                        Label(L("查看变更"), systemImage: "plus.forwardslash.minus")
-                            .font(Theme.Fonts.calloutEmphasis)
-                            .foregroundStyle(Theme.textPrimary)
-                            .padding(.horizontal, Theme.Space.s12)
-                            .frame(height: 28)
-                            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
-                    }
-                    .buttonStyle(PressableButtonStyle())
-                    .quietControl()
-                    .help(L("更新前先看上游改了什么（SKILL.md diff）"))
-                    Button {
-                        store.pullSkill(skill)
-                    } label: {
-                        Label(L("更新到最新"), systemImage: "arrow.down.circle")
+                        Label(L("审阅并更新…"), systemImage: "plus.forwardslash.minus")
                             .font(Theme.Fonts.calloutEmphasis)
                     }
                     .buttonStyle(.borderedProminent)
-                    .help(L("git pull --ff-only，失败不强制。主入口在「更新」页。"))
+                    .help(L("先看上游 diff 与本地改动，确认后备份并更新。没有不经审阅的更新"))
                 }
+                Button {
+                    store.requestSandbox(skill)
+                } label: {
+                    Label(L("单技能试跑…"), systemImage: "flask")
+                        .font(Theme.Fonts.calloutEmphasis)
+                        .foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, Theme.Space.s12)
+                        .frame(height: 28)
+                        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                }
+                .buttonStyle(PressableButtonStyle())
+                .quietControl()
+                .help(L("在只加载这一个技能的干净会话里试它，验证它到底会不会被触发"))
+                Button {
+                    store.requestRollback(skill)
+                } label: {
+                    Label(L("回滚…"), systemImage: "clock.arrow.circlepath")
+                        .font(Theme.Fonts.calloutEmphasis)
+                        .foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, Theme.Space.s12)
+                        .frame(height: 28)
+                        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                }
+                .buttonStyle(PressableButtonStyle())
+                .quietControl()
+                .help(L("恢复到最近一次备份（更新/卸载前自动生成）"))
             }
             localDisableControls
             uninstallButton
@@ -1565,10 +1664,79 @@ private struct ChainSection: View {
 
 // MARK: - 更新 diff 预览（三期 1：技能文本变更 = 行为变更，先看再更）
 
-struct DiffSheet: View {
+// MARK: - 更新审阅（G1）：diff 强制审阅 + 本地改动警示 + 备份后更新
+
+/// unified diff 上色渲染（单技能审阅与批量审阅共用）
+struct DiffTextView: View {
+    var diff: String
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(diff.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
+                    diffLine(String(line))
+                }
+            }
+            .padding(Theme.Space.s8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .quietControl(cornerRadius: Theme.Radius.tile)
+        .panelScroll()
+    }
+
+    private func diffLine(_ line: String) -> some View {
+        let color: Color
+        if line.hasPrefix("+") && !line.hasPrefix("+++") { color = Theme.healthy }
+        else if line.hasPrefix("-") && !line.hasPrefix("---") { color = Theme.error }
+        else if line.hasPrefix("@@") { color = Theme.accent }
+        else { color = Theme.textSecondary }
+        return Text(line.isEmpty ? " " : line)
+            .font(Theme.Fonts.mono)
+            .foregroundStyle(color)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// 本地改动警示块：说明补丁保护机制，列出 git status 行
+struct DirtyNotice: View {
+    var lines: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s4) {
+            Label(
+                LF("本地改过 %d 处。更新前自动备份并导出补丁；能干净重放才重放，否则保持纯上游版（补丁在 skill-patches，可回滚）。", lines.count),
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .font(Theme.Fonts.calloutEmphasis)
+            .foregroundStyle(Theme.warning)
+            ForEach(Array(lines.prefix(6).enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .font(Theme.Fonts.mono)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            if lines.count > 6 {
+                Text(LF("…共 %d 行改动", lines.count))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+            }
+        }
+        .padding(Theme.Space.s8 + 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                .fill(Theme.warning.opacity(0.10))
+        }
+    }
+}
+
+/// 单技能更新审阅 sheet：看到 diff 才能确认——没有不经审阅的更新
+struct UpdateReviewSheet: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
-    var skill: Skill
+
+    private var review: AppStore.UpdateReview? { store.updateReview }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1576,7 +1744,7 @@ struct DiffSheet: View {
             Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 1)
             content.padding(Theme.Space.s20)
         }
-        .frame(width: 640, height: 520)
+        .frame(width: 640, height: 560)
         .background(.regularMaterial)
     }
 
@@ -1591,10 +1759,10 @@ struct DiffSheet: View {
                         .fill(Theme.accent.opacity(0.12))
                 }
             VStack(alignment: .leading, spacing: 1) {
-                Text(skill.name)
+                Text(review?.skill.name ?? "")
                     .font(Theme.Fonts.panelTitle)
                     .foregroundStyle(Theme.textPrimary)
-                Text("上游变更预览 · 本地改动不会被覆盖（快进合并）")
+                Text(L("上游变更审阅 · 确认后先备份再更新"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
             }
@@ -1618,9 +1786,12 @@ struct DiffSheet: View {
     @ViewBuilder
     private var content: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s12) {
-            if let diff = store.diffContent {
-                if !diff.stat.isEmpty {
-                    Text(diff.stat)
+            if let review, review.loaded {
+                if !review.dirty.isEmpty {
+                    DirtyNotice(lines: review.dirty)
+                }
+                if !review.stat.isEmpty {
+                    Text(review.stat)
                         .font(Theme.Fonts.mono)
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(6)
@@ -1628,27 +1799,15 @@ struct DiffSheet: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .quietControl(cornerRadius: Theme.Radius.control)
                 }
-                if diff.diff.isEmpty {
+                if review.diff.isEmpty {
                     emptyDiff
                 } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(diff.diff.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
-                                diffLine(String(line))
-                            }
-                        }
-                        .padding(Theme.Space.s8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .quietControl(cornerRadius: Theme.Radius.tile)
-                    .panelScroll()
+                    DiffTextView(diff: review.diff)
                 }
             } else {
                 HStack(spacing: Theme.Space.s8) {
                     ProgressView().controlSize(.small)
-                    Text("正在对照上游…")
+                    Text(L("正在对照上游…"))
                         .font(Theme.Fonts.secondary)
                         .foregroundStyle(Theme.textSecondary)
                 }
@@ -1657,13 +1816,12 @@ struct DiffSheet: View {
             HStack {
                 Spacer()
                 Button {
-                    store.pullSkill(skill)
-                    dismiss()
+                    store.confirmUpdate()
                 } label: {
                     HStack(spacing: Theme.Space.s4) {
                         Image(systemName: "arrow.down.circle")
                             .font(.system(size: 11, weight: .semibold))
-                        Text("更新到最新")
+                        Text(L("备份并更新"))
                             .font(Theme.Fonts.calloutEmphasis)
                     }
                     .foregroundStyle(.white)
@@ -1674,6 +1832,7 @@ struct DiffSheet: View {
                 .buttonStyle(PressableButtonStyle())
                 .accentGlass(Capsule(style: .continuous))
                 .keyboardShortcut(.defaultAction)
+                .disabled(review?.loaded != true)
             }
         }
     }
@@ -1683,22 +1842,154 @@ struct DiffSheet: View {
             Image(systemName: "checkmark.circle")
                 .font(.system(size: 22))
                 .foregroundStyle(Theme.textTertiary)
-            Text("上游没有文本变更（可能只是提交记录前移）")
+            Text(L("上游没有文本变更（可能只是提交记录前移）"))
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+}
 
-    private func diffLine(_ line: String) -> some View {
-        let color: Color
-        if line.hasPrefix("+") && !line.hasPrefix("+++") { color = Theme.healthy }
-        else if line.hasPrefix("-") && !line.hasPrefix("---") { color = Theme.error }
-        else if line.hasPrefix("@@") { color = Theme.accent }
-        else { color = Theme.textSecondary }
-        return Text(line.isEmpty ? " " : line)
-            .font(Theme.Fonts.mono)
-            .foregroundStyle(color)
-            .frame(maxWidth: .infinity, alignment: .leading)
+/// 批量更新审阅 sheet：逐技能折叠 diff；本地改过的默认跳过，只能去详情页单独审阅
+struct BatchUpdateSheet: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+
+    private var reviews: [AppStore.UpdateReview] { store.batchReviews ?? [] }
+    private var cleanCount: Int { reviews.filter { $0.dirty.isEmpty }.count }
+    private var dirtyCount: Int { reviews.count - cleanCount }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 1)
+            content.padding(Theme.Space.s20)
+        }
+        .frame(width: 680, height: 600)
+        .background(.regularMaterial)
+    }
+
+    private var header: some View {
+        HStack(spacing: Theme.Space.s12) {
+            Image(systemName: "arrow.down.circle")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 28, height: 28)
+                .background {
+                    RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                        .fill(Theme.accent.opacity(0.12))
+                }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(L("批量更新审阅"))
+                    .font(Theme.Fonts.panelTitle)
+                    .foregroundStyle(Theme.textPrimary)
+                Text(L("逐个展开看 diff · 每个技能更新前自动备份"))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            Spacer()
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 28, height: 28)
+                    .quietControl()
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+        }
+        .padding(.horizontal, Theme.Space.s20)
+        .padding(.vertical, Theme.Space.s16)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s12) {
+            if reviews.isEmpty {
+                HStack(spacing: Theme.Space.s8) {
+                    ProgressView().controlSize(.small)
+                    Text(L("正在逐个对照上游…"))
+                        .font(Theme.Fonts.secondary)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Space.s8) {
+                        ForEach(reviews) { review in
+                            reviewRow(review)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .panelScroll()
+                if dirtyCount > 0 {
+                    Text(LF("%d 个技能本地有改动，本次跳过。可在详情页「审阅并更新…」单独处理。", dirtyCount))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.warning)
+                }
+            }
+            HStack {
+                Spacer()
+                Button {
+                    store.confirmBatchUpdate()
+                } label: {
+                    HStack(spacing: Theme.Space.s4) {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(LF("备份并更新 %d 个", cleanCount))
+                            .font(Theme.Fonts.calloutEmphasis)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, Theme.Space.s16)
+                    .frame(height: 28)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(PressableButtonStyle())
+                .accentGlass(Capsule(style: .continuous))
+                .keyboardShortcut(.defaultAction)
+                .disabled(cleanCount == 0)
+            }
+        }
+    }
+
+    private func reviewRow(_ review: AppStore.UpdateReview) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: Theme.Space.s8) {
+                if !review.dirty.isEmpty {
+                    DirtyNotice(lines: review.dirty)
+                }
+                if review.diff.isEmpty {
+                    Text(L("上游没有文本变更（可能只是提交记录前移）"))
+                        .font(Theme.Fonts.secondary)
+                        .foregroundStyle(Theme.textSecondary)
+                } else {
+                    DiffTextView(diff: review.diff)
+                        .frame(height: 220)
+                }
+            }
+            .padding(.top, Theme.Space.s4)
+        } label: {
+            HStack(spacing: Theme.Space.s8) {
+                Text(review.skill.name)
+                    .font(Theme.Fonts.calloutEmphasis)
+                    .foregroundStyle(Theme.textPrimary)
+                if !review.dirty.isEmpty {
+                    Label(L("本地有改动，跳过"), systemImage: "exclamationmark.triangle.fill")
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.warning)
+                }
+                Spacer()
+                Text(review.stat.split(separator: "\n").last.map(String.init) ?? "")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(Theme.Space.s8 + 2)
+        .quietControl(cornerRadius: Theme.Radius.control)
     }
 }

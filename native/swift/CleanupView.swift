@@ -174,7 +174,7 @@ struct CleanupSheet: View {
                             .font(Theme.Fonts.calloutEmphasis)
                             .foregroundStyle(Theme.error)
                     }
-                    Text(LF("· %lld 个原目录将从 ~/.cc-switch/skills 移入废纸篓，清空废纸篓后无法恢复\n· 清理后「撤销迁移」失效——回滚目标已不存在，技能从此只由本应用管理\n· CC Switch 应用里这些技能会显示为缺失（它的数据库不受影响）\n· 磁盘空间在清空废纸篓后才真正释放", passed.count))
+                    Text(LF("· %lld 个原目录将从 ~/.cc-switch/skills 移入废纸篓，清空废纸篓后无法恢复\n· 清理后「撤销迁移」失效，回滚目标已不存在，技能从此只由本应用管理\n· CC Switch 应用里这些技能会显示为缺失（它的数据库不受影响）\n· 磁盘空间在清空废纸篓后才真正释放", passed.count))
                         .font(Theme.Fonts.secondary)
                         .lineSpacing(3)
                         .foregroundStyle(Theme.textSecondary)

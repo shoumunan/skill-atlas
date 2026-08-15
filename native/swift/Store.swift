@@ -63,7 +63,10 @@ struct TriggerOverlap: Identifiable {
 
 @MainActor
 final class AppStore: ObservableObject {
-    @Published var data: AtlasData?
+    @Published var data: AtlasData? { didSet { dataRevision += 1 } }
+    /// 体检报告缓存的失效键：技能数据或使用统计一变就 +1
+    private var dataRevision = 0
+    private var doctorReportCache: (revision: Int, window: Int, report: DoctorReport)?
     @Published var fatalError: String?
     @Published var scanning = false
 
@@ -82,7 +85,7 @@ final class AppStore: ObservableObject {
     @Published var triggerOverlaps: [TriggerOverlap] = []
 
     /// 使用频率统计（key = 技能目录名；后台增量索引会话日志）
-    @Published var usage: [String: SkillUsage] = [:]
+    @Published var usage: [String: SkillUsage] = [:] { didSet { dataRevision += 1 } }
     @Published var usageIndexing = false
     @Published var usageProgress = 0.0
     /// 最近一次索引的统计口径（报告/帮助文案用）
@@ -160,22 +163,348 @@ final class AppStore: ObservableObject {
         return merged
     }
 
-    /// 更新 diff 预览（sheet；nil = 关闭）
-    @Published var diffTarget: Skill?
-    @Published var diffContent: (stat: String, diff: String)?
+    // MARK: - 更新审阅（G1：diff 强制审阅 + 本地补丁保护 + 回滚）
+    //
+    // 所有更新入口（详情按钮、更新条「全部更新」、⇧⌘U）一律先出审阅：
+    // 看到 diff 才能确认；本地有改动的技能批量更新时默认跳过，只能单独审阅。
+    // 确认后走 SkillActions.applyUpdate（备份 → 补丁 → pull → 重放）。
 
-    func showDiff(for skill: Skill) {
-        diffTarget = skill
-        diffContent = nil
+    struct UpdateReview: Identifiable, Equatable {
+        var skill: Skill
+        var stat: String
+        var diff: String
+        /// git status --porcelain 的本地改动行；非空 = 本地改过
+        var dirty: [String]
+        var loaded: Bool
+        var id: String { skill.name }
+
+        static func == (lhs: UpdateReview, rhs: UpdateReview) -> Bool {
+            lhs.id == rhs.id && lhs.loaded == rhs.loaded
+        }
+    }
+
+    /// 单技能审阅（sheet；nil = 关闭）
+    @Published var updateReview: UpdateReview?
+    /// 批量审阅（sheet；nil = 关闭，[] = 正在对照上游）
+    @Published var batchReviews: [UpdateReview]?
+    /// 回滚确认（confirmationDialog）：技能 + 将恢复到的备份名
+    struct RollbackRequest: Identifiable {
+        var skill: Skill
+        var backupName: String
+        var id: String { skill.name }
+    }
+    @Published var rollbackRequest: RollbackRequest?
+    /// 更新/回滚完成后的结果通报（alert）
+    @Published var updateNotice: String?
+
+    private func computeReview(_ skill: Skill) async -> UpdateReview {
         let source = URL(fileURLWithPath: skill.sourcePath, isDirectory: true)
         let branch = skill.repoBranch
+        let result = await Task.detached(priority: .userInitiated) {
+            (SkillGit.upstreamDiff(source: source, branch: branch), SkillGit.localChanges(source: source))
+        }.value
+        return UpdateReview(skill: skill, stat: result.0.stat, diff: result.0.skillDiff, dirty: result.1, loaded: true)
+    }
+
+    func requestUpdate(_ skill: Skill) {
+        guard skill.origin == .atlas else { return }
+        updateReview = UpdateReview(skill: skill, stat: "", diff: "", dirty: [], loaded: false)
+        pauseWatching()
+        Task {
+            let review = await computeReview(skill)
+            resumeWatching()
+            if updateReview?.skill.name == skill.name { updateReview = review }
+        }
+    }
+
+    func confirmUpdate() {
+        guard let review = updateReview, review.loaded else { return }
+        updateReview = nil
+        performGuardedUpdate([review.skill])
+    }
+
+    func requestUpdateAll() {
+        let targets = updatableSkills.filter { $0.origin == .atlas }
+        guard !targets.isEmpty else { return }
+        batchReviews = []
+        pauseWatching()
+        Task {
+            var reviews: [UpdateReview] = []
+            for skill in targets {
+                reviews.append(await computeReview(skill))
+            }
+            resumeWatching()
+            if batchReviews != nil { batchReviews = reviews }
+        }
+    }
+
+    func confirmBatchUpdate() {
+        guard let reviews = batchReviews, !reviews.isEmpty else { return }
+        batchReviews = nil
+        performGuardedUpdate(reviews.filter { $0.dirty.isEmpty }.map(\.skill))
+    }
+
+    /// 带保护的更新执行：逐个 备份 → 补丁 → pull --ff-only → 重放，最后统一通报
+    private func performGuardedUpdate(_ targets: [Skill]) {
+        guard !targets.isEmpty else { return }
+        pauseWatching()
+        updatingDirectories.formUnion(targets.map(\.directory))
+        Task {
+            var updated = 0
+            var unreplayed: [String] = []
+            var failures: [String] = []
+            for skill in targets {
+                let result = await Task.detached(priority: .userInitiated) {
+                    Result { try SkillActions.applyUpdate(skill: skill) }
+                }.value
+                switch result {
+                case .success(let apply):
+                    updated += 1
+                    if apply.patchFile != nil && !apply.replayed { unreplayed.append(skill.name) }
+                case .failure(let error):
+                    failures.append("\(skill.name)：\(error.localizedDescription)")
+                }
+                updatingDirectories.remove(skill.directory)
+            }
+            resumeWatching()
+            var lines: [String] = []
+            if updated > 0 { lines.append(LF("%d 个技能已更新；更新前快照已存入 skill-backups，可随时回滚。", updated)) }
+            if !unreplayed.isEmpty {
+                lines.append(LF("本地改动未能自动重放（补丁已存 skill-patches，工作区为纯上游版）：%@", unreplayed.joined(separator: "、")))
+            }
+            if !failures.isEmpty { lines.append(L("未完成：") + "\n" + failures.joined(separator: "\n")) }
+            if !lines.isEmpty { updateNotice = lines.joined(separator: "\n\n") }
+            await rescan(keepSelection: true)
+            await checkSkillUpdates(interactive: false)
+        }
+    }
+
+    // MARK: - 单技能试跑（三期 G3）
+
+    /// 试跑确认（sheet）：展示能隔离什么、不能隔离什么，确认后才建目录开终端
+    @Published var sandboxTarget: Skill?
+    @Published var sandboxCount = 0
+
+    func requestSandbox(_ skill: Skill) {
+        sandboxTarget = skill
+    }
+
+    func confirmSandbox() {
+        guard let skill = sandboxTarget else { return }
+        sandboxTarget = nil
+        pauseWatching()
+        do {
+            let plan = try SkillSandbox.run(skill: skill)
+            sandboxCount = SkillSandbox.existing().count
+            profileNotice = LF("已开一个只装「%@」的会话。用完在设置页可一键清理试跑目录（当前 %d 个）。",
+                               skill.name, sandboxCount)
+        } catch {
+            actionError = error.localizedDescription
+        }
+        resumeWatching()
+    }
+
+    func refreshSandboxCount() {
+        sandboxCount = SkillSandbox.existing().count
+    }
+
+    func clearSandboxes() {
+        let cleared = SkillSandbox.clearAll()
+        refreshSandboxCount()
+        profileNotice = LF("已把 %d 个试跑目录移入废纸篓。", cleared)
+    }
+
+    // MARK: - 场景 Profile（三期 G8）
+
+    @Published var profiles = ProfilesFile()
+    /// 待确认的写盘计划（sheet）：nil = 无
+    struct ProfileApplyRequest: Identifiable {
+        var profile: AtlasProfile
+        var plan: ProfileWriter.Plan
+        /// nil = 用户级默认；非 nil = 绑定到该目录
+        var directory: URL?
+        var id: String { (directory?.path ?? "user") + profile.id }
+    }
+    @Published var profileRequest: ProfileApplyRequest?
+    @Published var profileSheetPresented = false
+    @Published var profileNotice: String?
+
+    var activeProfile: AtlasProfile? {
+        profiles.profiles.first { $0.id == profiles.activeProfileID }
+    }
+
+    func loadProfiles() {
+        profiles = ProfileStore.load()
+    }
+
+    private func persistProfiles() {
+        do { try ProfileStore.save(profiles) } catch { actionError = error.localizedDescription }
+    }
+
+    func upsertProfile(_ profile: AtlasProfile) {
+        var copy = profile
+        copy.updatedAt = Int(Date().timeIntervalSince1970)
+        if let index = profiles.profiles.firstIndex(where: { $0.id == copy.id }) {
+            profiles.profiles[index] = copy
+        } else {
+            profiles.profiles.append(copy)
+        }
+        persistProfiles()
+    }
+
+    func deleteProfile(_ profile: AtlasProfile) {
+        profiles.profiles.removeAll { $0.id == profile.id }
+        if profiles.activeProfileID == profile.id {
+            // 定义没了就不该继续对用户配置生效——先撤干净再删
+            revertDefaultProfile(silent: true)
+        }
+        for binding in profiles.bindings where binding.profileID == profile.id {
+            unbindDirectory(binding, silent: true)
+        }
+        persistProfiles()
+    }
+
+    /// 生成写盘计划并请求确认（不落盘）
+    func requestProfileApply(_ profile: AtlasProfile, directory: URL?) {
+        guard updatingDirectories.isEmpty else {
+            profileNotice = L("有技能正在更新，等它完成再切换场景。")
+            return
+        }
+        let target = directory.map { ProfileWriter.projectSettingsURL(for: $0) } ?? ProfileWriter.userSettingsURL
+        let plan = ProfileWriter.plan(profile: profile, skills: skills, target: target)
+        profileRequest = ProfileApplyRequest(profile: profile, plan: plan, directory: directory)
+    }
+
+    /// 用户确认后真正写盘
+    func confirmProfileApply() {
+        guard let request = profileRequest else { return }
+        profileRequest = nil
+        let target = request.directory.map { ProfileWriter.projectSettingsURL(for: $0) }
+            ?? ProfileWriter.userSettingsURL
+        let previous: [String]
+        if let directory = request.directory {
+            previous = profiles.bindings.first { $0.directory == directory.path }?.appliedKeys ?? []
+        } else {
+            previous = profiles.activeAppliedKeys
+        }
+        do {
+            let applied = try ProfileWriter.apply(
+                profile: request.profile, skills: skills, target: target, previousKeys: previous
+            )
+            if let directory = request.directory {
+                profiles.bindings.removeAll { $0.directory == directory.path }
+                profiles.bindings.append(ProfileBinding(
+                    directory: directory.path, profileID: request.profile.id,
+                    boundAt: Int(Date().timeIntervalSince1970), appliedKeys: applied
+                ))
+                profileNotice = LF("已把「%@」绑定到 %@：%d 个技能不再进该目录会话的自动清单。原配置已备份。",
+                                   request.profile.name,
+                                   directory.path.replacingOccurrences(of: AtlasPaths.home.path, with: "~"),
+                                   applied.count)
+            } else {
+                profiles.activeProfileID = request.profile.id
+                profiles.activeAppliedKeys = applied
+                profileNotice = LF("已把「%@」设为默认场景：%d 个技能不再进自动清单。原配置已备份。",
+                                   request.profile.name, applied.count)
+            }
+            persistProfiles()
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    func revertDefaultProfile(silent: Bool = false) {
+        do {
+            try ProfileWriter.revert(target: ProfileWriter.userSettingsURL, appliedKeys: profiles.activeAppliedKeys)
+            profiles.activeProfileID = nil
+            profiles.activeAppliedKeys = []
+            persistProfiles()
+            if !silent { profileNotice = L("已恢复默认：所有技能重新进入自动清单。") }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    func unbindDirectory(_ binding: ProfileBinding, silent: Bool = false) {
+        let target = ProfileWriter.projectSettingsURL(for: URL(fileURLWithPath: binding.directory))
+        do {
+            try ProfileWriter.revert(target: target, appliedKeys: binding.appliedKeys)
+            profiles.bindings.removeAll { $0.directory == binding.directory }
+            persistProfiles()
+            if !silent { profileNotice = L("已解除绑定，该目录恢复默认技能清单。") }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    // MARK: - 描述医生开药（三期 G2）
+
+    /// 处方 sheet（nil = 关闭）
+    @Published var prescription: DescriptionPrescription?
+
+    func requestPrescription(_ skill: Skill) {
+        prescription = DescriptionRx.prescribe(skill: skill)
+    }
+
+    func adoptPrescription() {
+        guard let rx = prescription, !rx.noop else { return }
+        prescription = nil
+        do {
+            try DescriptionRx.writeBack(skill: rx.skill, newDescription: rx.rewritten)
+            updateNotice = LF("「%@」的描述已改写并写回 SKILL.md。git 管理的技能这算一次本地改动，更新时会走补丁保护，不会被上游覆盖。", rx.skill.name)
+        } catch {
+            actionError = error.localizedDescription
+        }
+        Task { await rescan(keepSelection: true) }
+    }
+
+    /// 疗效验证：同一句话在「原描述」与「改后描述」两个库里分别模拟，返回本技能名次（1 起；nil = 没进前 8）
+    func rxRankComparison(phrase: String) -> (before: Int?, after: Int?) {
+        guard let rx = prescription else { return (nil, nil) }
+        let atRiskNames = Set(doctorReport.atRisk.map(\.skill.name))
+        func rank(in pool: [Skill]) -> Int? {
+            let ranked = TriggerLab.simulate(phrase: phrase, skills: pool, usage: usage, atRiskNames: atRiskNames)
+            return ranked.firstIndex { $0.skill.name == rx.skill.name }.map { $0 + 1 }
+        }
+        let altered = skills.map { skill -> Skill in
+            guard skill.name == rx.skill.name else { return skill }
+            var copy = skill
+            copy.description = rx.rewritten
+            return copy
+        }
+        return (before: rank(in: skills), after: rank(in: altered))
+    }
+
+    func requestRollback(_ skill: Skill) {
+        guard skill.origin == .atlas else { return }
+        // 正在更新中的技能不能同时回滚（同目录并发写会互踩）
+        guard !updatingDirectories.contains(skill.directory) else { return }
+        guard let backup = SkillBackup.latest(directory: skill.directory) else {
+            actionError = LF("「%@」还没有备份。备份在更新或卸载时自动生成。", skill.name)
+            return
+        }
+        rollbackRequest = RollbackRequest(skill: skill, backupName: backup.lastPathComponent)
+    }
+
+    func confirmRollback() {
+        guard let request = rollbackRequest else { return }
+        rollbackRequest = nil
+        pauseWatching()
+        updatingDirectories.insert(request.skill.directory)
         Task {
             let result = await Task.detached(priority: .userInitiated) {
-                SkillGit.upstreamDiff(source: source, branch: branch)
+                Result { try SkillActions.rollback(skill: request.skill) }
             }.value
-            if diffTarget?.name == skill.name {
-                diffContent = (stat: result.stat, diff: result.skillDiff)
+            updatingDirectories.remove(request.skill.directory)
+            resumeWatching()
+            switch result {
+            case .success(let name):
+                updateNotice = LF("「%@」已回滚到备份 %@。回滚前的状态也拍了快照，可再次回滚。", request.skill.name, name)
+            case .failure(let error):
+                actionError = error.localizedDescription
             }
+            await rescan(keepSelection: true)
+            await checkSkillUpdates(interactive: false)
         }
     }
 
@@ -345,6 +674,10 @@ final class AppStore: ObservableObject {
             // 默认不选中任何技能（详情栏保持收起，等用户点了再展开）
             let existing = keepSelection ? result.skills.first(where: { $0.name == selectedName }) : nil
             selectedName = existing?.name
+            loadProfiles()
+            // 老仓库是在这些文件出现之前 init 的，补齐忽略项防止 settings 备份、
+            // 事件日志、沙箱被 F8 的快照提交推到远端
+            try? GitSync.ensureIgnored()
             offerMigrationIfNeeded()
             writeOfferProbe()
             writeDoctorProbe()
@@ -405,6 +738,201 @@ final class AppStore: ObservableObject {
                             try? text.write(toFile: path, atomically: true, encoding: .utf8)
                         }
                     }
+                    self.quitIfRequested()
+                }
+            }
+            // G1 更新审阅三 probe（-atlasProbeOut 落盘；配 -atlasQuit 用于无头验收）
+            if let target = UserDefaults.standard.string(forKey: "atlasUpdateReviewProbe") {
+                UserDefaults.standard.removeObject(forKey: "atlasUpdateReviewProbe")
+                let skill = result.skills.first(where: { $0.name == target || $0.directory == target })
+                pauseWatching()
+                Task {
+                    var payload: [String: Any] = ["target": target]
+                    if let skill {
+                        let review = await self.computeReview(skill)
+                        payload["directory"] = skill.directory
+                        payload["stat"] = review.stat
+                        payload["diff"] = review.diff
+                        payload["dirty"] = review.dirty
+                    } else {
+                        payload["error"] = "not found"
+                    }
+                    self.resumeWatching()
+                    self.writeProbeJSON(payload)
+                    self.quitIfRequested()
+                }
+            }
+            if let target = UserDefaults.standard.string(forKey: "atlasApplyUpdateProbe") {
+                UserDefaults.standard.removeObject(forKey: "atlasApplyUpdateProbe")
+                let skill = result.skills.first(where: { $0.name == target || $0.directory == target })
+                pauseWatching()
+                Task {
+                    var payload: [String: Any] = ["target": target]
+                    if let skill {
+                        let outcome = await Task.detached(priority: .userInitiated) {
+                            Result { try SkillActions.applyUpdate(skill: skill) }
+                        }.value
+                        switch outcome {
+                        case .success(let apply):
+                            payload["directory"] = skill.directory
+                            payload["backup"] = apply.backupName
+                            payload["patch"] = apply.patchFile ?? ""
+                            payload["replayed"] = apply.replayed
+                            payload["dirty"] = apply.dirtyFiles
+                        case .failure(let error):
+                            payload["error"] = error.localizedDescription
+                        }
+                    } else {
+                        payload["error"] = "not found"
+                    }
+                    self.resumeWatching()
+                    self.writeProbeJSON(payload)
+                    self.quitIfRequested()
+                }
+            }
+            // G3 单技能试跑 probe：建沙箱并落盘计划，不开终端
+            if let target = UserDefaults.standard.string(forKey: "atlasSandboxProbe") {
+                UserDefaults.standard.removeObject(forKey: "atlasSandboxProbe")
+                let path = UserDefaults.standard.string(forKey: "atlasProbeOut")
+                if let skill = result.skills.first(where: { $0.name == target || $0.directory == target }) {
+                    do {
+                        _ = try SkillSandbox.run(skill: skill, dryRunProbe: path)
+                    } catch {
+                        writeProbeJSON(["target": target, "error": error.localizedDescription])
+                    }
+                } else {
+                    writeProbeJSON(["target": target, "error": "not found"])
+                }
+                quitIfRequested()
+            }
+            // G8 Profile probe：create|apply|bind|unbind|status
+            // -atlasProfileName <名> -atlasProfileMembers <逗号分隔目录> -atlasProfileDir <目录>
+            if let action = UserDefaults.standard.string(forKey: "atlasProfileProbe") {
+                UserDefaults.standard.removeObject(forKey: "atlasProfileProbe")
+                loadProfiles()
+                var payload: [String: Any] = ["action": action]
+                let name = UserDefaults.standard.string(forKey: "atlasProfileName") ?? "验收场景"
+                let dirPath = UserDefaults.standard.string(forKey: "atlasProfileDir")
+                do {
+                    switch action {
+                    case "create":
+                        var profile = AtlasProfile.new(name: name)
+                        let raw = UserDefaults.standard.string(forKey: "atlasProfileMembers") ?? ""
+                        profile.members = raw.split(separator: ",").map {
+                            $0.trimmingCharacters(in: .whitespaces)
+                        }.filter { !$0.isEmpty }
+                        upsertProfile(profile)
+                        payload["profileID"] = profile.id
+                        payload["members"] = profile.members
+                    case "apply", "bind":
+                        guard let profile = profiles.profiles.first(where: { $0.name == name }) else {
+                            throw AtlasError("找不到 Profile：\(name)")
+                        }
+                        let directory = (action == "bind" && dirPath != nil)
+                            ? URL(fileURLWithPath: dirPath!) : nil
+                        let target = directory.map { ProfileWriter.projectSettingsURL(for: $0) }
+                            ?? ProfileWriter.userSettingsURL
+                        let plan = ProfileWriter.plan(profile: profile, skills: skills, target: target)
+                        payload["target"] = target.path
+                        payload["excluded"] = plan.excluded
+                        payload["kept"] = plan.kept
+                        payload["conflicts"] = plan.conflicts
+                        payload["foreignKeys"] = plan.foreignKeys
+                        profileRequest = ProfileApplyRequest(profile: profile, plan: plan, directory: directory)
+                        confirmProfileApply()
+                        payload["written"] = (try? ProfileWriter.readSettings(at: target))?["skillOverrides"] as? [String: Any] ?? [:]
+                    case "unbind":
+                        if let dirPath, let binding = profiles.bindings.first(where: { $0.directory == dirPath }) {
+                            unbindDirectory(binding, silent: true)
+                            payload["unbound"] = dirPath
+                        } else {
+                            revertDefaultProfile(silent: true)
+                            payload["unbound"] = "user"
+                        }
+                    default:
+                        break
+                    }
+                    payload["profiles"] = profiles.profiles.map(\.name)
+                    payload["activeProfile"] = activeProfile?.name ?? ""
+                    payload["bindings"] = profiles.bindings.map(\.directory)
+                    if let error = actionError { payload["error"] = error }
+                } catch {
+                    payload["error"] = error.localizedDescription
+                }
+                writeProbeJSON(payload)
+                quitIfRequested()
+            }
+            // G5 Hook 遥测 probe：install / uninstall / status
+            if let action = UserDefaults.standard.string(forKey: "atlasHookProbe") {
+                UserDefaults.standard.removeObject(forKey: "atlasHookProbe")
+                var payload: [String: Any] = ["action": action]
+                do {
+                    switch action {
+                    case "install": try HookTelemetry.install()
+                    case "uninstall": try HookTelemetry.uninstall()
+                    default: break
+                    }
+                    payload["installed"] = HookTelemetry.installed()
+                    payload["script"] = HookTelemetry.scriptURL.path
+                    payload["settings"] = HookTelemetry.settingsURL.path
+                    payload["events"] = HookTelemetry.totalEvents
+                } catch {
+                    payload["error"] = error.localizedDescription
+                }
+                writeProbeJSON(payload)
+                quitIfRequested()
+            }
+            // G2 描述开药两 probe：Rx = 只出处方；RxApply = 出处方并写回
+            for (key, apply) in [("atlasRxProbe", false), ("atlasRxApplyProbe", true)] {
+                guard let target = UserDefaults.standard.string(forKey: key) else { continue }
+                UserDefaults.standard.removeObject(forKey: key)
+                let skill = result.skills.first(where: { $0.name == target || $0.directory == target })
+                var payload: [String: Any] = ["target": target]
+                if let skill {
+                    let rx = DescriptionRx.prescribe(skill: skill)
+                    payload["directory"] = skill.directory
+                    payload["noop"] = rx.noop
+                    payload["rewritten"] = rx.rewritten
+                    payload["moves"] = rx.moves
+                    payload["beforeBuried"] = rx.beforeBuried
+                    payload["afterBuried"] = rx.afterBuried
+                    if apply, !rx.noop {
+                        do {
+                            try DescriptionRx.writeBack(skill: skill, newDescription: rx.rewritten)
+                            payload["applied"] = true
+                        } catch {
+                            payload["applied"] = false
+                            payload["error"] = error.localizedDescription
+                        }
+                    }
+                } else {
+                    payload["error"] = "not found"
+                }
+                writeProbeJSON(payload)
+                quitIfRequested()
+            }
+            if let target = UserDefaults.standard.string(forKey: "atlasRollbackProbe") {
+                UserDefaults.standard.removeObject(forKey: "atlasRollbackProbe")
+                let skill = result.skills.first(where: { $0.name == target || $0.directory == target })
+                pauseWatching()
+                Task {
+                    var payload: [String: Any] = ["target": target]
+                    if let skill {
+                        let outcome = await Task.detached(priority: .userInitiated) {
+                            Result { try SkillActions.rollback(skill: skill) }
+                        }.value
+                        switch outcome {
+                        case .success(let name):
+                            payload["directory"] = skill.directory
+                            payload["restored"] = name
+                        case .failure(let error):
+                            payload["error"] = error.localizedDescription
+                        }
+                    } else {
+                        payload["error"] = "not found"
+                    }
+                    self.resumeWatching()
+                    self.writeProbeJSON(payload)
                     self.quitIfRequested()
                 }
             }
@@ -548,20 +1076,30 @@ final class AppStore: ObservableObject {
         return errors + (doctorReport.overBudget ? 1 : 0)
     }
 
-    /// UI 展示的平台固定五个：Claude Code / Codex / Gemini / Grok / WorkBuddy。
-    /// OpenCode、Hermes 仅保留数据兼容（已有软链不动），不再出现在界面上。
+    /// UI 展示的平台：Claude / Codex / Gemini / Grok / WorkBuddy。
+    /// OpenClaw、OpenCode、Hermes 只保留数据兼容——扫描、挂载、安全扫描照常，
+    /// 已建的软链不动，但不占界面位置（用不上的平台摆在那里只是噪音）。
+    /// 日后要放出来，把它加回这个数组即可，其余代码不用动。
     var visiblePlatforms: [AgentPlatform] {
         [.claude, .codex, .gemini, .grokbuild, .workbuddy]
     }
 
-    /// 体检报告（预算模拟 + 超长描述 + 可回收）
+    /// 体检报告（预算模拟 + 超长描述 + 可回收）。
+    /// 按 (dataRevision, 预算窗口) 记忆化——侧栏角标/页副标每次渲染都读它，
+    /// 不缓存等于每帧对 143 条描述跑一遍 token 估算 + 触发词正则。
     var doctorReport: DoctorReport {
-        ContextDoctor.report(
+        if let cache = doctorReportCache,
+           cache.revision == dataRevision, cache.window == contextWindowTokens {
+            return cache.report
+        }
+        let report = ContextDoctor.report(
             skills: skills,
             usage: usage,
             staleDirectories: Set(staleSkills.map(\.directory)),
             contextWindowTokens: contextWindowTokens
         )
+        doctorReportCache = (dataRevision, contextWindowTokens, report)
+        return report
     }
 
     func clearFilters() {
@@ -587,6 +1125,7 @@ final class AppStore: ObservableObject {
             AgentPlatform.opencode.root(home: SkillScanner.home),
             AgentPlatform.hermes.root(home: SkillScanner.home),
             AgentPlatform.workbuddy.root(home: SkillScanner.home),
+            AgentPlatform.openclaw.root(home: SkillScanner.home),
         ]
             .map { $0.resolvingSymlinksInPath().standardizedFileURL.path }
         let resolved = url.resolvingSymlinksInPath().standardizedFileURL.path
@@ -698,6 +1237,7 @@ final class AppStore: ObservableObject {
             AgentPlatform.opencode.root(home: SkillScanner.home).path,
             AgentPlatform.hermes.root(home: SkillScanner.home).path,
             AgentPlatform.workbuddy.root(home: SkillScanner.home).path,
+            AgentPlatform.openclaw.root(home: SkillScanner.home).path,
         ])
         watcher.start(paths: Array(paths)) { [weak self] in
             MainActor.assumeIsolated { self?.scheduleAutoRescan() }
@@ -925,7 +1465,7 @@ final class AppStore: ObservableObject {
             "verbose": report.verbose.count,
             "overlong": report.overlong.count,
             "reclaimableTokens": report.reclaimableTokens,
-            "listingSoftCap": ContextDoctor.listingSoftCap,
+            "perEntryCap": ContextDoctor.perEntryCap,
             "window": contextWindowTokens,
         ]
         if let payload = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
@@ -984,6 +1524,15 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// probe 统一落盘：写到 -atlasProbeOut 指定的路径（无则不写）
+    private func writeProbeJSON(_ payload: [String: Any]) {
+        guard let path = UserDefaults.standard.string(forKey: "atlasProbeOut"), !path.isEmpty else { return }
+        if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+           let text = String(data: data, encoding: .utf8) {
+            try? text.write(toFile: path, atomically: true, encoding: .utf8)
+        }
+    }
+
     func checkSkillUpdates(interactive: Bool) async {
         guard !checkingSkillUpdates else { return }
         // 后台自动检查节流：30 分钟内不重复跑（手动「重新检查」不受限）。
@@ -1023,25 +1572,6 @@ final class AppStore: ObservableObject {
                 return copy
             }
             self.data = data
-        }
-    }
-
-    func pullSkill(_ skill: Skill) {
-        guard skill.origin == .atlas, !updatingDirectories.contains(skill.directory) else { return }
-        pauseWatching()
-        updatingDirectories.insert(skill.directory)
-        Task {
-            let source = URL(fileURLWithPath: skill.sourcePath, isDirectory: true)
-            let result = await Task.detached(priority: .userInitiated) {
-                Result { try SkillGit.pullFF(source: source) }
-            }.value
-            updatingDirectories.remove(skill.directory)
-            if case .failure(let error) = result {
-                actionError = error.localizedDescription
-            }
-            resumeWatching()
-            await rescan(keepSelection: true)
-            await checkSkillUpdates(interactive: false)
         }
     }
 
@@ -1230,11 +1760,31 @@ final class AppStore: ObservableObject {
             }.value
             guard !Task.isCancelled else { return }
             usage = result.usage
+            mergeHookStats()
             usageIndexing = false
             usageIndexInfo = String(
                 format: L("%d 个会话文件（增量解析 %d 个），耗时 %.1f 秒"),
                 result.scannedFiles, result.reparsedFiles, result.duration
             )
+        }
+    }
+
+    // MARK: - Hook 实时遥测（三期 G5）
+
+    /// hook 事件口径（目录 → 精确计量），与 grep 口径并存展示
+    @Published var hookStats: [String: HookTelemetry.HookStats] = [:]
+
+    /// 把 hook 事件并进 usage：grep 漏计的补会话数，最近使用取两口径较新者。
+    /// 长期未用/丢弃模拟因此不再冤枉「grep 认不出但确实在用」的技能。
+    func mergeHookStats() {
+        var nameToDirectory: [String: String] = [:]
+        for skill in skills { nameToDirectory[skill.name] = skill.directory }
+        hookStats = HookTelemetry.stats(nameToDirectory: nameToDirectory)
+        for (directory, stats) in hookStats {
+            var record = usage[directory] ?? SkillUsage()
+            if record.total == 0 { record.claudeSessions = stats.sessions }
+            if let last = stats.last, last > (record.lastUsed ?? .distantPast) { record.lastUsed = last }
+            usage[directory] = record
         }
     }
 
@@ -1273,9 +1823,17 @@ final class AppStore: ObservableObject {
     /// 长期未用：从未使用 + 90 天未用（索引完成后才有意义）
     var staleSkills: [Skill] {
         guard !usageIndexing else { return [] }
-        let cutoff = Date().addingTimeInterval(-90 * 86400)
+        let now = Date()
+        let cutoff = now.addingTimeInterval(-90 * 86400)
+        // 新装技能给 14 天观察期：「没有使用记录」≠ 吃灰，也可能是刚装上还没轮到它。
+        // 没有这一条，用户上午装的技能下午就会被「全部停用」一键停掉。
+        let grace = 14.0 * 86400
         return skills.filter { skill in
             guard !skill.disabled else { return false }  // 已停用的不再算「吃灰」
+            if skill.installedAt > 0,
+               now.timeIntervalSince(Date(timeIntervalSince1970: TimeInterval(skill.installedAt))) < grace {
+                return false
+            }
             guard let record = usage[skill.directory] else { return true }
             guard let last = record.lastUsed else { return true }
             return last < cutoff
@@ -1415,31 +1973,5 @@ final class AppStore: ObservableObject {
         Task { await rescan(keepSelection: true) }
     }
 
-    // MARK: - 批量更新
-
-    func updateAllSkills() {
-        let targets = updatableSkills.filter { $0.origin == .atlas }
-        guard !targets.isEmpty else { return }
-        pauseWatching()
-        updatingDirectories.formUnion(targets.map(\.directory))
-        Task {
-            var failures: [String] = []
-            for skill in targets {
-                let source = URL(fileURLWithPath: skill.sourcePath, isDirectory: true)
-                let result = await Task.detached(priority: .userInitiated) {
-                    Result { try SkillGit.pullFF(source: source) }
-                }.value
-                if case .failure(let error) = result {
-                    failures.append("\(skill.name)：\(error.localizedDescription)")
-                }
-                updatingDirectories.remove(skill.directory)
-            }
-            resumeWatching()
-            if !failures.isEmpty {
-                actionError = L("部分技能未能快进更新：") + "\n" + failures.joined(separator: "\n")
-            }
-            await rescan(keepSelection: true)
-            await checkSkillUpdates(interactive: false)
-        }
-    }
+    // MARK: - 批量更新（入口在「更新审阅」区：requestUpdateAll → confirmBatchUpdate）
 }

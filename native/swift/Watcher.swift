@@ -11,6 +11,10 @@ final class DirectoryWatcher {
     private var stream: FSEventStreamRef?
     private var onChange: (() -> Void)?
     private(set) var paused = false
+    /// 计数式暂停：并发操作各自 pause/resume，归零才真正恢复。
+    /// 布尔版在暂停窗口重叠时会被第一个 resume 提前解除——FSEvents 在另一
+    /// 操作 git fetch 写 .git 时送达，形成自触发重扫（历史上修过的循环复发形态）。
+    private var pauseCount = 0
 
     func start(paths: [String], onChange: @escaping () -> Void) {
         stop()
@@ -44,8 +48,15 @@ final class DirectoryWatcher {
         self.stream = stream
     }
 
-    func pause() { paused = true }
-    func resume() { paused = false }
+    func pause() {
+        pauseCount += 1
+        paused = true
+    }
+
+    func resume() {
+        pauseCount = max(0, pauseCount - 1)
+        if pauseCount == 0 { paused = false }
+    }
 
     func stop() {
         guard let stream else { return }

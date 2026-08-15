@@ -2,9 +2,13 @@ import SwiftUI
 
 // MARK: - 设置页（v7 重排：系统设置式分组，居中 640 列）
 //
-// 四组：外观（界面样式 / 菜单栏 / 语言）· 技能库（位置 / 扫描范围 / 重扫）
-//      · 从 CC Switch 迁移（机制图 + 状态 + 动作）· 应用（版本 / 更新）
+// 分组：外观（界面样式 / 菜单栏 / 语言）· 技能库（位置 / 扫描范围 / 重扫）
+//      · 多机同步 · 本地技能收编（散装 → 本库，所有用户）
+//      · 从 CC Switch 迁移（机制图 + 状态 + 动作，只对有 CC Switch 数据的用户显示）
+//      · 应用（版本 / 应用内自动更新）
 // 全部是真设置：界面样式立即生效并持久化，菜单栏开关直接撤下图标。
+// 「收进本库」有两条来路：散装收编（人人可用）与 CC Switch 迁移（存量用户），
+// 设置页两组分开陈列，谁的场景谁可见。
 
 struct SettingsPage: View {
     var body: some View {
@@ -12,7 +16,10 @@ struct SettingsPage: View {
             VStack(spacing: Theme.Space.s20) {
                 AppearanceGroup()
                 LibraryGroup()
+                ProfileGroup()
+                TelemetryGroup()
                 SyncGroup()
+                AdoptGroup()
                 MigrationGroup()
                 AppGroup()
             }
@@ -23,6 +30,233 @@ struct SettingsPage: View {
         .panelScroll()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentSurface()
+    }
+}
+
+// MARK: - 场景 Profile（三期 G8）
+
+private struct ProfileGroup: View {
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        SettingsGroup(title: "场景 Profile") {
+            SettingsRow(
+                title: store.activeProfile.map { LF("当前默认：%@", $0.name) } ?? L("按场景收窄技能清单"),
+                subtitle: store.profiles.profiles.isEmpty
+                    ? L("143 个技能共用一份全局清单时，写基金材料的会话里也挂着个人项目的工具。建一个场景，勾上这个场景真正要用的技能，其余的会被摘出模型的自动清单（仍可手动调用）。只对 Claude Code 生效，随时可撤。")
+                    : LF("已有 %d 个场景，%d 个目录绑定。改的是 Claude Code 自己的 skillOverrides，写盘前会让你确认并自动备份。",
+                         store.profiles.profiles.count, store.profiles.bindings.count),
+                divider: false
+            ) {
+                Button {
+                    store.loadProfiles()
+                    store.profileSheetPresented = true
+                } label: {
+                    Text(L("管理场景…"))
+                        .font(Theme.Fonts.calloutEmphasis)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, Theme.Space.s12 + 2)
+                        .frame(height: 26)
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(PressableButtonStyle())
+                .accentGlass(Capsule(style: .continuous))
+            }
+            if store.sandboxCount > 0 {
+                SettingsRow(
+                    title: "试跑目录",
+                    subtitle: "单技能试跑留下的一次性目录（含技能副本与临时配置）。不自动清理，因为正在跑的会话不会告诉 App 它还活着。",
+                    divider: false
+                ) {
+                    HStack(spacing: Theme.Space.s8) {
+                        Text(LF("%d 个", store.sandboxCount))
+                            .font(Theme.Fonts.caption)
+                            .foregroundStyle(Theme.textTertiary)
+                        Button {
+                            store.clearSandboxes()
+                        } label: {
+                            Text(L("移入废纸篓"))
+                                .font(Theme.Fonts.calloutEmphasis)
+                                .foregroundStyle(Theme.textPrimary)
+                                .padding(.horizontal, Theme.Space.s12)
+                                .frame(height: 26)
+                                .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                        }
+                        .buttonStyle(PressableButtonStyle())
+                        .quietControl()
+                    }
+                }
+            }
+        }
+        .onAppear {
+            store.loadProfiles()
+            store.refreshSandboxCount()
+        }
+    }
+}
+
+// MARK: - Hook 实时遥测（三期 G5）
+
+private struct TelemetryGroup: View {
+    @EnvironmentObject private var store: AppStore
+    @State private var installed = false
+    @State private var errorText: String?
+    @State private var message: String?
+    /// 事件计数缓存：只在 onAppear/动作后刷新——body 里直接读文件会每帧全量 I/O
+    @State private var eventsCount = 0
+
+    var body: some View {
+        SettingsGroup(title: "Hook 实时遥测") {
+            SettingsRow(
+                title: installed ? "已接入 Claude Code" : "接入 Claude Code",
+                subtitle: installed
+                    ? LF("Skill 工具每次调用都会记一行事件（已累计 %d 条）。事件在 ~/.skill-atlas/usage-events.jsonl，与转录扫描口径合并展示。", eventsCount)
+                    : "在 ~/.claude/settings.json 注册一个 PostToolUse hook（只加自己的条目，写入前原文备份到 ~/.skill-atlas/settings-backups/）。此后技能调用实时计量，不再只靠扫转录考古。",
+                divider: false
+            ) {
+                HStack(spacing: Theme.Space.s8) {
+                    if let message {
+                        Text(message)
+                            .font(Theme.Fonts.caption)
+                            .foregroundStyle(Theme.healthy)
+                    }
+                    if installed {
+                        Button {
+                            do {
+                                try HookTelemetry.uninstall()
+                                refresh()
+                                flash(L("已移除，备份已留"))
+                            } catch { errorText = error.localizedDescription }
+                        } label: {
+                            Text(L("移除接入"))
+                                .font(Theme.Fonts.calloutEmphasis)
+                                .foregroundStyle(Theme.textPrimary)
+                                .padding(.horizontal, Theme.Space.s12)
+                                .frame(height: 26)
+                                .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                        }
+                        .buttonStyle(PressableButtonStyle())
+                        .quietControl()
+                        .help(L("从 settings.json 移除本应用的 hook 条目（其余配置不动），并删除 hook 脚本"))
+                    } else {
+                        Button {
+                            do {
+                                try HookTelemetry.install()
+                                refresh()
+                                flash(L("已接入"))
+                                store.mergeHookStats()
+                            } catch { errorText = error.localizedDescription }
+                        } label: {
+                            Text(L("接入…"))
+                                .font(Theme.Fonts.calloutEmphasis)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, Theme.Space.s12 + 2)
+                                .frame(height: 26)
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(PressableButtonStyle())
+                        .accentGlass(Capsule(style: .continuous))
+                        .help(L("写入 hook 前会先备份 settings.json；hook 脚本永远 exit 0，不会阻塞任何工具调用"))
+                    }
+                }
+            }
+            if let errorText {
+                Text(errorText)
+                    .font(Theme.Fonts.secondary)
+                    .foregroundStyle(Theme.error)
+                    .padding(.horizontal, Theme.Space.s16)
+                    .padding(.bottom, Theme.Space.s12)
+            }
+        }
+        .onAppear { refresh() }
+    }
+
+    private func refresh() {
+        installed = HookTelemetry.installed()
+        eventsCount = HookTelemetry.totalEvents
+    }
+
+    private func flash(_ text: String) {
+        message = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { message = nil }
+    }
+}
+
+// MARK: - 本地技能收编（散装 → 本库，人人可用）
+
+private struct AdoptGroup: View {
+    @EnvironmentObject private var store: AppStore
+    @State private var confirming = false
+
+    var body: some View {
+        let adoptable = store.adoptableSkills
+        SettingsGroup(title: "本地技能收编") {
+            SettingsRow(
+                title: "散装技能",
+                subtitle: adoptable.isEmpty
+                    ? "平台技能目录里没有待收编的散装技能。新装的会被自动发现，并在技能库列表顶部出现收编条。"
+                    : LF("发现 %d 个直接装在 ~/.claude/skills 等平台目录的技能。收进本库后统一开关平台、停用、更新、卸载。", adoptable.count),
+                divider: false
+            ) {
+                if adoptable.isEmpty {
+                    HStack(spacing: Theme.Space.s4) {
+                        Image(systemName: "checkmark.circle")
+                            .font(.system(size: 12))
+                        Text(L("已全部在库"))
+                            .font(Theme.Fonts.callout)
+                    }
+                    .foregroundStyle(Theme.textTertiary)
+                } else {
+                    HStack(spacing: Theme.Space.s8) {
+                        Button {
+                            store.jumpToLocalSkills()
+                        } label: {
+                            Text(L("去看看"))
+                                .font(Theme.Fonts.calloutEmphasis)
+                                .foregroundStyle(Theme.textPrimary)
+                                .padding(.horizontal, Theme.Space.s12)
+                                .frame(height: 26)
+                                .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                        }
+                        .buttonStyle(PressableButtonStyle())
+                        .quietControl()
+                        .help(L("只看本地安装的技能"))
+                        Button {
+                            confirming = true
+                        } label: {
+                            Text(LF("全部收编（%d）", adoptable.count))
+                                .font(Theme.Fonts.calloutEmphasis)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, Theme.Space.s12)
+                                .frame(height: 26)
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(PressableButtonStyle())
+                        .accentGlass(Capsule(style: .continuous))
+                        .help(L("把全部本地直装技能拷入本库并接管挂载"))
+                        .confirmationDialog(
+                            LF("把 %lld 个本地技能收进 Skill Atlas 库？", adoptable.count),
+                            isPresented: $confirming,
+                            titleVisibility: .visible
+                        ) {
+                            Button(L("收编")) { store.adoptAllLocalSkills() }
+                            Button(L("取消"), role: .cancel) {}
+                        } message: {
+                            Text(adoptConfirmMessage(adoptable))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func adoptConfirmMessage(_ adoptable: [Skill]) -> String {
+        var text = L("内容拷入 ~/.skill-atlas/skills/，原平台目录替换成指向本库的软链，之后在本应用统一开关平台。")
+        let external = adoptable.filter { SkillActions.isExternalSource($0) }.count
+        if external > 0 {
+            text += LF("其中 %lld 个的实体在平台目录之外，收编后编辑原目录不再生效。", external)
+        }
+        return text
     }
 }
 
@@ -194,6 +428,7 @@ private struct AppearanceGroup: View {
 
 private struct LibraryGroup: View {
     @EnvironmentObject private var store: AppStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pathsExpanded = false
 
     var body: some View {
@@ -220,7 +455,7 @@ private struct LibraryGroup: View {
                 subtitle: "本库 + CC Switch 源（只读）+ 各平台技能目录，软链去重后合并展示。"
             ) {
                 Button {
-                    withAnimation(Motion.control) { pathsExpanded.toggle() }
+                    withAnimation(reduceMotion ? nil : Motion.control) { pathsExpanded.toggle() }
                 } label: {
                     HStack(spacing: Theme.Space.s4) {
                         Text(LF("%lld 个目录", store.data?.summary.checkedPaths.count ?? 0))
@@ -282,7 +517,21 @@ private struct LibraryGroup: View {
 private struct MigrationGroup: View {
     @EnvironmentObject private var store: AppStore
 
+    /// 只对有 CC Switch 痕迹的用户显示：有 DB / 已迁移 / 有回滚清单。
+    /// 纯本地用户的「收进本库」入口是上面的收编组，这块整组不出现。
+    private var relevant: Bool {
+        store.data?.summary.hasCCSwitch == true
+            || store.data?.summary.migrated == true
+            || SkillMigrator.canRollback()
+    }
+
     var body: some View {
+        if relevant {
+            group
+        }
+    }
+
+    private var group: some View {
         SettingsGroup(title: "从 CC Switch 迁移") {
             VStack(alignment: .leading, spacing: Theme.Space.s12) {
                 // 机制：一张图讲清「复制进库，软链出去」
@@ -292,7 +541,7 @@ private struct MigrationGroup: View {
                     .lineSpacing(3)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(L("没用过 CC Switch？不需要这一步：用「安装技能」直接装进本库；已经散装在各平台目录里的技能会被自动收录展示，随时可选择收进库统一管理。"))
+                Text(L("迁移只覆盖 CC Switch 管理的技能。直接散装在平台目录里的（含迁移后新装的），走上面的「本地技能收编」或技能库顶部的收编条。"))
                     .font(Theme.Fonts.secondary)
                     .lineSpacing(3)
                     .foregroundStyle(Theme.textTertiary)
@@ -447,19 +696,23 @@ private struct AppGroup: View {
     @ObservedObject private var updates = UpdateChecker.shared
 
     private var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.4.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.3.1"
     }
 
     var body: some View {
         SettingsGroup(title: "应用") {
             SettingsRow(
                 title: "Skill Atlas \(version)",
-                subtitle: updates.available.map { LF("发现新版本 %@，点右侧按钮更新。", $0.version) }
-                    ?? (UpdateChecker.feedConfigured ? L("启动时自动检查一次新版本。") : L("本地构建 · 未配置更新源，重新构建即为最新。")),
+                subtitle: updates.available.map { LF("发现新版本 %@，点右侧按钮应用内自动更新（下载、校验、换装、重启一条龙）。", $0.version) }
+                    ?? (UpdateChecker.feedConfigured ? L("启动时自动检查一次新版本；有新版可一键应用内更新。") : L("本地构建 · 未配置更新源，重新构建即为最新。")),
                 divider: false
             ) {
                 Button {
-                    UpdateChecker.shared.checkFromMenu()
+                    if let feed = updates.available {
+                        SelfUpdater.shared.install(feed)
+                    } else {
+                        UpdateChecker.shared.checkFromMenu()
+                    }
                 } label: {
                     Text(updates.available == nil ? L("检查更新…") : LF("更新到 %@", updates.available?.version ?? ""))
                         .font(Theme.Fonts.calloutEmphasis)

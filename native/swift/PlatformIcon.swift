@@ -8,20 +8,26 @@ import SwiftUI
 //   Codex     = openai.svg（OpenAI 标准黑，模板渲染随明暗反色）
 //   Gemini    = gemini-color.svg（官方四色渐变，原色渲染）
 //   Grok      = xai.svg（xAI 官方 X 标，模板渲染随明暗反色）
-//   WorkBuddy = workbuddy.png（workbuddy.ai 官方猫耳机器人 app icon，原色渲染。
-//               官方只发 SVG，但其 evenodd 挖孔 + 高斯模糊 CoreSVG 渲染不了，
-//               已用 Chrome 无头栅格成 256px PNG——改这个标请重走栅格化）
-// UI 只展示这五个平台；OpenCode / Hermes 仅保留数据兼容，不再出现在界面上。
+//   WorkBuddy = workbuddy-trim.png（从官方 app icon 提炼的单色线稿。原图是「绿底 +
+//               白线」的完整 app 图标，自带底板、满饱和，混在一排「透明底细笔画标」
+//               里过重。流水线：workbuddy.png（母版，留着重制用）
+//               → tools/glyphify.swift 按白度抠出线稿成透明底模板图
+//               → tools/trimglyph.swift 裁掉透明边并居中进正方画布
+//               → 这里按模板渲染 + 品牌绿渐变、glyphScale 0.60 与其余标同墨量）
+//   OpenClaw  = openclaw.svg（自绘原创「三道爪痕」glyph，非官方商标——OpenClaw 的
+//               龙虾标带商标风险且官方无 press kit，用抽象爪痕规避；模板渲染反色）
+// UI 只展示这六个平台；OpenCode / Hermes 仅保留数据兼容，不再出现在界面上。
 
 extension AgentPlatform {
     /// 界面展示名（`label` 是 skills.platforms 的存储键，不能改）
     var displayName: String {
         switch self {
-        case .claude: return "Claude Code"
+        case .claude: return "Claude"
         case .codex: return "Codex"
         case .gemini: return "Gemini"
         case .grokbuild: return "Grok"
         case .workbuddy: return "WorkBuddy"
+        case .openclaw: return "OpenClaw"
         case .opencode: return "OpenCode"
         case .hermes: return "Hermes"
         }
@@ -53,7 +59,12 @@ enum PlatformBrand {
             glyphScale: 0.78
         )
         case .grokbuild: return Spec(file: "xai", template: true, tint: Color(hex: 0x8E8E93), glyphScale: 0.58)
-        case .workbuddy: return Spec(file: "workbuddy", template: false, tint: Color(hex: 0x01C886), glyphScale: 0.78)
+        case .workbuddy: return Spec(
+            file: "workbuddy-trim", template: true, tint: Color(hex: 0x01C886),
+            gradient: [Color(hex: 0x0FD08F), Color(hex: 0x00A97A)],
+            glyphScale: 0.60
+        )
+        case .openclaw: return Spec(file: "openclaw", template: true, tint: Color(hex: 0xE8503A), glyphScale: 0.66)
         case .opencode, .hermes: return nil
         }
     }
@@ -129,6 +140,7 @@ struct PlatformLogo: View {
         }
         .frame(width: size * (spec?.glyphScale ?? 0.62), height: size * (spec?.glyphScale ?? 0.62))
         .frame(width: chip ? size : size * 0.72, height: chip ? size : size * 0.72)
+        .clipShape(shape)
         .background {
             if chip {
                 shape.fill(chipFill(spec: spec, dark: dark))
@@ -220,24 +232,58 @@ struct PlatformFilterStrip: View {
     @EnvironmentObject private var store: AppStore
 
     var body: some View {
-        HStack(spacing: Theme.Space.s4) {
+        // 只给图标，第一次打开的人认不出是哪个平台；宽度够就带上名称，
+        // 详情栏展开/窗口变窄时自动退回纯图标（父级用 layoutPriority 保证
+        // 右侧菜单先拿到空间，这里拿到的才是真实剩余宽度）
+        ViewThatFits(in: .horizontal) {
+            strip(labeled: true)     // 宽：图标 + 名称
+            strip(labeled: false)    // 中：纯图标
+            compactMenu              // 窄：退成下拉，与类别/状态/来源同款
+        }
+    }
+
+    /// 极窄时的兜底：复用 FilterMenu，菜单里逐行列出平台名（名称照样看得到）
+    private var compactMenu: some View {
+        FilterMenu(
+            label: "平台",
+            selection: $store.platform,
+            options: ["全部"] + store.visiblePlatforms.map(\.label),
+            display: { key in
+                AgentPlatform.allCases.first { $0.label == key }?.displayName ?? key
+            }
+        )
+    }
+
+    private func strip(labeled: Bool) -> some View {
+        let filtering = store.platform != "全部"
+        return HStack(spacing: 2) {
             ForEach(store.visiblePlatforms) { platform in
                 let active = store.platform == platform.label
                 Button {
                     store.platform = active ? "全部" : platform.label
                 } label: {
-                    PlatformLogo(
-                        platform: platform,
-                        size: 22,
-                        lit: store.platform == "全部" || active
-                    )
-                    .overlay {
-                        if active {
-                            RoundedRectangle(cornerRadius: 22 * 0.3, style: .continuous)
-                                .strokeBorder(Theme.accent, lineWidth: 1.5)
+                    HStack(spacing: Theme.Space.s4 + 1) {
+                        // 没在筛选时全部点亮（品牌色本身就是识别信息）；
+                        // 一旦筛选，只有选中的保持点亮，其余去色让状态一眼可读
+                        PlatformLogo(platform: platform, size: 18, lit: !filtering || active)
+                        if labeled {
+                            Text(platform.displayName)
+                                .font(active ? Theme.Fonts.secondaryEmphasis : Theme.Fonts.secondary)
+                                .foregroundStyle(
+                                    active ? Theme.accent : (filtering ? Theme.textTertiary : Theme.textSecondary)
+                                )
+                                .fixedSize()
                         }
                     }
-                    .contentShape(Rectangle().inset(by: -2))
+                    .padding(.horizontal, labeled ? Theme.Space.s4 + 2 : 2)
+                    .frame(height: 24)
+                    .background {
+                        if active {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Theme.accent.opacity(0.12))
+                        }
+                    }
+                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .help(active ? LF("清除 %@ 筛选", platform.displayName) : LF("只看 %@", platform.displayName))
@@ -245,6 +291,10 @@ struct PlatformFilterStrip: View {
         }
         .padding(.horizontal, 3)
         .frame(height: 28)
-        .quietControl()
+        // 容器比之前更轻：只留极淡底表明「这一组是一套开关」，不再上发丝边
+        .background {
+            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                .fill(Color.primary.opacity(0.035))
+        }
     }
 }

@@ -83,6 +83,11 @@ enum SkillLauncher {
         return directory
     }
 
+    /// 给单技能试跑（G3）复用同一条 Terminal 通路，不另造一套 AppleScript
+    static func openTerminalForSandbox(command: String) throws {
+        try openTerminal(running: command)
+    }
+
     /// Terminal.app 新窗口执行（首次会弹「控制 Terminal」授权，系统级、一次性）
     private static func openTerminal(running commandLine: String) throws {
         let escaped = commandLine
@@ -178,14 +183,39 @@ enum GitSync {
         return Status(branch: branch, dirtyCount: dirty, lastCommit: last)
     }
 
+    /// 不该进 git 快照的东西。往 ~/.skill-atlas 塞新文件的功能**必须**在这里登记，
+    /// 否则 snapshot() 的 `git add -A` 会把它们推到远端：settings 备份含用户 env 与
+    /// API base、事件日志含使用行为、沙箱与 Profile 快照都是一次性物。
+    static let defaultIgnores = [
+        "usage-index.json",
+        "usage-events.jsonl",
+        "skill-backups/",
+        "settings-backups/",
+        "profile-snapshots/",
+        "sandbox/",
+        "update.log",
+        ".DS_Store",
+    ]
+
+    /// 幂等补齐 .gitignore。原实现只在文件不存在时写一次，于是 F8 之后新增的功能
+    /// 在老仓库上永远补不进条目——新文件被静默纳入快照。
+    static func ensureIgnored(_ lines: [String] = defaultIgnores) throws {
+        let gitignore = libraryRoot.appendingPathComponent(".gitignore")
+        let existing = (try? String(contentsOf: gitignore, encoding: .utf8)) ?? ""
+        let present = Set(existing.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) })
+        let missing = lines.filter { !present.contains($0) }
+        guard !missing.isEmpty else { return }
+        var text = existing
+        if !text.isEmpty, !text.hasSuffix("\n") { text += "\n" }
+        text += missing.joined(separator: "\n") + "\n"
+        try FileManager.default.createDirectory(at: libraryRoot, withIntermediateDirectories: true)
+        try text.write(to: gitignore, atomically: true, encoding: .utf8)
+    }
+
     /// git init + .gitignore（使用缓存与备份不入库）+ 首次提交
     static func initialize() throws {
         guard !isRepo() else { return }
-        let gitignore = libraryRoot.appendingPathComponent(".gitignore")
-        if !FileManager.default.fileExists(atPath: gitignore.path) {
-            try "usage-index.json\nskill-backups/\n.DS_Store\n"
-                .write(to: gitignore, atomically: true, encoding: .utf8)
-        }
+        try ensureIgnored()
         guard run(["init"]) != nil else { throw AtlasError(L("git init 失败（本机没有可用的 git？）")) }
         _ = run(["add", "-A"])
         _ = run(["commit", "-m", "Skill Atlas 初始快照"])
@@ -195,6 +225,8 @@ enum GitSync {
     @discardableResult
     static func snapshot() throws -> Bool {
         guard isRepo() else { throw AtlasError(L("还不是 git 仓库，先初始化")) }
+        // 每次提交前补齐忽略项：老仓库是在这些文件出现之前 init 的
+        try? ensureIgnored()
         _ = run(["add", "-A"])
         let dirty = run(["status", "--porcelain"])?
             .split(separator: "\n").filter { !$0.isEmpty }.count ?? 0
