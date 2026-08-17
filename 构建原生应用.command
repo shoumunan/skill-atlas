@@ -34,7 +34,11 @@ if swift build -c release 2>/dev/null; then
   cp "$APP_DIR/native/.build/release/SkillAtlas" "$BIN"
 else
   echo "构建方式：swiftc + vendor（SwiftPM 在纯 CLT 环境不可用）"
+  # -swift-version 5：和 Package.swift 的 swift-tools-version:5.9 对齐。
+  # 不锁版本时，部分 CI 镜像的 swiftc 默认按 Swift 6 语义做 actor 隔离检查，
+  # SwiftPM 路径里只是警告的 MainActor 越界访问在这里会变成硬错误。
   CLANG_MODULE_CACHE_PATH="/tmp/skill-atlas-clang-cache" xcrun swiftc -O -parse-as-library \
+    -swift-version 5 \
     -target arm64-apple-macos14.0 \
     "$APP_DIR"/native/swift/*.swift \
     "$APP_DIR"/native/vendor/FluidGradient/Sources/FluidGradient/*.swift \
