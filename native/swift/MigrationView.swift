@@ -6,7 +6,7 @@ import SwiftUI
 // 讲清三件事：迁什么（N 个技能）、怎么迁（复制进库 + 软链出去）、能不能反悔（随时撤销）。
 
 struct MigrationSheet: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     private var plan: SkillMigrator.Plan { SkillMigrator.plan() }
 

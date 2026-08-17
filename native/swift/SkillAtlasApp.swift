@@ -75,7 +75,7 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
 @main
 struct SkillAtlasApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var store = AppStore()
+    @State private var store = AppStore()
     /// 设置页「菜单栏快速搜索」开关：关掉即撤下菜单栏图标（⌥⌘K 热键随之无处呼出）
     @AppStorage("atlasMenuBarEnabled") private var menuBarEnabled = true
 
@@ -94,7 +94,8 @@ struct SkillAtlasApp: App {
                 // 切语言时整棵树重建，所有 LocalizedStringKey 立即按新语言取词
                 .id(store.uiLanguage)
                 .environment(\.locale, store.uiLanguage.resolvedLocale)
-                .environmentObject(store)
+                .environment(store)
+                .environment(store.usageIndex)
                 .frame(minWidth: 1000, minHeight: 660)
                 .background(WindowConfigurator())
                 .preferredColorScheme(forcedScheme)
@@ -145,7 +146,7 @@ struct SkillAtlasApp: App {
             MenuBarPalette()
                 .id(store.uiLanguage)
                 .environment(\.locale, store.uiLanguage.resolvedLocale)
-                .environmentObject(store)
+                .environment(store)
         } label: {
             Image(nsImage: MenuBarIcon.template)
         }

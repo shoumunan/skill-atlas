@@ -38,7 +38,7 @@ enum MountStatus: String {
     }
 }
 
-struct Mount {
+struct Mount: Equatable {
     var enabled: Bool
     var status: MountStatus
     var path: String
@@ -47,7 +47,7 @@ struct Mount {
 }
 
 /// 技能来源：CC Switch 管理 or 用户直接装在 ~/.claude/skills、~/.codex/skills 的本地技能
-enum SkillOrigin: String, CaseIterable {
+enum SkillOrigin: String, CaseIterable, Equatable {
     case atlas, ccSwitch, local
 
     var label: String {
@@ -59,7 +59,7 @@ enum SkillOrigin: String, CaseIterable {
     }
 }
 
-struct Skill: Identifiable {
+struct Skill: Identifiable, Equatable {
     var id: String { name }
     var dbId: Int
     var name: String
@@ -164,8 +164,8 @@ enum Rules {
     /// 手工维护的高质量示例
     static let examplePrompts: [String: [String]] = [
         "fund-content-creative": [
-            "帮我想 3 个能让基民共情的基金短视频创意",
-            "围绕定投，做一套不说教的投教内容方案",
+            "根据这些要点，写一段给同事看的市场说明（不超过 200 字）",
+            "把这份材料改成三条并列的结论，每条一句话",
         ],
         "browser-use": [
             "打开这个网页，帮我填写表单并截图确认",

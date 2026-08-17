@@ -9,7 +9,7 @@ import SwiftUI
 // 四个面板同一套头部（彩色图标章 + 标题 + 计数 + 副文案），行样式统一。
 
 struct DoctorPage: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
 
     var body: some View {
         let report = store.doctorReport
@@ -108,7 +108,7 @@ private struct DoctorPanel<Content: View>: View {
 // MARK: - 预算带
 
 private struct BudgetBand: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var report: DoctorReport
 
@@ -233,7 +233,7 @@ private struct BudgetBand: View {
 // MARK: - 需要修复（挂载与文件问题，从技能列表收拢过来的唯一入口）
 
 private struct IssuesPanel: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
 
     var body: some View {
         let issues = store.skills.filter { $0.health != .healthy && !$0.disabled }
@@ -332,7 +332,7 @@ private struct IssuesPanel: View {
 // MARK: - 描述体检（丢弃风险 / 截断 / 缩短建议，都是「描述」一件事）
 
 private struct DescriptionPanel: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var report: DoctorReport
 
     var body: some View {
@@ -438,7 +438,8 @@ private func groupHead(_ text: String, count: Int) -> some View {
 // MARK: - 长期未用（可回收）
 
 private struct StalePanel: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
+    @Environment(UsageIndexState.self) private var usageIndex
     @State private var confirmBatch = false
     var report: DoctorReport
 
@@ -455,7 +456,7 @@ private struct StalePanel: View {
                 : LF("从未使用或超 90 天未用。悬停行内单个停用，可回收 ~%d token。", report.reclaimableTokens),
             note: L("不计入健康")
         ) {
-            if store.usageIndexing {
+            if usageIndex.indexing {
                 HStack(spacing: Theme.Space.s8) {
                     ProgressView().controlSize(.small)
                     Text(L("正在索引使用记录…"))
@@ -512,7 +513,7 @@ private struct StalePanel: View {
 
 /// 长期未用行：行内一键停用（≤2 次点击自查达标）
 private struct StaleRow: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @State private var hovering = false
     var skill: Skill
 
@@ -561,7 +562,7 @@ private struct StaleRow: View {
 // MARK: - 触发词重叠
 
 private struct OverlapPanel: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
 
     var body: some View {
         DoctorPanel(
@@ -591,7 +592,7 @@ private struct OverlapPanel: View {
 }
 
 private struct OverlapRow: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var overlap: TriggerOverlap
 
     var body: some View {
@@ -641,7 +642,7 @@ private struct OverlapRow: View {
 // MARK: - 共享小件
 
 private struct DoctorRow: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @State private var hovering = false
     var skill: Skill
     var note: String
@@ -705,7 +706,7 @@ private func emptyHint(symbol: String, tint: Color, text: String) -> some View {
 
 /// 体检行尾的「开药」入口
 struct RxButton: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var skill: Skill
 
     var body: some View {
@@ -727,7 +728,7 @@ struct RxButton: View {
 
 /// 处方 sheet：改法说明 + 前后对照（250 字符可见线）+ 试触发疗效 + 写回
 struct PrescriptionSheet: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var probePhrase = ""
     @State private var promptCopied = false

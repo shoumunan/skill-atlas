@@ -18,7 +18,7 @@ import Foundation
 // 性能：不做逐行 JSON 解码。mmap 文件后字节级搜索 "skills/"，
 // 只对命中行做类型核对与时间戳提取；缓存按 (路径, mtime, size) 命中直接复用。
 
-struct SkillUsage {
+struct SkillUsage: Equatable {
     var claudeSessions = 0
     var codexSessions = 0
     var lastUsed: Date?
@@ -33,10 +33,12 @@ enum UsageIndexer {
         var size: Int
         /// 目录名 → 该会话内最后引用的 unix 时间戳
         var skills: [String: Double]
+        /// 已消化到的字节偏移（对齐到完整行末）。jsonl 追加时只读尾巴。
+        var bytesRead: Int = 0
     }
 
     struct Cache: Codable {
-        var version: Int = 2
+        var version: Int = 3
         /// 平台 → (会话文件路径 → 解析结果)
         var files: [String: [String: FileEntry]] = [:]
     }
@@ -55,7 +57,7 @@ enum UsageIndexer {
         let started = Date()
         let fileManager = FileManager.default
         var cache = (try? JSONDecoder().decode(Cache.self, from: Data(contentsOf: cacheURL))) ?? Cache()
-        if cache.version != 2 { cache = Cache() }
+        if cache.version != 3 { cache = Cache() }
 
         let roots: [(platform: String, url: URL)] = [
             ("claude", SkillScanner.home.appendingPathComponent(".claude/projects")),
@@ -87,15 +89,36 @@ enum UsageIndexer {
             if let hit = cache.files[job.platform]?[job.path],
                hit.mtime == job.mtime, hit.size == job.size {
                 newCache.files[job.platform, default: [:]][job.path] = hit
+            } else if let hit = cache.files[job.platform]?[job.path],
+                      job.size > hit.size, hit.bytesRead > 0, hit.bytesRead <= hit.size {
+                // jsonl 追加：只读上次完整行之后的尾巴，技能计数与旧结果合并
+                let added = parseFile(
+                    at: job.path,
+                    platform: job.platform,
+                    knownDirs: knownDirs,
+                    fallbackTime: job.mtime,
+                    startOffset: hit.bytesRead
+                )
+                var merged = hit.skills
+                for (name, time) in added.skills {
+                    merged[name] = max(merged[name] ?? 0, time)
+                }
+                newCache.files[job.platform, default: [:]][job.path] = FileEntry(
+                    mtime: job.mtime,
+                    size: job.size,
+                    skills: merged,
+                    bytesRead: added.bytesRead
+                )
+                reparsed += 1
             } else {
-                let skills = parseFile(
+                let parsed = parseFile(
                     at: job.path,
                     platform: job.platform,
                     knownDirs: knownDirs,
                     fallbackTime: job.mtime
                 )
                 newCache.files[job.platform, default: [:]][job.path] = FileEntry(
-                    mtime: job.mtime, size: job.size, skills: skills
+                    mtime: job.mtime, size: job.size, skills: parsed.skills, bytesRead: parsed.bytesRead
                 )
                 reparsed += 1
             }
@@ -178,10 +201,30 @@ enum UsageIndexer {
         at path: String,
         platform: String,
         knownDirs: Set<String>,
-        fallbackTime: Double
-    ) -> [String: Double] {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe),
-              !data.isEmpty else { return [:] }
+        fallbackTime: Double,
+        startOffset: Int = 0
+    ) -> (skills: [String: Double], bytesRead: Int) {
+        let url = URL(fileURLWithPath: path)
+        let data: Data
+        let baseOffset: Int
+        if startOffset > 0 {
+            guard let handle = try? FileHandle(forReadingFrom: url) else { return ([:], startOffset) }
+            defer { try? handle.close() }
+            do {
+                try handle.seek(toOffset: UInt64(startOffset))
+                let tail = try handle.readToEnd() ?? Data()
+                guard !tail.isEmpty else { return ([:], startOffset) }
+                data = tail
+                baseOffset = startOffset
+            } catch {
+                return ([:], startOffset)
+            }
+        } else {
+            guard let mapped = try? Data(contentsOf: url, options: .mappedIfSafe),
+                  !mapped.isEmpty else { return ([:], 0) }
+            data = mapped
+            baseOffset = 0
+        }
 
         var result: [String: Double] = [:]
         var searchStart = data.startIndex
@@ -193,10 +236,10 @@ enum UsageIndexer {
             searchStart = match.upperBound
 
             if lineRange == nil || !(lineRange!.contains(match.lowerBound)) {
-                // 定位新行边界
+                // 定位新行边界；没有换行的尾巴不算一行，留给下次续读
+                guard let lineEnd = data[match.upperBound...].firstIndex(of: newline) else { break }
                 let lineStart = data[..<match.lowerBound].lastIndex(of: newline).map { data.index(after: $0) }
                     ?? data.startIndex
-                let lineEnd = data[match.upperBound...].firstIndex(of: newline) ?? data.endIndex
                 lineRange = lineStart..<lineEnd
 
                 // Codex：只认工具调用行（目录清单/世界状态行全部排除）
@@ -228,7 +271,19 @@ enum UsageIndexer {
             let time = lineTime > 0 ? lineTime : fallbackTime
             result[name] = max(result[name] ?? 0, time)
         }
-        return result
+        return (result, baseOffset + completeBytes(in: data))
+    }
+
+    /// 已对齐到完整行末的字节数。文件末尾没有换行时停在上一行，下次续读会再带上半截。
+    private static func completeBytes(in data: Data) -> Int {
+        if data.isEmpty { return 0 }
+        if data[data.index(before: data.endIndex)] == newline {
+            return data.count
+        }
+        if let last = data.lastIndex(of: newline) {
+            return data.distance(from: data.startIndex, to: data.index(after: last))
+        }
+        return 0
     }
 
     private static func extractTimestamp(_ data: Data, in range: Range<Data.Index>) -> Double {

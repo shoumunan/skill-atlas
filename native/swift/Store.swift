@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 
 enum LaunchArgs {
@@ -45,7 +46,7 @@ enum NavPage: String, CaseIterable, Identifiable, Hashable {
 
     var help: String {
         switch self {
-        case .library: return L("安装、挂载、更新、卸载技能（⌘1）")
+        case .library: return L("安装、挂载、更新、卸载技能（⌘1）。J/K 或方向键选行，/ 搜索")
         case .doctor: return L("挂载异常、预算、重叠、长期未用（⌘2）")
         case .guide: return L("三步把技能用起来（⌘3）")
         case .settings: return L("外观、本库、迁移、应用更新（⌘4）")
@@ -61,74 +62,130 @@ struct TriggerOverlap: Identifiable {
     var id: String { "\(first.name)|\(second.name)" }
 }
 
+/// 索引进度单独成对象：按文件回调时不要带动技能表重绘。
 @MainActor
-final class AppStore: ObservableObject {
-    @Published var data: AtlasData? { didSet { dataRevision += 1 } }
+@Observable
+final class UsageIndexState {
+    var indexing = false
+    var progress = 0.0
+    @ObservationIgnored private var lastPublished = 0.0
+
+    func begin() {
+        indexing = true
+        progress = 0
+        lastPublished = 0
+    }
+
+    func report(_ fraction: Double) {
+        guard fraction >= 1 || fraction - lastPublished >= 0.2 else { return }
+        lastPublished = fraction
+        progress = fraction
+    }
+
+    func finish() {
+        progress = 1
+        indexing = false
+    }
+}
+
+@MainActor
+@Observable
+final class AppStore {
+    var data: AtlasData? { didSet { dataRevision += 1; libraryGeneration += 1; scheduleDoctorReport() } }
     /// 体检报告缓存的失效键：技能数据或使用统计一变就 +1
     private var dataRevision = 0
-    private var doctorReportCache: (revision: Int, window: Int, report: DoctorReport)?
-    @Published var fatalError: String?
-    @Published var scanning = false
+    /// 只在库表真的要变时抬。体检/指南读用量时不拆隐藏着的技能表。
+    private var libraryGeneration = 0
+    @ObservationIgnored private var doctorReportCache: (revision: Int, window: Int, report: DoctorReport)?
+    /// 只让读了 `doctorReport` 的视图刷新，不再带动整棵树。
+    private var cachedDoctorReport = DoctorReport() {
+        didSet { doctorBadgeCache = nil }
+    }
+    @ObservationIgnored private var doctorComputeTask: Task<Void, Never>?
+    @ObservationIgnored private var deferredWork: Task<Void, Never>?
+    @ObservationIgnored private var firstLaunchDeferred = true
+    var fatalError: String?
+    var scanning = false
 
-    @Published var nav: NavPage = .library
-    @Published var selectedName: String?
-    @Published var search = ""
-    @Published var category = "全部"
-    @Published var platform = "全部"
+    var nav: NavPage = .library
+    var selectedName: String?
+    var search = "" { didSet { scheduleSearchDebounce() } }
+    /// 过滤用的防抖搜索词：输入即时回显，过滤延迟 200ms——每击键全量过滤 + 整表 reloadData 会发肉
+    private(set) var debouncedSearch = ""
+    @ObservationIgnored private var searchDebounce: Task<Void, Never>?
+    var category = "全部"
+    var platform = "全部"
     /// 状态筛选：全部 / 可更新 / 已停用（健康状态的入口统一收在体检页）
-    @Published var stateFilter = "全部"
-    @Published var sourceFilter = "全部"
-    @Published var favoritesOnly = false
-    @Published var favorites: Set<String>
+    var stateFilter = "全部"
+    var sourceFilter = "全部"
+    var favoritesOnly = false
+    var favorites: Set<String>
 
     /// 触发词重叠（每次扫描后计算一次，不计入健康统计）
-    @Published var triggerOverlaps: [TriggerOverlap] = []
+    var triggerOverlaps: [TriggerOverlap] = []
 
     /// 使用频率统计（key = 技能目录名；后台增量索引会话日志）
-    @Published var usage: [String: SkillUsage] = [:] { didSet { dataRevision += 1 } }
-    @Published var usageIndexing = false
-    @Published var usageProgress = 0.0
+    var usage: [String: SkillUsage] = [:] {
+        didSet {
+            // 默认按名称排：使用统计落地不必让 145 行过滤缓存失效。
+            // 按频率/近用排序，或人正在看体检/指南时，才抬世代。
+            if sortOrder == "使用频率" || sortOrder == "最近使用" {
+                dataRevision += 1
+                libraryGeneration += 1
+            } else if nav == .doctor || nav == .guide {
+                dataRevision += 1
+            }
+            scheduleDoctorReport()
+        }
+    }
+    let usageIndex = UsageIndexState()
     /// 最近一次索引的统计口径（报告/帮助文案用）
-    @Published var usageIndexInfo = ""
+    var usageIndexInfo = ""
 
     /// 技能库排序：名称 / 使用频率
-    @Published var sortOrder = "名称"
+    var sortOrder = "名称"
     /// 技能库分组视图（二期 F7）：不分组 / 套件 / 类别——逻辑分组，不动物理目录
-    @Published var groupBy = "不分组"
+    var groupBy = "不分组"
 
     /// 阅读器 sheet 当前展示的技能（nil = 关闭）
-    @Published var readerSkill: Skill?
+    var readerSkill: Skill?
 
     /// 安装技能 sheet（⌘N / 筛选行「+ 安装」/ 空状态主按钮）
-    @Published var installSheetPresented = false
+    var installSheetPresented = false
 
     /// 从 CC Switch 迁出向导
-    @Published var migrationSheetPresented = false
-    @Published var migrating = false
-    @Published var migrationStatus = ""
+    var migrationSheetPresented = false
+    var migrating = false
+    var migrationStatus = ""
     /// 清理 CC Switch 副本向导（迁移完成后回收磁盘）
-    @Published var cleanupSheetPresented = false
+    var cleanupSheetPresented = false
 
     /// 管理操作（停用/恢复/卸载）的错误提示，弹 alert
-    @Published var actionError: String?
+    var actionError: String?
     /// 卸载确认对话框的目标技能（nil = 关闭）
-    @Published var uninstallTarget: Skill?
+    var uninstallTarget: Skill?
     /// 正在更新中的技能目录名（行内旋转指示）
-    @Published var updatingDirectories: Set<String> = []
+    var updatingDirectories: Set<String> = []
     /// 正在批量检查技能更新
-    @Published var checkingSkillUpdates = false
+    var checkingSkillUpdates = false
     /// 本次检查是否用户手动发起（后台自动检查不在界面上展示进度）
-    @Published var checkingInteractive = false
+    var checkingInteractive = false
     /// 最近一次技能更新检查完成时间
-    @Published var lastSkillUpdateCheck: Date?
+    var lastSkillUpdateCheck: Date?
     /// 体检页的上下文窗口档位（token），持久化
-    @Published var contextWindowTokens: Int {
-        didSet { UserDefaults.standard.set(contextWindowTokens, forKey: "atlasContextWindow") }
+    var contextWindowTokens: Int {
+        didSet {
+            UserDefaults.standard.set(contextWindowTokens, forKey: "atlasContextWindow")
+            scheduleDoctorReport()
+        }
     }
-    private var debugActionDone = false
+    private static let lastSkillUpdateCheckKey = "atlasLastSkillUpdateCheck"
+    @ObservationIgnored private var debugActionDone = false
 
     /// 自增即请求聚焦全局搜索框（⌘K）
-    @Published var searchFocusRequest = 0
+    var searchFocusRequest = 0
+    /// 技能表跨切页复用，避免 SwiftUI 卸掉时丢掉滚动位置。
+    @ObservationIgnored var skillTable: SkillTableController?
 
     /// 素材投递箱（二期 F5）：拖进来的文件与匹配结果
     struct DroppedMaterial: Identifiable {
@@ -136,23 +193,22 @@ final class AppStore: ObservableObject {
         var matches: [DropMatch]
         var id: String { url.path }
     }
-    @Published var droppedMaterial: DroppedMaterial?
-    @Published var dropTargeted = false
+    var droppedMaterial: DroppedMaterial?
+    var dropTargeted = false
 
     func receiveDroppedFile(_ url: URL) {
         let matches = DropRules.match(fileURL: url, skills: skills)
         droppedMaterial = DroppedMaterial(url: url, matches: matches)
     }
 
-    /// 已装技能的安全复扫结果（key = 技能目录名；后台增量，mtime 缓存）
-    @Published var securityFindings: [String: [SecurityFinding]] = [:]
-    private var securityCache: [String: (stamp: Date, findings: [SecurityFinding])] = [:]
+    /// 已装技能的安全复扫结果（key = 技能目录名；后台增量，逐文件缓存落盘）
+    var securityFindings: [String: [SecurityFinding]] = [:]
     /// 已装技能的外链清单（info 级 URL，喂给存活探测）
-    @Published var externalLinks: [String: [String]] = [:]
+    var externalLinks: [String: [String]] = [:]
     /// 外链存活探测结果（并进安全展示）
-    @Published var deadLinkFindings: [String: [SecurityFinding]] = [:]
-    @Published var checkingLinks = false
-    @Published var lastLinkCheck: Date?
+    var deadLinkFindings: [String: [SecurityFinding]] = [:]
+    var checkingLinks = false
+    var lastLinkCheck: Date?
 
     /// 体检/详情用的安全合并视图：静态复扫 + 外链死链
     var securityDisplay: [String: [SecurityFinding]] {
@@ -184,18 +240,18 @@ final class AppStore: ObservableObject {
     }
 
     /// 单技能审阅（sheet；nil = 关闭）
-    @Published var updateReview: UpdateReview?
+    var updateReview: UpdateReview?
     /// 批量审阅（sheet；nil = 关闭，[] = 正在对照上游）
-    @Published var batchReviews: [UpdateReview]?
+    var batchReviews: [UpdateReview]?
     /// 回滚确认（confirmationDialog）：技能 + 将恢复到的备份名
     struct RollbackRequest: Identifiable {
         var skill: Skill
         var backupName: String
         var id: String { skill.name }
     }
-    @Published var rollbackRequest: RollbackRequest?
+    var rollbackRequest: RollbackRequest?
     /// 更新/回滚完成后的结果通报（alert）
-    @Published var updateNotice: String?
+    var updateNotice: String?
 
     private func computeReview(_ skill: Skill) async -> UpdateReview {
         let source = URL(fileURLWithPath: skill.sourcePath, isDirectory: true)
@@ -282,8 +338,8 @@ final class AppStore: ObservableObject {
     // MARK: - 单技能试跑（三期 G3）
 
     /// 试跑确认（sheet）：展示能隔离什么、不能隔离什么，确认后才建目录开终端
-    @Published var sandboxTarget: Skill?
-    @Published var sandboxCount = 0
+    var sandboxTarget: Skill?
+    var sandboxCount = 0
 
     func requestSandbox(_ skill: Skill) {
         sandboxTarget = skill
@@ -316,7 +372,7 @@ final class AppStore: ObservableObject {
 
     // MARK: - 场景 Profile（三期 G8）
 
-    @Published var profiles = ProfilesFile()
+    var profiles = ProfilesFile()
     /// 待确认的写盘计划（sheet）：nil = 无
     struct ProfileApplyRequest: Identifiable {
         var profile: AtlasProfile
@@ -325,9 +381,9 @@ final class AppStore: ObservableObject {
         var directory: URL?
         var id: String { (directory?.path ?? "user") + profile.id }
     }
-    @Published var profileRequest: ProfileApplyRequest?
-    @Published var profileSheetPresented = false
-    @Published var profileNotice: String?
+    var profileRequest: ProfileApplyRequest?
+    var profileSheetPresented = false
+    var profileNotice: String?
 
     var activeProfile: AtlasProfile? {
         profiles.profiles.first { $0.id == profiles.activeProfileID }
@@ -440,7 +496,7 @@ final class AppStore: ObservableObject {
     // MARK: - 描述医生开药（三期 G2）
 
     /// 处方 sheet（nil = 关闭）
-    @Published var prescription: DescriptionPrescription?
+    var prescription: DescriptionPrescription?
 
     func requestPrescription(_ skill: Skill) {
         prescription = DescriptionRx.prescribe(skill: skill)
@@ -514,7 +570,7 @@ final class AppStore: ObservableObject {
         var dependents: [String]
         var id: String { skill.name }
     }
-    @Published var disableWarning: DisableWarning?
+    var disableWarning: DisableWarning?
 
     /// 停用入口统一走这里：有活跃下游依赖先警告
     func requestDisable(_ skill: Skill) {
@@ -529,20 +585,22 @@ final class AppStore: ObservableObject {
     }
 
     /// 界面语言（设置页切换；视图树以它为 .id 整体重建，立即生效）
-    @Published var uiLanguage = AppLanguage.stored
+    var uiLanguage = AppLanguage.stored
     func selectLanguage(_ language: AppLanguage) {
         AppLanguage.select(language)
         uiLanguage = language
     }
 
     private static let favoritesKey = "skill-atlas-favorites"
-    private var keyMonitor: Any?
+    @ObservationIgnored private var keyMonitor: Any?
 
     init() {
         let stored = UserDefaults.standard.stringArray(forKey: Self.favoritesKey) ?? []
         favorites = Set(stored)
         let window = UserDefaults.standard.integer(forKey: "atlasContextWindow")
         contextWindowTokens = window > 0 ? window : 200_000
+        let lastCheck = UserDefaults.standard.double(forKey: Self.lastSkillUpdateCheckKey)
+        if lastCheck > 0 { lastSkillUpdateCheck = Date(timeIntervalSince1970: lastCheck) }
         let page = LaunchArgs.value("atlasPage") ?? UserDefaults.standard.string(forKey: "atlasPage")
         if let page {
             switch page {
@@ -564,7 +622,10 @@ final class AppStore: ObservableObject {
         }
     }
 
-    /// 技能库页支持 ↑/↓ 移动选中项；输入框聚焦时不拦截。
+    /// 库页 Equatable 隔离用：后台安全扫描/外链探测不抬这个世代，列表不跟着重刷。
+    var libraryEpoch: Int { libraryGeneration }
+
+    /// 技能库：↑/↓ 或 J/K 选行，/ 聚焦搜索。输入框聚焦时不拦截。
     func installKeyMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -573,8 +634,11 @@ final class AppStore: ObservableObject {
                       event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
                       !(NSApp.keyWindow?.firstResponder is NSTextView) else { return event }
                 switch event.keyCode {
-                case 125: self.moveSelection(1); return nil
-                case 126: self.moveSelection(-1); return nil
+                case 125, 38: self.moveSelection(1); return nil
+                case 126, 40: self.moveSelection(-1); return nil
+                case 44:
+                    self.searchFocusRequest += 1
+                    return nil
                 default: return event
                 }
             }
@@ -597,9 +661,13 @@ final class AppStore: ObservableObject {
         scanning = true
         defer { scanning = false }
         do {
-            var result = try await Task.detached(priority: .userInitiated) {
-                try SkillScanner.scan()
+            let scanned = try await Task.detached(priority: .userInitiated) {
+                let data = try SkillScanner.scan()
+                let overlaps = AppStore.computeTriggerOverlaps(data.skills)
+                return (data, overlaps)
             }.value
+            var result = scanned.0
+            let overlaps = scanned.1
             // 扫描结果里 updateAvailable 默认 false；把上一轮检查的标记带过来，
             // 否则每次重扫都会丢「有新版本」状态（检查有 30 分钟节流，不会马上补回）
             let previousFlags = Dictionary(
@@ -611,13 +679,21 @@ final class AppStore: ObservableObject {
                 copy.updateAvailable = previousFlags[skill.directory] ?? false
                 return copy
             }
-            data = result
-            fatalError = nil
-            triggerOverlaps = Self.computeTriggerOverlaps(result.skills)
-            reindexUsage(for: result.skills)
-            rescanSecurity(for: result.skills)
+            // 扫描结果与上一轮无差异就不发布：watcher 抖动（touch/元数据事件）不该带动全树重算。
+            // hasCCSwitch/migrated 可以不伴随技能集变化（如删库留目录），单独比这两个标志。
+            let summaryFlagsChanged = data.map {
+                $0.summary.hasCCSwitch != result.summary.hasCCSwitch
+                    || $0.summary.migrated != result.summary.migrated
+            } ?? true
+            // 先标「正在索引」，再发布 data：否则空 usage + 未开始索引会被当成「全部吃灰」
+            scheduleBackgroundWork(skills: result.skills)
+            if summaryFlagsChanged || data?.skills != result.skills {
+                data = result
+                triggerOverlaps = overlaps
+            }
+            if fatalError != nil { fatalError = nil }
             startWatchingIfNeeded()
-            runPhase2ProbesIfRequested(skills: result.skills)
+            await runPhase2ProbesIfRequested(skills: result.skills)
             // 调试钩子：-atlasReader <技能名> 启动即打开阅读器；-atlasSelect <技能名> 启动即选中（截图用）
             if readerSkill == nil,
                let name = UserDefaults.standard.string(forKey: "atlasReader"),
@@ -673,7 +749,7 @@ final class AppStore: ObservableObject {
             }
             // 默认不选中任何技能（详情栏保持收起，等用户点了再展开）
             let existing = keepSelection ? result.skills.first(where: { $0.name == selectedName }) : nil
-            selectedName = existing?.name
+            if selectedName != existing?.name { selectedName = existing?.name }
             loadProfiles()
             // 老仓库是在这些文件出现之前 init 的，补齐忽略项防止 settings 备份、
             // 事件日志、沙箱被 F8 的快照提交推到远端
@@ -692,9 +768,7 @@ final class AppStore: ObservableObject {
                     self?.rollbackMigration()
                 }
             }
-            if !LaunchArgs.flag("atlasQuit") {
-                Task { await self.checkSkillUpdates(interactive: false) }
-            }
+            // 自动 git fetch 改走 scheduleBackgroundWork，错开启动前 10 秒
             if let raw = UserDefaults.standard.string(forKey: "atlasToggle"),
                let platform = AgentPlatform(rawValue: raw) {
                 UserDefaults.standard.removeObject(forKey: "atlasToggle")
@@ -953,8 +1027,56 @@ final class AppStore: ObservableObject {
         return seen
     }
 
+    private struct FilterStamp: Equatable {
+        var revision: Int
+        var search: String
+        var category: String
+        var platform: String
+        var stateFilter: String
+        var sourceFilter: String
+        var favoritesOnly: Bool
+        var favorites: Set<String>
+        var sortOrder: String
+    }
+
+    @ObservationIgnored private var filteredSkillsCache: (stamp: FilterStamp, result: [Skill])?
+
+    /// 搜索防抖：清空立即生效（✕ 按钮 / ⌘K 退出不清不滞后）；非空延迟 200ms 再进过滤
+    private func scheduleSearchDebounce() {
+        searchDebounce?.cancel()
+        if search.isEmpty {
+            if debouncedSearch != search { debouncedSearch = search }
+            return
+        }
+        searchDebounce = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled, let self, self.debouncedSearch != self.search else { return }
+            self.debouncedSearch = self.search
+        }
+    }
+
     var filteredSkills: [Skill] {
-        let query = search.trimmingCharacters(in: .whitespaces).lowercased()
+        let stamp = FilterStamp(
+            revision: dataRevision,
+            search: debouncedSearch,
+            category: category,
+            platform: platform,
+            stateFilter: stateFilter,
+            sourceFilter: sourceFilter,
+            favoritesOnly: favoritesOnly,
+            favorites: favorites,
+            sortOrder: sortOrder
+        )
+        if let cache = filteredSkillsCache, cache.stamp == stamp {
+            return cache.result
+        }
+        let result = computeFilteredSkills()
+        filteredSkillsCache = (stamp, result)
+        return result
+    }
+
+    private func computeFilteredSkills() -> [Skill] {
+        let query = debouncedSearch.trimmingCharacters(in: .whitespaces).lowercased()
         // 搜索并入任务推荐：除关键词直配外，扩展中文任务别名（搜「做个PPT」能命中 pptx）
         var queryTokens: [String] = []
         if !query.isEmpty {
@@ -1064,16 +1186,30 @@ final class AppStore: ObservableObject {
         nav = .library
     }
 
-    /// 侧栏角标 & 更新页：可更新的技能
+    /// 侧栏角标 & 更新页：可更新的技能。
+    /// 按 dataRevision 记忆化——侧栏 5 个 RailItem 每次渲染都读它，不缓存等于每次发布重排 N 遍
+    @ObservationIgnored private var updatableSkillsCache: (revision: Int, result: [Skill])?
+
     var updatableSkills: [Skill] {
-        skills.filter { $0.updateAvailable && !$0.disabled }
+        if let cache = updatableSkillsCache, cache.revision == dataRevision { return cache.result }
+        let result = skills.filter { $0.updateAvailable && !$0.disabled }
             .sorted { $0.name.lowercased() < $1.name.lowercased() }
+        updatableSkillsCache = (dataRevision, result)
+        return result
     }
 
     /// 侧栏角标：异常数；超 listing 预算时再加 1，避免把上百个「有丢弃风险」全堆在角标
+    @ObservationIgnored private var doctorBadgeCache: (revision: Int, result: Int)?
+
     var doctorBadgeCount: Int {
+        let reportReady = doctorReportCache?.revision == dataRevision
+        if let cache = doctorBadgeCache, cache.revision == dataRevision, reportReady {
+            return cache.result
+        }
         let errors = skills.filter { $0.health == .error && !$0.disabled }.count
-        return errors + (doctorReport.overBudget ? 1 : 0)
+        let result = errors + (reportReady && cachedDoctorReport.overBudget ? 1 : 0)
+        if reportReady { doctorBadgeCache = (dataRevision, result) }
+        return result
     }
 
     /// UI 展示的平台：Claude / Codex / Gemini / Grok / WorkBuddy。
@@ -1085,22 +1221,8 @@ final class AppStore: ObservableObject {
     }
 
     /// 体检报告（预算模拟 + 超长描述 + 可回收）。
-    /// 按 (dataRevision, 预算窗口) 记忆化——侧栏角标/页副标每次渲染都读它，
-    /// 不缓存等于每帧对 143 条描述跑一遍 token 估算 + 触发词正则。
-    var doctorReport: DoctorReport {
-        if let cache = doctorReportCache,
-           cache.revision == dataRevision, cache.window == contextWindowTokens {
-            return cache.report
-        }
-        let report = ContextDoctor.report(
-            skills: skills,
-            usage: usage,
-            staleDirectories: Set(staleSkills.map(\.directory)),
-            contextWindowTokens: contextWindowTokens
-        )
-        doctorReportCache = (dataRevision, contextWindowTokens, report)
-        return report
-    }
+    /// 后台算好再发布：渲染路径只读缓存，避免侧栏角标在主线程重算 145 条描述。
+    var doctorReport: DoctorReport { cachedDoctorReport }
 
     func clearFilters() {
         category = "全部"
@@ -1167,7 +1289,7 @@ final class AppStore: ObservableObject {
             let updates = updatableSkills.count
             return updates > 0
                 ? LF("%d 个技能 · %d 个有新版本", summary.total, updates)
-                : LF("%d 个技能 · 随处按 ⌥⌘K 快速搜索", summary.total)
+                : LF("%d 个技能 · J/K 选择 · / 搜索", summary.total)
         case .doctor:
             let report = doctorReport
             if report.overBudget {
@@ -1216,14 +1338,14 @@ final class AppStore: ObservableObject {
 
     // MARK: - 目录自动刷新（FSEvents + 2 秒防抖）
 
-    private let watcher = DirectoryWatcher()
-    private var watcherStarted = false
-    private var refreshDebounce: Task<Void, Never>?
+    @ObservationIgnored private let watcher = DirectoryWatcher()
+    @ObservationIgnored private var watcherStarted = false
+    @ObservationIgnored private var refreshDebounce: Task<Void, Never>?
 
     private func startWatchingIfNeeded() {
         guard !watcherStarted else { return }
         watcherStarted = true
-        // 注意：不能监听 ~/.skill-atlas 根目录——usage-index.json（后台使用统计缓存）
+        // 注意：不能监听 ~/.skill-atlas 根目录——usage-index.json / security-index.json
         // 就写在根下，监听它会形成 扫描→写缓存→FSEvents→再扫描 的自触发循环
         //（表现为右上角刷新箭头转个不停）。只监听技能目录与 CC Switch DB。
         let paths = Set([
@@ -1372,7 +1494,7 @@ final class AppStore: ObservableObject {
 
     var canRollback: Bool { SkillMigrator.canRollback() }
 
-    private var suppressMigrationOffer = false
+    @ObservationIgnored private var suppressMigrationOffer = false
 
     func offerMigrationIfNeeded() {
         if LaunchArgs.flag("atlasForceMigrate") {
@@ -1455,7 +1577,7 @@ final class AppStore: ObservableObject {
 
     private func writeDoctorProbe() {
         guard let path = UserDefaults.standard.string(forKey: "atlasDoctorProbe"), !path.isEmpty else { return }
-        let report = doctorReport
+        let report = makeDoctorReport()
         let object: [String: Any] = [
             "entries": report.entries.count,
             "budgetTokens": report.budgetTokens,
@@ -1552,6 +1674,7 @@ final class AppStore: ObservableObject {
             checkingSkillUpdates = false
             checkingInteractive = false
             lastSkillUpdateCheck = Date()
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.lastSkillUpdateCheckKey)
             resumeWatching()
         }
         let results: [String: Bool] = await Task.detached(priority: .utility) {
@@ -1564,59 +1687,43 @@ final class AppStore: ObservableObject {
             return map
         }.value
         if var data {
+            var changed = false
             data.skills = data.skills.map { skill in
                 var copy = skill
-                if let flag = results[skill.directory] {
+                if let flag = results[skill.directory], copy.updateAvailable != flag {
                     copy.updateAvailable = flag
+                    changed = true
                 }
                 return copy
             }
-            self.data = data
+            if changed { self.data = data }
         }
     }
 
     // MARK: - 安全复扫（二期 F3：防「几个月后变恶意」）
 
     /// 后台静态复扫已装技能（atlas/local；CC Switch 只读来源跳过——修复动作是迁移）。
-    /// 以目录 mtime 为缓存键，只重扫有变化的。
+    /// 逐文件 (path, mtime, size) 缓存落盘，冷启动几乎只读索引。
     private func rescanSecurity(for skills: [Skill]) {
         let targets = skills
             .filter { $0.origin != .ccSwitch && !$0.disabled }
             .map { (directory: $0.directory, path: $0.sourcePath) }
-        let cache = securityCache
         Task { [weak self] in
-            let result: ([String: [SecurityFinding]], [String: (Date, [SecurityFinding])]) =
-                await Task.detached(priority: .utility) {
-                    var findings: [String: [SecurityFinding]] = [:]
-                    var newCache: [String: (Date, [SecurityFinding])] = [:]
-                    let fileManager = FileManager.default
-                    for target in targets {
-                        let url = URL(fileURLWithPath: target.path, isDirectory: true)
-                        let stamp = (try? fileManager.attributesOfItem(atPath: target.path))?[.modificationDate] as? Date ?? .distantPast
-                        if let cached = cache[target.path], cached.stamp == stamp {
-                            newCache[target.path] = cached
-                            if !cached.findings.isEmpty { findings[target.directory] = cached.findings }
-                            continue
-                        }
-                        let scanned = SecurityScanner.scan(directory: url)
-                        newCache[target.path] = (stamp, scanned)
-                        if !scanned.isEmpty { findings[target.directory] = scanned }
-                    }
-                    return (findings, newCache)
-                }.value
+            let scanned = await Task.detached(priority: .utility) {
+                SecurityScanner.scanInstalled(targets: targets)
+            }.value
             guard let self else { return }
             // 可疑项（非 info）进体检展示；info 外链单独收集喂存活探测
             var visible: [String: [SecurityFinding]] = [:]
             var links: [String: [String]] = [:]
-            for (directory, findings) in result.0 {
+            for (directory, findings) in scanned {
                 let suspicious = findings.filter { $0.severity != .info }
                 if !suspicious.isEmpty { visible[directory] = suspicious }
                 let urls = findings.filter { $0.severity == .info }.map(\.excerpt)
                 if !urls.isEmpty { links[directory] = urls }
             }
-            self.securityFindings = visible
-            self.externalLinks = links
-            self.securityCache = result.1
+            if self.securityFindings != visible { self.securityFindings = visible }
+            if self.externalLinks != links { self.externalLinks = links }
             Task { await self.checkExternalLinks(force: LaunchArgs.flag("atlasCheckLinks")) }
         }
     }
@@ -1681,15 +1788,15 @@ final class AppStore: ObservableObject {
 
     // MARK: - 二期探针（F1 触发模拟 / F2 发起器 dry-run，验收用）
 
-    private var phase2ProbesDone = false
+    @ObservationIgnored private var phase2ProbesDone = false
 
-    private func runPhase2ProbesIfRequested(skills: [Skill]) {
+    private func runPhase2ProbesIfRequested(skills: [Skill]) async {
         guard !phase2ProbesDone else { return }
         phase2ProbesDone = true
         // -atlasTriggerProbe "做个PPT" -atlasProbeOut /path.json
         if let phrase = LaunchArgs.value("atlasTriggerProbe"),
            let out = LaunchArgs.value("atlasProbeOut") {
-            let atRiskNames = Set(doctorReport.atRisk.map(\.skill.name))
+            let atRiskNames = Set(makeDoctorReport().atRisk.map(\.skill.name))
             let ranked = TriggerLab.simulate(
                 phrase: phrase, skills: skills, usage: usage, atRiskNames: atRiskNames
             )
@@ -1714,7 +1821,7 @@ final class AppStore: ObservableObject {
         if let name = LaunchArgs.value("atlasOutputsProbe"),
            let out = LaunchArgs.value("atlasProbeOut"),
            let skill = skills.first(where: { $0.name == name || $0.directory == name }) {
-            let records = OutputLinker.recentOutputs(for: skill)
+            let records = await OutputLinker.recentOutputs(for: skill)
             let payload: [[String: Any]] = records.map {
                 ["dir": $0.directory.path, "date": $0.dateText, "topic": $0.topic,
                  "files": $0.fileCount, "deliverable": $0.latestDeliverable ?? ""]
@@ -1742,26 +1849,110 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // MARK: - 启动错峰 / 后台派生计算
+
+    /// 无头验收 / 调试探针：跳过错峰，立刻跑完后续工作
+    private var skipLaunchStagger: Bool {
+        LaunchArgs.flag("atlasQuit")
+            || LaunchArgs.flag("atlasCheckLinks")
+            || LaunchArgs.flag("atlasCheckSkillUpdates")
+            || UserDefaults.standard.bool(forKey: "atlasCheckSkillUpdates")
+            || LaunchArgs.value("atlasTriggerProbe") != nil
+            || LaunchArgs.value("atlasLaunchProbe") != nil
+            || LaunchArgs.value("atlasOutputsProbe") != nil
+            || LaunchArgs.value("atlasDropProbe") != nil
+            || UserDefaults.standard.string(forKey: "atlasUpdateReviewProbe") != nil
+            || UserDefaults.standard.string(forKey: "atlasAction") != nil
+            || UserDefaults.standard.string(forKey: "atlasToggle") != nil
+            || UserDefaults.standard.string(forKey: "atlasDoctorProbe") != nil
+    }
+
+    /// 扫描先落地，使用统计 / 安全复扫 / git fetch 错开启动前几秒的合成窗口。
+    private func scheduleBackgroundWork(skills: [Skill]) {
+        deferredWork?.cancel()
+        let stagger = firstLaunchDeferred && !skipLaunchStagger
+        firstLaunchDeferred = false
+        usageIndex.begin()
+        deferredWork = Task { [weak self] in
+            if stagger {
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+            }
+            guard !Task.isCancelled else { return }
+            self?.startUsageIndex(for: skills)
+
+            if stagger {
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+            }
+            guard !Task.isCancelled else { return }
+            self?.rescanSecurity(for: skills)
+
+            if LaunchArgs.flag("atlasQuit") { return }
+            if stagger {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+            }
+            guard !Task.isCancelled else { return }
+            await self?.checkSkillUpdates(interactive: false)
+        }
+    }
+
+    private func makeDoctorReport() -> DoctorReport {
+        ContextDoctor.report(
+            skills: skills,
+            usage: usage,
+            staleDirectories: Set(staleSkills.map(\.directory)),
+            contextWindowTokens: contextWindowTokens
+        )
+    }
+
+    private func scheduleDoctorReport() {
+        let revision = dataRevision
+        let window = contextWindowTokens
+        if let cache = doctorReportCache, cache.revision == revision, cache.window == window {
+            return
+        }
+        let snapshotSkills = skills
+        let snapshotUsage = usage
+        let stale = Set(staleSkills.map(\.directory))
+        doctorComputeTask?.cancel()
+        doctorComputeTask = Task { [weak self] in
+            let report = await Task.detached(priority: .utility) {
+                ContextDoctor.report(
+                    skills: snapshotSkills,
+                    usage: snapshotUsage,
+                    staleDirectories: stale,
+                    contextWindowTokens: window
+                )
+            }.value
+            guard !Task.isCancelled, let self else { return }
+            self.cachedDoctorReport = report
+            self.doctorReportCache = (revision, window, report)
+        }
+    }
+
     // MARK: - 使用频率统计（后台增量索引）
 
-    private var usageTask: Task<Void, Never>?
+    @ObservationIgnored private var usageTask: Task<Void, Never>?
 
     func reindexUsage(for skills: [Skill]) {
+        usageIndex.begin()
+        startUsageIndex(for: skills)
+    }
+
+    private func startUsageIndex(for skills: [Skill]) {
         usageTask?.cancel()
         let knownDirs = Set(skills.map(\.directory))
-        usageIndexing = true
-        usageProgress = 0
         // AppStore 与应用同生命周期，任务内强捕获（新一轮索引会先 cancel 旧任务）
         usageTask = Task { [self] in
-            let result = await Task.detached(priority: .utility) { [self] in
+            let progress = usageIndex
+            let result = await Task.detached(priority: .utility) {
                 UsageIndexer.index(knownDirs: knownDirs) { fraction in
-                    Task { @MainActor [self] in self.usageProgress = fraction }
+                    Task { @MainActor in progress.report(fraction) }
                 }
             }.value
             guard !Task.isCancelled else { return }
-            usage = result.usage
+            if usage != result.usage { usage = result.usage }
             mergeHookStats()
-            usageIndexing = false
+            usageIndex.finish()
             usageIndexInfo = String(
                 format: L("%d 个会话文件（增量解析 %d 个），耗时 %.1f 秒"),
                 result.scannedFiles, result.reparsedFiles, result.duration
@@ -1772,19 +1963,26 @@ final class AppStore: ObservableObject {
     // MARK: - Hook 实时遥测（三期 G5）
 
     /// hook 事件口径（目录 → 精确计量），与 grep 口径并存展示
-    @Published var hookStats: [String: HookTelemetry.HookStats] = [:]
+    var hookStats: [String: HookTelemetry.HookStats] = [:]
 
     /// 把 hook 事件并进 usage：grep 漏计的补会话数，最近使用取两口径较新者。
     /// 长期未用/丢弃模拟因此不再冤枉「grep 认不出但确实在用」的技能。
     func mergeHookStats() {
-        var nameToDirectory: [String: String] = [:]
-        for skill in skills { nameToDirectory[skill.name] = skill.directory }
-        hookStats = HookTelemetry.stats(nameToDirectory: nameToDirectory)
-        for (directory, stats) in hookStats {
-            var record = usage[directory] ?? SkillUsage()
-            if record.total == 0 { record.claudeSessions = stats.sessions }
-            if let last = stats.last, last > (record.lastUsed ?? .distantPast) { record.lastUsed = last }
-            usage[directory] = record
+        let nameToDirectory = Dictionary(uniqueKeysWithValues: skills.map { ($0.name, $0.directory) })
+        Task { [weak self] in
+            let stats = await Task.detached(priority: .utility) {
+                HookTelemetry.stats(nameToDirectory: nameToDirectory)
+            }.value
+            guard let self else { return }
+            if self.hookStats != stats { self.hookStats = stats }
+            var next = self.usage
+            for (directory, record) in stats {
+                var merged = next[directory] ?? SkillUsage()
+                if merged.total == 0 { merged.claudeSessions = record.sessions }
+                if let last = record.last, last > (merged.lastUsed ?? .distantPast) { merged.lastUsed = last }
+                next[directory] = merged
+            }
+            if next != self.usage { self.usage = next }
         }
     }
 
@@ -1822,7 +2020,7 @@ final class AppStore: ObservableObject {
 
     /// 长期未用：从未使用 + 90 天未用（索引完成后才有意义）
     var staleSkills: [Skill] {
-        guard !usageIndexing else { return [] }
+        guard !usageIndex.indexing else { return [] }
         let now = Date()
         let cutoff = now.addingTimeInterval(-90 * 86400)
         // 新装技能给 14 天观察期：「没有使用记录」≠ 吃灰，也可能是刚装上还没轮到它。
@@ -1848,15 +2046,13 @@ final class AppStore: ObservableObject {
     // MARK: - 触发词撞车检测
 
     /// 抽取触发短语：描述中「」引号内的短语 + 技能名分词
-    static func triggerPhrases(of skill: Skill) -> Set<String> {
+    nonisolated static func triggerPhrases(of skill: Skill) -> Set<String> {
         var phrases = Set<String>()
-        if let regex = try? NSRegularExpression(pattern: "「([^」]{1,24})」") {
-            let text = skill.description
-            let range = NSRange(text.startIndex..., in: text)
-            for match in regex.matches(in: text, range: range) {
-                if let swiftRange = Range(match.range(at: 1), in: text) {
-                    phrases.insert(String(text[swiftRange]))
-                }
+        let text = skill.description
+        let range = NSRange(text.startIndex..., in: text)
+        for match in TriggerLab.quotedPhrase.matches(in: text, range: range) {
+            if let swiftRange = Range(match.range(at: 1), in: text) {
+                phrases.insert(String(text[swiftRange]))
             }
         }
         // 技能名分词：常见结构词不算触发信号
@@ -1869,7 +2065,7 @@ final class AppStore: ObservableObject {
     }
 
     /// 两技能共享 ≥2 条短语（或 1 条 ≥4 字的完整短语）判为重叠；按共享数排序取前 10
-    static func computeTriggerOverlaps(_ allSkills: [Skill]) -> [TriggerOverlap] {
+    nonisolated static func computeTriggerOverlaps(_ allSkills: [Skill]) -> [TriggerOverlap] {
         let skills = allSkills.filter { !$0.disabled }  // 已停用的不会再响应触发词
         let phraseSets = skills.map { triggerPhrases(of: $0) }
         var overlaps: [TriggerOverlap] = []

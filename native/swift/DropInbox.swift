@@ -58,7 +58,7 @@ enum DropRules {
 // MARK: - 投递确认弹层
 
 struct DropSheet: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var chosenDirectory: String
     @State private var topic: String

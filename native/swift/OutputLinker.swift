@@ -7,7 +7,7 @@ import Foundation
 // 体裁 ← SkillLauncher.genreMap 反查，目录名自带日期与主题。
 // 只读扫描、详情页展示最近 5 次、点击 open、一键重跑上次主题。
 
-struct OutputRecord: Identifiable {
+struct OutputRecord: Identifiable, Sendable {
     var directory: URL
     /// 目录名里的日期（yyyyMMdd）
     var dateText: String
@@ -22,21 +22,48 @@ struct OutputRecord: Identifiable {
 
 @MainActor
 enum OutputLinker {
+    /// 扫描结果缓存：key = 体裁目录路径，stamp = (目录 mtime, 顶层目录名清单)。
+    /// 选中切换/方向键浏览命中缓存就不再打盘；真正扫盘放后台线程，
+    /// 主线程只做一次 contentsOfDirectory + 一次 mtime（可承受）。
+    private static var cache: [String: (stamp: (Date, [String]), records: [OutputRecord])] = [:]
+
     /// 技能的最近产出（按目录名日期降序，最多 limit 条）
-    static func recentOutputs(for skill: Skill, limit: Int = 5) -> [OutputRecord] {
+    static func recentOutputs(for skill: Skill, limit: Int = 5) async -> [OutputRecord] {
         guard let genre = SkillLauncher.genre(for: skill) else { return [] }
         let genreDir = SkillLauncher.workRoot
             .appendingPathComponent("projects")
             .appendingPathComponent(genre)
+        let key = genreDir.path
+        let stamp = snapshot(of: genreDir)
+        if let cached = cache[key], cached.stamp == stamp {
+            return cached.records
+        }
+        let records = await Task.detached(priority: .userInitiated) {
+            scan(genrePath: key, limit: limit)
+        }.value
+        cache[key] = (stamp, records)
+        return records
+    }
+
+    private static func snapshot(of directory: URL) -> (Date, [String]) {
         let fileManager = FileManager.default
-        guard let names = try? fileManager.contentsOfDirectory(atPath: genreDir.path) else { return [] }
+        let names = (try? fileManager.contentsOfDirectory(atPath: directory.path)) ?? []
+        let mtime = (try? fileManager.attributesOfItem(atPath: directory.path))?[.modificationDate] as? Date
+            ?? .distantPast
+        return (mtime, names)
+    }
+
+    /// 真正扫盘（后台线程）：顶层目录逐个列内容，N+1 次 syscall 不占主线程
+    private nonisolated static func scan(genrePath: String, limit: Int) -> [OutputRecord] {
+        let fileManager = FileManager.default
+        guard let names = try? fileManager.contentsOfDirectory(atPath: genrePath) else { return [] }
 
         var records: [OutputRecord] = []
         for name in names where !name.hasPrefix(".") {
             // 目录名约定：YYYYMMDD_主题
             guard name.count >= 9, name.prefix(8).allSatisfy(\.isNumber),
                   name.dropFirst(8).first == "_" else { continue }
-            let directory = genreDir.appendingPathComponent(name)
+            let directory = URL(fileURLWithPath: genrePath).appendingPathComponent(name)
             var isDir: ObjCBool = false
             guard fileManager.fileExists(atPath: directory.path, isDirectory: &isDir), isDir.boolValue else { continue }
 

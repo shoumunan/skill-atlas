@@ -419,7 +419,7 @@ struct ConceptMap: View {
 // MARK: 解释卡
 
 struct ConceptExplainCard: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var layer: ConceptLayer?
     var compact: Bool = false
@@ -473,17 +473,15 @@ struct ConceptExplainCard: View {
     private func inAppAction(_ layer: ConceptLayer) -> some View {
         switch layer {
         case .you:
-            if let skill = store.featuredSkill {
-                Button {
-                    store.copyToPasteboard(AppStore.callPhrase(for: skill))
-                } label: {
-                    Text(L("复制调用语"))
-                        .font(Theme.Fonts.calloutEmphasis)
-                        .foregroundStyle(Theme.accent)
-                }
-                .buttonStyle(.plain)
-                .help(LF("复制：%@", AppStore.callPhrase(for: skill)))
+            Button {
+                store.copyToPasteboard(GuideSample.namedPhrase)
+            } label: {
+                Text(L("复制调用语"))
+                    .font(Theme.Fonts.calloutEmphasis)
+                    .foregroundStyle(Theme.accent)
             }
+            .buttonStyle(.plain)
+            .help(L("复制教材示例，不是你库里的技能"))
         case .harness:
             Button {
                 store.nav = .library
@@ -513,7 +511,7 @@ struct ConceptExplainCard: View {
 // MARK: 整节
 
 struct GuideChainSection: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var wide: Bool
     @Binding var locked: ConceptLayer?
 
@@ -556,7 +554,7 @@ struct GuideChainSection: View {
 
 /// 「下次该配哪个」——把抽象对照变成下次遇到任务能直接套的判断
 private struct SkillOrMCPBlock: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s8) {
@@ -578,9 +576,7 @@ private struct SkillOrMCPBlock: View {
         .quietControl(cornerRadius: Theme.Radius.tile)
     }
 
-    // 这里不再「点名库里的某个技能来举例」：那要靠硬编码具体目录名去比对，
-    // 而硬编码的只可能是作者自己的技能，等于把作者的职业写进每个用户的界面。
-    // 需要活例子的地方走 store.featuredSkill（取谁最常用，与具体是谁无关）。
+    // 教材举例走 GuideSample，不点名本机库里的技能。
     private func example(_ text: String) -> some View {
         HStack(alignment: .top, spacing: Theme.Space.s8) {
             Circle()

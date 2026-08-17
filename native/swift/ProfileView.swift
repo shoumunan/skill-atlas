@@ -8,7 +8,7 @@ import AppKit
 // 必须让人看清「写哪个文件、摘掉哪些技能、原文备份到哪」再决定。
 
 struct ProfileSheet: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var selectedID: String?
     @State private var draftName = ""
@@ -405,7 +405,7 @@ struct ProfileSheet: View {
 /// 单技能试跑的确认页（三期 G3）：开会话前把「隔离了什么、没隔离什么」摊开。
 /// 这个功能最容易被误当成安全沙箱，所以警示写在最显眼处，不折叠。
 struct SandboxSheet: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -529,7 +529,7 @@ struct SandboxSheet: View {
 
 /// 写盘确认页：改用户配置前，把要做的事一条条摊开
 struct ProfileApplySheet: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     private var request: AppStore.ProfileApplyRequest? { store.profileRequest }

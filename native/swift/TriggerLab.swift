@@ -26,6 +26,7 @@ struct TriggerCandidate: Identifiable {
 enum TriggerLab {
     /// 社区实测 listing 截断口径：核心触发词必须落在前 250 字符
     static let visibleWindow = 250
+    static let quotedPhrase = try! NSRegularExpression(pattern: "「([^」]{1,24})」")
 
     /// 技能的触发信号：短语 → 在描述里的首次位置（nil = 只在技能名里）
     static func signals(of skill: Skill) -> [(phrase: String, position: Int?)] {
@@ -35,17 +36,15 @@ enum TriggerLab {
         let lowered = description.lowercased()
 
         // 「」引号短语（描述作者显式声明的触发词）
-        if let regex = try? NSRegularExpression(pattern: "「([^」]{1,24})」") {
-            let range = NSRange(description.startIndex..., in: description)
-            for match in regex.matches(in: description, range: range) {
-                guard let swiftRange = Range(match.range(at: 1), in: description) else { continue }
-                let phrase = String(description[swiftRange])
-                guard seen.insert(phrase.lowercased()).inserted else { continue }
-                let position = description.distance(
-                    from: description.startIndex, to: swiftRange.lowerBound
-                )
-                result.append((phrase, position))
-            }
+        let range = NSRange(description.startIndex..., in: description)
+        for match in quotedPhrase.matches(in: description, range: range) {
+            guard let swiftRange = Range(match.range(at: 1), in: description) else { continue }
+            let phrase = String(description[swiftRange])
+            guard seen.insert(phrase.lowercased()).inserted else { continue }
+            let position = description.distance(
+                from: description.startIndex, to: swiftRange.lowerBound
+            )
+            result.append((phrase, position))
         }
 
         // 技能名分词（名称永远可见，position = nil 表示不受截断影响）
@@ -147,7 +146,7 @@ struct BuriedTriggerEntry: Identifiable {
 extension ContextDoctor {
     /// 「」显式触发词首次出现在前 250 字符之外 → 对 listing 里的模型不可见
     static func buriedTriggers(skills: [Skill]) -> [BuriedTriggerEntry] {
-        guard let regex = try? NSRegularExpression(pattern: "「([^」]{1,24})」") else { return [] }
+        let regex = TriggerLab.quotedPhrase
         var entries: [BuriedTriggerEntry] = []
         for skill in skills where !skill.disabled {
             let description = skill.description

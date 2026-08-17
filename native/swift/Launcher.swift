@@ -188,6 +188,7 @@ enum GitSync {
     /// API base、事件日志含使用行为、沙箱与 Profile 快照都是一次性物。
     static let defaultIgnores = [
         "usage-index.json",
+        "security-index.json",
         "usage-events.jsonl",
         "skill-backups/",
         "settings-backups/",

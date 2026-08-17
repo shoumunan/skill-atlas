@@ -1,16 +1,10 @@
 import AppKit
 import SwiftUI
-#if canImport(FluidGradient)
-// SwiftPM（完整 Xcode）路径：FluidGradient 作为独立模块引入
-import FluidGradient
-#endif
-// 仅 Command Line Tools 环境：构建脚本把 native/vendor/FluidGradient 源码
-// 与本目标合并编译，同名类型直接可用，无需 import。
 
 // MARK: - 设计令牌（唯一事实来源，对应 DESIGN.md）
 //
 // 三层材质体系：
-//   L0 背景  = 桌面采样模糊 + FluidGradient 流动环境光 + 白纱
+//   L0 背景  = 系统桌面采样模糊 + 白纱（不再叠自绘流动渐变）
 //   L1 内容  = ContentSurface（安静的标准表面，内容从玻璃下透出来）
 //   L2 玻璃  = GlassChrome（只给导航与控件层：侧栏、工具条控件、指南页胶囊）
 // 玻璃永远不叠玻璃；内容层绝不用玻璃。
@@ -24,6 +18,21 @@ enum Theme {
     /// 中性语义色（长期未用这类「不是问题、只是没动静」的状态）。
     /// 健康三色表示要处理，这个表示不必处理，别混用。
     static let idle = Color(hex: 0x8E8E93)
+    /// 列表面板实色。滑动时必须不透明，半透明/阴影会逼整表每帧离屏合成。
+    static let panelNSColor = NSColor(name: nil) { appearance in
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return dark
+            ? NSColor(calibratedRed: 0.16, green: 0.16, blue: 0.17, alpha: 1)
+            : .white
+    }
+    static let panelFill = Color(nsColor: panelNSColor)
+    /// 和 AtlasBackdrop 同一色，窗口底露出来时不要另一层系统灰。
+    static let backdropNSColor = NSColor(name: nil) { appearance in
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return dark
+            ? NSColor(calibratedRed: 0.11, green: 0.11, blue: 0.12, alpha: 1)
+            : NSColor(calibratedRed: 0.94, green: 0.94, blue: 0.95, alpha: 1)
+    }
 
     /// 中性文本：亮色用黑 .85/.55/.35，暗色相应用白
     static let textPrimary = dynamicInk(0.85)
@@ -112,51 +121,17 @@ extension View {
     }
 }
 
-// MARK: - L0 背景：桌面模糊 + FluidGradient 环境光 + 白纱
+// MARK: - L0 背景：系统桌面模糊 + 白纱
 
-/// 窗口底层材质：采样桌面壁纸的系统级模糊
-struct WindowBackdrop: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .underWindowBackground
-        view.blendingMode = .behindWindow
-        view.state = .followsWindowActiveState
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
-}
-
-/// L0：给上层玻璃提供「活的」可折射光影。
-/// FluidGradient（github.com/Cindori/FluidGradient，MIT）绘制低饱和流动 blobs。
+/// L0：实色底。桌面模糊会让每次 SwiftUI 排版都逼 WindowServer
+/// 整窗重采样壁纸——主线程其实在睡觉，人手上却觉得「整窗发肉」。
 struct AtlasBackdrop: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        ZStack {
-            WindowBackdrop()
-            if !reduceTransparency {
-                FluidGradient(
-                    blobs: [
-                        Color(hex: 0x9CC7F7),  // sky
-                        Color(hex: 0xB4B8F2),  // periwinkle
-                        Color(hex: 0xA9E3C6),  // mint
-                        Color(hex: 0xBFD5F2),
-                    ],
-                    highlights: [
-                        Color(hex: 0xD6E6FB),
-                        Color(hex: 0xDEDCFA),
-                        Color(hex: 0xCDEEDD),
-                    ],
-                    speed: reduceMotion ? 0 : 0.2,
-                    blur: 0.75
-                )
-                .opacity(colorScheme == .dark ? 0.22 : 0.35)
-                Color.white.opacity(colorScheme == .dark ? 0.03 : 0.12)
-            }
-        }
+        (colorScheme == .dark
+            ? Color(red: 0.11, green: 0.11, blue: 0.12)
+            : Color(red: 0.94, green: 0.94, blue: 0.95))
         .ignoresSafeArea()
     }
 }
@@ -169,18 +144,15 @@ struct ContentSurface: ViewModifier {
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        // 大面板不用 .regularMaterial：列表/详情几乎铺满窗口，材质会整块
+        // 采样桌面模糊，Store 每发布一次就逼 WindowServer 重绘。实色纱便宜得多。
         content
-            .clipShape(shape)
             .background {
-                shape.fill(.regularMaterial)
-                    .overlay {
-                        shape.fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.45))
-                    }
+                shape.fill(Theme.panelFill)
             }
             .overlay {
                 shape.strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.10 : 0.35), lineWidth: 0.5)
             }
-            .shadow(color: .black.opacity(0.06), radius: 14, y: 8)
     }
 }
 
@@ -205,23 +177,16 @@ struct GlassChrome<S: InsettableShape>: ViewModifier {
         content
             .background {
                 ZStack {
-                    shape.fill(.ultraThinMaterial)
-                    // 顶到底的白色渐变纱
+                    shape.fill(dark
+                        ? Color(red: 0.14, green: 0.14, blue: 0.15)
+                        : Color.white)
                     shape.fill(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity((dark ? 0.12 : 0.35) + veilBoost),
-                                Color.white.opacity((dark ? 0.04 : 0.15) + veilBoost),
+                                Color.white.opacity((dark ? 0.10 : 0.28) + veilBoost),
+                                Color.white.opacity((dark ? 0.03 : 0.10) + veilBoost),
                             ],
                             startPoint: .top, endPoint: .bottom
-                        )
-                    )
-                    // 顶部内侧柔和径向白光（「从内部发光」）
-                    shape.fill(
-                        RadialGradient(
-                            colors: [Color.white.opacity(dark ? 0.10 : 0.20), .clear],
-                            center: UnitPoint(x: 0.5, y: 0),
-                            startRadius: 0, endRadius: 140
                         )
                     )
                 }
@@ -256,9 +221,8 @@ struct GlassChrome<S: InsettableShape>: ViewModifier {
                     lineWidth: 1
                 )
             }
-            // 环境阴影（大而软）+ 接触阴影（小而实）
-            .shadow(color: .black.opacity(hovering && interactive ? 0.14 : 0.10), radius: 18, y: 10)
-            .shadow(color: .black.opacity(hovering && interactive ? 0.22 : 0.18), radius: 2, y: 1)
+            .shadow(color: .black.opacity(hovering && interactive ? 0.10 : 0.06), radius: 6, y: 3)
+            .shadow(color: .black.opacity(0.10), radius: 1, y: 1)
             .scaleEffect(interactive && hovering && !reduceMotion ? 1.01 : 1)
             .animation(reduceMotion ? nil : Motion.control, value: hovering)
             .onHover { inside in
@@ -538,13 +502,31 @@ struct WindowConfigurator: NSViewRepresentable {
             window.titlebarAppearsTransparent = true
             window.titlebarSeparatorStyle = .none
             window.styleMask.insert(.fullSizeContentView)
-            window.isOpaque = false
-            window.backgroundColor = .clear
+            window.isOpaque = true
+            window.backgroundColor = Theme.backdropNSColor
             window.minSize = NSSize(width: 1000, height: 660)
             let spacer = NSToolbar(identifier: "AtlasTitlebarSpacer")
             spacer.allowsUserCustomization = false
-            window.toolbar = spacer
-            window.toolbarStyle = .unifiedCompact
+            // 全屏时交通灯进菜单栏，空 toolbar 再占一层就是顶上那条灰边。
+            if window.styleMask.contains(.fullScreen) {
+                window.toolbar = nil
+            } else {
+                window.toolbar = spacer
+                window.toolbarStyle = .unifiedCompact
+            }
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.willEnterFullScreenNotification, object: window, queue: .main
+            ) { note in
+                (note.object as? NSWindow)?.toolbar = nil
+            }
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main
+            ) { note in
+                guard let win = note.object as? NSWindow else { return }
+                win.toolbar = spacer
+                win.toolbarStyle = .unifiedCompact
+                Self.alignTrafficLights(win)
+            }
             let spec = LaunchArgs.value("atlasWindow") ?? UserDefaults.standard.string(forKey: "atlasWindow")
             if let spec, let size = Self.parseSize(spec) {
                 window.setContentSize(size)
@@ -581,4 +563,51 @@ struct WindowConfigurator: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+/// 探测是否全屏。窗口模式忽略顶部安全区；全屏时撤掉空 toolbar，只让系统菜单栏。
+struct FullscreenTopInset: NSViewRepresentable {
+    @Binding var isFullscreen: Bool
+
+    func makeNSView(context: Context) -> Probe {
+        let probe = Probe()
+        probe.onChange = { isFullscreen = $0 }
+        return probe
+    }
+
+    func updateNSView(_ probe: Probe, context: Context) {
+        probe.onChange = { isFullscreen = $0 }
+        probe.publish()
+    }
+
+    final class Probe: NSView {
+        var onChange: ((Bool) -> Void)?
+        private var observers: [NSObjectProtocol] = []
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observers.forEach { NotificationCenter.default.removeObserver($0) }
+            observers = []
+            guard let window else {
+                publish()
+                return
+            }
+            let names: [Notification.Name] = [
+                NSWindow.didEnterFullScreenNotification,
+                NSWindow.didExitFullScreenNotification,
+            ]
+            for name in names {
+                observers.append(NotificationCenter.default.addObserver(
+                    forName: name, object: window, queue: .main
+                ) { [weak self] _ in
+                    self?.publish()
+                })
+            }
+            publish()
+        }
+
+        func publish() {
+            onChange?(window?.styleMask.contains(.fullScreen) == true)
+        }
+    }
 }

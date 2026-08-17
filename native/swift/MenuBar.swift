@@ -112,7 +112,7 @@ enum GlobalHotKey {
 // MARK: 浮层内容
 
 struct MenuBarPalette: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
     @FocusState private var searchFocused: Bool

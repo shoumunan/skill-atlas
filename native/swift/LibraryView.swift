@@ -1,40 +1,234 @@
+import AppKit
 import SwiftUI
 
 // MARK: - 技能库页（列表 + 详情双栏，统计数字分流到工具条副文案与体检页）
 
 struct LibraryPage: View {
-    @EnvironmentObject private var store: AppStore
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(AppStore.self) private var store
 
     var body: some View {
-        HStack(spacing: Theme.Space.s12) {
-            SkillBrowser()
-            // 详情栏按需展开：没选中就收起，列表占满整宽
-            if store.selectedSkill != nil {
-                InspectorPanel()
-                    .frame(width: 440)
-                    .transition(reduceMotion
-                        ? .opacity
-                        : .move(edge: .trailing).combined(with: .opacity))
-            }
-        }
-        .frame(maxHeight: .infinity)
-        .animation(reduceMotion ? nil : Motion.standard, value: store.selectedSkill?.name != nil)
+        // 整页交给 AppKit 拼：表是真子视图，不再套进 HStack / VStack / opacity。
+        // 那些节点即使用 opacity(1) 也会合成组，滑动就变成「每帧重绘整页」。
+        LibrarySplitView(store: store, pin: LibraryPin(store))
+            .equatable()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-// MARK: - 技能列表面板
+/// 库页只跟这些字段走。安全复扫 / 外链 / hook 统计发布时 pin 不变，跳过 updateNSView。
+@MainActor
+private struct LibraryPin: Equatable {
+    var epoch: Int
+    var selected: String?
+    var favorites: Set<String>
+    var groupBy: String
+    var sortOrder: String
+    var category: String
+    var platform: String
+    var stateFilter: String
+    var sourceFilter: String
+    var favoritesOnly: Bool
+    var search: String
+    var checkingInteractive: Bool
+    var updating: Bool
+    var empty: Bool
 
-struct SkillBrowser: View {
-    @EnvironmentObject private var store: AppStore
+    init(_ store: AppStore) {
+        epoch = store.libraryEpoch
+        selected = store.selectedName
+        favorites = store.favorites
+        groupBy = store.groupBy
+        sortOrder = store.sortOrder
+        category = store.category
+        platform = store.platform
+        stateFilter = store.stateFilter
+        sourceFilter = store.sourceFilter
+        favoritesOnly = store.favoritesOnly
+        search = store.debouncedSearch
+        checkingInteractive = store.checkingInteractive
+        updating = !store.updatingDirectories.isEmpty
+        empty = store.filteredSkills.isEmpty
+    }
+}
+
+private struct LibrarySplitView: NSViewRepresentable, Equatable {
+    var store: AppStore
+    var pin: LibraryPin
+
+    static func == (lhs: LibrarySplitView, rhs: LibrarySplitView) -> Bool {
+        lhs.pin == rhs.pin
+    }
+
+    func makeNSView(context: Context) -> LibrarySplitNSView {
+        LibrarySplitNSView(store: store)
+    }
+
+    func updateNSView(_ view: LibrarySplitNSView, context: Context) {
+        view.refresh(store: store)
+    }
+
+    static func dismantleNSView(_ view: LibrarySplitNSView, coordinator: ()) {
+        view.detachTable()
+    }
+}
+
+/// 左：筛选条 + 缓存的 NSScrollView；右：详情栏 440。表跨切页活在 Store 上。
+@MainActor
+final class LibrarySplitNSView: NSView {
+    private var store: AppStore
+    private let leftPane = NSView()
+    private let listPane = NSView()
+    private let filterHost: NSHostingView<AnyView>
+    private let inspectorHost: NSHostingView<AnyView>
+    private let emptyHost: NSHostingView<AnyView>
+    private let chrome = PanelChrome()
+    private var showingEmpty = false
+    private let gap: CGFloat = Theme.Space.s12
+    private let inspectorWidth: CGFloat = 440
+
+    init(store: AppStore) {
+        self.store = store
+        filterHost = NSHostingView(rootView: AnyView(LibraryFilterBar().environment(store)))
+        inspectorHost = NSHostingView(rootView: AnyView(InspectorPanel().environment(store)))
+        emptyHost = NSHostingView(rootView: AnyView(EmptyListView().environment(store)))
+        super.init(frame: .zero)
+        wantsLayer = false
+
+        // 高度跟内容，宽度跟左栏。intrinsic 两边都开时，条会按内容宽度居中，
+        // 「全部技能」就离开列表左缘。
+        filterHost.sizingOptions = .intrinsicContentSize
+        filterHost.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        filterHost.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        inspectorHost.sizingOptions = []
+        emptyHost.sizingOptions = []
+
+        leftPane.wantsLayer = true
+        leftPane.layer?.backgroundColor = Theme.panelNSColor.cgColor
+        // 不要圆角 + masksToBounds：会把整张表打成离屏图。
+        // 圆角由 PanelChrome 盖在四角上，表还是真子视图。
+        leftPane.layer?.masksToBounds = false
+
+        addSubview(leftPane)
+        addSubview(inspectorHost)
+        filterHost.translatesAutoresizingMaskIntoConstraints = false
+        listPane.translatesAutoresizingMaskIntoConstraints = false
+        chrome.translatesAutoresizingMaskIntoConstraints = false
+        leftPane.addSubview(filterHost)
+        leftPane.addSubview(listPane)
+        leftPane.addSubview(chrome)
+        NSLayoutConstraint.activate([
+            filterHost.topAnchor.constraint(equalTo: leftPane.topAnchor),
+            filterHost.leadingAnchor.constraint(equalTo: leftPane.leadingAnchor),
+            filterHost.trailingAnchor.constraint(equalTo: leftPane.trailingAnchor),
+            listPane.topAnchor.constraint(equalTo: filterHost.bottomAnchor),
+            listPane.leadingAnchor.constraint(equalTo: leftPane.leadingAnchor),
+            listPane.trailingAnchor.constraint(equalTo: leftPane.trailingAnchor),
+            listPane.bottomAnchor.constraint(equalTo: leftPane.bottomAnchor),
+            chrome.topAnchor.constraint(equalTo: leftPane.topAnchor),
+            chrome.leadingAnchor.constraint(equalTo: leftPane.leadingAnchor),
+            chrome.trailingAnchor.constraint(equalTo: leftPane.trailingAnchor),
+            chrome.bottomAnchor.constraint(equalTo: leftPane.bottomAnchor),
+        ])
+
+        showingEmpty = store.filteredSkills.isEmpty
+        attachList()
+        SkillTableController.shared(for: store).reloadFromStore()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var isOpaque: Bool { false }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        leftPane.layer?.backgroundColor = Theme.panelNSColor.cgColor
+        chrome.needsDisplay = true
+    }
+
+    func refresh(store: AppStore) {
+        self.store = store
+        let controller = SkillTableController.shared(for: store)
+        controller.reloadFromStore()
+        let empty = store.filteredSkills.isEmpty
+        if empty != showingEmpty {
+            showingEmpty = empty
+            attachList()
+        }
+        needsLayout = true
+    }
+
+    func detachTable() {
+        SkillTableController.shared(for: store).scroll.removeFromSuperview()
+    }
+
+    private func attachList() {
+        let scroll = SkillTableController.shared(for: store).scroll
+        emptyHost.removeFromSuperview()
+        scroll.removeFromSuperview()
+        let child = showingEmpty ? emptyHost : scroll
+        child.translatesAutoresizingMaskIntoConstraints = true
+        child.autoresizingMask = [.width, .height]
+        child.frame = listPane.bounds
+        listPane.addSubview(child)
+    }
+
+    override func layout() {
+        super.layout()
+        let inspectorX = max(0, bounds.width - inspectorWidth)
+        inspectorHost.frame = NSRect(x: inspectorX, y: 0, width: inspectorWidth, height: bounds.height)
+        leftPane.frame = NSRect(x: 0, y: 0, width: max(0, inspectorX - gap), height: bounds.height)
+        let child = showingEmpty ? emptyHost : SkillTableController.shared(for: store).scroll
+        if child.superview === listPane {
+            child.frame = listPane.bounds
+        }
+    }
+}
+
+/// 用背景色盖住四角，画出和其他页一样的圆角卡片。不裁切、不合成列表。
+private final class PanelChrome: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = false
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var isOpaque: Bool { false }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let radius = Theme.Radius.panel
+        let card = NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius)
+        let field = NSBezierPath(rect: bounds)
+        field.append(card)
+        field.windingRule = .evenOdd
+        Theme.backdropNSColor.setFill()
+        field.fill()
+
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        NSColor.white.withAlphaComponent(dark ? 0.10 : 0.35).setStroke()
+        card.lineWidth = 0.5
+        card.stroke()
+    }
+}
+
+// MARK: - 列表顶栏（筛选 / 排序，不含表本身）
+
+private struct LibraryFilterBar: View {
+    @Environment(AppStore.self) private var store
 
     var body: some View {
-        let skills = store.filteredSkills
+        @Bindable var store = store
         VStack(spacing: 0) {
             UpdatesBanner()
             AdoptBanner()
 
-            // 行一「看哪一批 + 怎么排」：左=范围切换，右=视图控件（图标打头）
             HStack(spacing: Theme.Space.s12) {
                 FavoritesTabs()
                 Spacer()
@@ -49,68 +243,23 @@ struct SkillBrowser: View {
             .padding(.top, Theme.Space.s16)
             .padding(.bottom, Theme.Space.s8)
 
-            // 行二「筛哪些 + 剩多少」：左=筛选条件，右=清除 + 结果计数
-            FilterRow(resultCount: skills.count)
+            FilterRow(resultCount: store.filteredSkills.count)
                 .padding(.horizontal, Theme.Space.s16)
                 .padding(.bottom, Theme.Space.s12)
 
             Rectangle()
                 .fill(Color.primary.opacity(0.06))
                 .frame(height: 1)
-
-            if skills.isEmpty {
-                EmptyListView()
-            } else {
-                // 玻璃列表：透明底 + 悬停/选中胶囊，L1 材质透出来。
-                // 禁止 inset List 斑马纹（DESIGN.md §10.6）——不透明条纹像表格软件。
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 2, pinnedViews: [.sectionHeaders]) {
-                            ForEach(store.groupedSkills(skills), id: \.0) { groupName, groupSkills in
-                                Section {
-                                    ForEach(groupSkills) { skill in
-                                        SkillRowView(skill: skill)
-                                            .id(skill.name)
-                                            .contextMenu { SkillContextMenu(skill: skill) }
-                                    }
-                                } header: {
-                                    if !groupName.isEmpty {
-                                        HStack(spacing: Theme.Space.s4) {
-                                            Text(groupName)
-                                                .font(Theme.Fonts.secondaryEmphasis)
-                                                .foregroundStyle(Theme.textSecondary)
-                                            Text("\(groupSkills.count)")
-                                                .font(Theme.Fonts.caption)
-                                                .monospacedDigit()
-                                                .foregroundStyle(Theme.textTertiary)
-                                            Spacer()
-                                        }
-                                        .padding(.horizontal, Theme.Space.s12)
-                                        .padding(.top, Theme.Space.s8)
-                                        .padding(.bottom, Theme.Space.s4)
-                                        .background(.regularMaterial)
-                                    }
-                                }
-                            }
-                        }
-                        .padding(Theme.Space.s8)
-                    }
-                    .panelScroll()
-                    .onChange(of: store.selectedName) { _, name in
-                        guard let name else { return }
-                        proxy.scrollTo(name)
-                    }
-                }
-            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panelFill)
     }
 }
 
 /// 列表顶部更新条（更新页并入技能库后的主入口，参考 CC Switch）：
 /// 有可更新技能时出现；点文字筛出可更新，右侧「全部更新」一键快进合并。
 private struct UpdatesBanner: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -197,7 +346,7 @@ private struct UpdatesBanner: View {
 /// 列表顶部收编条（参照 UpdatesBanner）：发现散装的本地直装技能时出现。
 /// 点文字筛出本地安装；右侧「全部收编」批量拷入本库并接管挂载（确认后执行）。
 private struct AdoptBanner: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var confirming = false
 
@@ -273,7 +422,7 @@ private struct AdoptBanner: View {
 }
 
 private struct FavoritesTabs: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var tabSpace
 
@@ -311,11 +460,12 @@ private struct FavoritesTabs: View {
 }
 
 private struct FilterRow: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     /// 当前筛选后的条数——计数是筛选的结果，跟筛选放同一行才对得上
     var resultCount: Int
 
     var body: some View {
+        @Bindable var store = store
         // 排布逻辑：具体 → 抽象 → 结果。
         // 平台是最好认的（品牌标 + 名称）放最左；发丝把「一组开关」和「一组菜单」
         // 两种交互分开；右端是清除与结果计数。
@@ -475,8 +625,8 @@ struct ViewMenu: View {
     }
 }
 
-private struct SkillRowView: View {
-    @EnvironmentObject private var store: AppStore
+struct SkillRowView: View {
+    @Environment(AppStore.self) private var store
     @State private var hovering = false
     var skill: Skill
 
@@ -564,7 +714,7 @@ private struct SkillRowView: View {
 
 /// 右键菜单：高频操作全部 ≤2 次点击（DESIGN.md §10.2）
 struct SkillContextMenu: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var skill: Skill
 
     var body: some View {
@@ -615,7 +765,7 @@ struct SkillContextMenu: View {
 }
 
 struct EmptyListView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
 
     var body: some View {
         let favoritesEmpty = store.favoritesOnly && !store.hasActiveFilters
@@ -655,7 +805,7 @@ struct EmptyListView: View {
 // MARK: - 详情面板（L1）
 
 struct InspectorPanel: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
 
     var body: some View {
         VStack(spacing: 0) {
@@ -792,7 +942,7 @@ struct InspectorPanel: View {
 }
 
 private struct InspectorHead: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var skill: Skill
 
     var body: some View {
@@ -878,15 +1028,16 @@ private struct InspectorHead: View {
 
 /// 详情页「使用情况」块：调用会话数 / 最近使用 / 平台分布（来自本机会话日志索引）
 private struct UsageSection: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
+    @Environment(UsageIndexState.self) private var usageIndex
     var skill: Skill
 
     var body: some View {
         DetailSection(title: "使用情况", hint: "来自本机会话日志") {
-            if store.usageIndexing {
+            if usageIndex.indexing {
                 HStack(spacing: Theme.Space.s8) {
                     ProgressView().controlSize(.small)
-                    Text(LF("正在索引使用记录… %d%%", Int(store.usageProgress * 100)))
+                    Text(LF("正在索引使用记录… %d%%", Int(usageIndex.progress * 100)))
                         .font(Theme.Fonts.secondary)
                         .monospacedDigit()
                         .foregroundStyle(Theme.textSecondary)
@@ -926,7 +1077,7 @@ private struct UsageSection: View {
 }
 
 private struct ContextCostSection: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var skill: Skill
 
     var body: some View {
@@ -968,7 +1119,7 @@ private struct ContextCostSection: View {
 /// 详情页「管理」块：Atlas 技能可开关平台 / 停用；CC Switch 只读；
 /// 本地直装可「收进 Skill Atlas 库」接管，也可停用
 private struct ManageSection: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var skill: Skill
 
@@ -1152,7 +1303,7 @@ private struct ManageSection: View {
 
 /// 详情页主按钮：一键复制该技能的调用语，成功后勾选反馈
 private struct CopyCallButton: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var copied = false
     var skill: Skill
@@ -1187,7 +1338,7 @@ private struct CopyCallButton: View {
 }
 
 private struct CategoryChip: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var category: String
 
     var body: some View {
@@ -1237,7 +1388,7 @@ private struct DetailSection<Content: View>: View {
 }
 
 private struct PromptChip: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var copied = false
     var prompt: String
@@ -1297,7 +1448,7 @@ private struct MountLine: View {
 
 /// 详情页健康提醒：只在真有问题时出现（健康时不占版面），入口指向体检页。
 private struct HealthNote: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var skill: Skill
 
     var body: some View {
@@ -1345,7 +1496,7 @@ private struct HealthNote: View {
 
 /// 详情头的发起按钮：弹出主题输入，自动建体裁目录并开 Terminal 会话
 private struct LaunchButton: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @State private var presented = false
     var skill: Skill
 
@@ -1376,7 +1527,7 @@ private struct LaunchButton: View {
 }
 
 private struct LaunchPopover: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Binding var presented: Bool
     @State private var topic = ""
     @State private var errorText: String?
@@ -1494,7 +1645,7 @@ private struct LaunchPopover: View {
 // MARK: - 详情安全区块（二期 F3 复扫结果）
 
 private struct SecuritySection: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var skill: Skill
 
     var body: some View {
@@ -1517,7 +1668,7 @@ private struct SecuritySection: View {
 // MARK: - 最近产出（二期 F4：产出物回链）
 
 private struct OutputsSection: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @State private var records: [OutputRecord] = []
     var skill: Skill
 
@@ -1539,13 +1690,15 @@ private struct OutputsSection: View {
                 }
             }
         }
-        .onAppear { records = OutputLinker.recentOutputs(for: skill) }
-        .onChange(of: skill.name) { _, _ in records = OutputLinker.recentOutputs(for: skill) }
+        // .task(id:) 随选中切换自动取消重跑，且首次出现即加载；后台扫盘不占主线程
+        .task(id: skill.name) {
+            records = await OutputLinker.recentOutputs(for: skill)
+        }
     }
 }
 
 private struct OutputRow: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @State private var hovering = false
     var record: OutputRecord
     var skill: Skill
@@ -1607,7 +1760,7 @@ private struct OutputRow: View {
 // MARK: - 生产链路（二期 F6：上游/下游/依赖）
 
 private struct ChainSection: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var skill: Skill
 
     var body: some View {
@@ -1733,7 +1886,7 @@ struct DirtyNotice: View {
 
 /// 单技能更新审阅 sheet：看到 diff 才能确认——没有不经审阅的更新
 struct UpdateReviewSheet: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     private var review: AppStore.UpdateReview? { store.updateReview }
@@ -1852,7 +2005,7 @@ struct UpdateReviewSheet: View {
 
 /// 批量更新审阅 sheet：逐技能折叠 diff；本地改过的默认跳过，只能去详情页单独审阅
 struct BatchUpdateSheet: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     private var reviews: [AppStore.UpdateReview] { store.batchReviews ?? [] }

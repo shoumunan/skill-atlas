@@ -15,8 +15,8 @@ import SwiftUI
 // 1. 名词定义唯一落点是关系图——每个节点自带一行副句，不点也读得到。
 //    任何人为了让图「干净」删掉节点副句，这页对新手的价值当场归零。
 // 2. 面板内不再叠第二块 contentSurface（L1 叠 L1），次级容器一律 quietControl。
-// 3. 所有举例从 store.skills 动态取真实技能，取不到降级成中性说法——
-//    宁可不举例，也不展示用户没有的技能名。
+// 3. 教材举例只用 GuideSample，不读库里的真实技能名 / 描述 / 调用语。
+//    这页会进公开发布的截图；用「最常用技能」等于把作者或用户的身份写进说明书。
 
 // MARK: - 本页排印契约（v10 重排，改这个文件前先读完这一段）
 //
@@ -40,6 +40,33 @@ import SwiftUI
 // 2. DESIGN.md 第 311 行禁的是「孤立粗体页标题」，指内容面板顶上再放一个大标题去
 //    重复工具条里的页名。它管的不是长滚动文档里的分节标题；把它套到这里，才是本页
 //    没有任何 15pt 文字的原因。第 81 行写得很清楚：panelTitle = 面板标题。
+
+/// 指南页唯一允许出现的技能身份。不从本机库取名。
+enum GuideSample {
+    static let name = "weekly-notes"
+    static let directory = "weekly-notes"
+    static let category = "演示与文档"
+    static let description = "当用户说「写周报」「整理本周进展」时使用。按固定结构输出本周完成、风险和下周计划。"
+    static let namedPhrase = "请使用 weekly-notes：把这周的会议记录整理成一页周报"
+    static let autoPhrase = "把这周的会议记录整理成一页周报"
+}
+
+/// 试触发等活工具仍读本机库，但命中作者身份词的技能不进指南页。
+enum GuidePrivacy {
+    static let blocked = [
+        "寿楠", "永赢", "永贏", "永赢基金",
+        "shounan", "yongying", "jung8",
+    ]
+
+    static func isPersonal(_ skill: Skill) -> Bool {
+        let hay = "\(skill.name) \(skill.directory) \(skill.description) \(skill.whenToUse)"
+        return blocked.contains { hay.localizedCaseInsensitiveContains($0) }
+    }
+
+    static func publicSkills(from skills: [Skill]) -> [Skill] {
+        skills.filter { !isPersonal($0) }
+    }
+}
 
 enum GuideMetrics {
     /// 正文行宽上限。中文 12pt 约 12pt/字，640 ≈ 一行 50 字上下，落在舒适区间。
@@ -116,7 +143,7 @@ private struct GuideSentinelKey: PreferenceKey {
 }
 
 struct GuidePage: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var current: GuideSection = .start
     @State private var lockedLayer: ConceptLayer?
@@ -148,7 +175,7 @@ struct GuidePage: View {
                             .guideAnchor(.triage)
                         GuideSkillFileSection(wide: wide)
                             .guideAnchor(.skillmd)
-                        GuideLocalSection(wide: wide)
+                        GuideLocalSection()
                             .guideAnchor(.local)
                         // sentinel：滚到底时强制点亮最后一节
                         Color.clear
@@ -414,7 +441,7 @@ private struct GuideActionButton: View {
 // MARK: - ① 三步把技能用起来
 
 private struct GuideStartSection: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var wide: Bool
     var jump: (GuideSection) -> Void
 
@@ -450,8 +477,8 @@ private struct GuideStartSection: View {
                 index: 2,
                 title: "复制调用语",
                 detail: wide
-                    ? "列表行悬停、详情页、菜单栏 ⌥⌘K 回车，都能一键复制。右边就是你库里的活例子。"
-                    : "列表行悬停、详情页、菜单栏 ⌥⌘K 回车，都能一键复制。下面就是你库里的活例子。"
+                    ? "列表行悬停、详情页、菜单栏 ⌥⌘K 回车，都能一键复制。右边是一句教材示例，不是你库里的技能。"
+                    : "列表行悬停、详情页、菜单栏 ⌥⌘K 回车，都能一键复制。下面是一句教材示例，不是你库里的技能。"
             ) {
                 AnyView(EmptyView())
             }
@@ -470,19 +497,14 @@ private struct GuideStartSection: View {
     /// 不举 pptx 为例：官方明确 PowerPoint/Excel/Word/PDF 四个内置技能在
     /// Claude Code 里不可用，举它会让读者以为自己的 Claude Code 自带。
     private var firstStepDetail: String {
-        if let skill = store.featuredSkill {
-            return LF("在技能库选中想用的。不确定用哪个，就按 ⌘K 搜任务本身，搜「%@」或搜它要办的那件事都行。", skill.name)
-        }
-        return L("在技能库选中想用的；不确定用哪个就 ⌘K 直接搜任务本身，不用记技能叫什么。")
+        L("在技能库选中想用的；不确定用哪个就 ⌘K 直接搜任务本身，不用记技能叫什么。")
     }
 
     @ViewBuilder
     private var thirdStepContent: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s8) {
-            if let skill = store.featuredSkill {
-                phraseRow(label: "点名（最稳）", text: AppStore.callPhrase(for: skill))
-                phraseRow(label: "不点名（靠它自己认）", text: AppStore.autoMatchPhrase(for: skill))
-            }
+            phraseRow(label: "点名（最稳）", text: GuideSample.namedPhrase)
+            phraseRow(label: "不点名（靠它自己认）", text: GuideSample.autoPhrase)
             // 跳转不做成行内文字链：整段挂 onTapGesture 会把三句话都变成点击热区，
             // 用户点任何一处都会被弹走；按钮与本文件其他跳转（inference / triageRow）同构
             HStack(alignment: .top, spacing: Theme.Space.s8) {
@@ -606,29 +628,40 @@ private struct StepBlock: View {
     }
 }
 
-/// 活例子：当前选中（否则最常用）技能的完整调用语 + 复制
+/// 教材示例：固定中性技能，不读本机库。
 private struct FeaturedExample: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var copied = false
 
     var body: some View {
-        if let skill = store.featuredSkill {
+        if store.skills.isEmpty {
+            VStack(alignment: .leading, spacing: Theme.Space.s8) {
+                Text(L("库里还没有技能，先去安装一个。"))
+                    .font(Theme.Fonts.callout)
+                    .foregroundStyle(Theme.textTertiary)
+                GuideActionButton(title: "安装技能", help: "粘贴 GitHub 链接或选择本地文件夹（⌘N）") {
+                    store.installSheetPresented = true
+                }
+            }
+            .padding(Theme.Space.s12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .quietControl(cornerRadius: Theme.Radius.tile)
+        } else {
             VStack(alignment: .leading, spacing: Theme.Space.s8 + 2) {
                 HStack(spacing: Theme.Space.s8 + 2) {
-                    CategoryIcon(category: skill.category, size: 30)
+                    CategoryIcon(category: GuideSample.category, size: 30)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(skill.name)
+                        Text(GuideSample.name)
                             .font(Theme.Fonts.rowTitle)
                             .foregroundStyle(Theme.textPrimary)
-                        Text(store.selectedSkill == nil ? L("你最常用的技能") : L("当前选中的技能"))
+                        Text(L("教材示例，不是你库里的技能"))
                             .font(Theme.Fonts.caption)
                             .foregroundStyle(Theme.textTertiary)
                     }
                     Spacer()
-                    PlatformStrip(skill: skill, platforms: store.visiblePlatforms, size: 16, interactive: false)
                 }
-                Text(AppStore.callPhrase(for: skill))
+                Text(GuideSample.namedPhrase)
                     .font(Theme.Fonts.callout)
                     .lineSpacing(2)
                     .foregroundStyle(Theme.textPrimary)
@@ -637,7 +670,7 @@ private struct FeaturedExample: View {
                     .padding(Theme.Space.s12)
                     .quietControl(cornerRadius: Theme.Radius.row)
                 Button {
-                    store.copyToPasteboard(AppStore.callPhrase(for: skill))
+                    store.copyToPasteboard(GuideSample.namedPhrase)
                     withAnimation(reduceMotion ? nil : Motion.control) { copied = true }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                         withAnimation(reduceMotion ? nil : Motion.control) { copied = false }
@@ -661,18 +694,6 @@ private struct FeaturedExample: View {
             .padding(Theme.Space.s12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .quietControl(cornerRadius: Theme.Radius.tile)
-        } else {
-            VStack(alignment: .leading, spacing: Theme.Space.s8) {
-                Text(L("库里还没有技能，先去安装一个。"))
-                    .font(Theme.Fonts.callout)
-                    .foregroundStyle(Theme.textTertiary)
-                GuideActionButton(title: "安装技能", help: "粘贴 GitHub 链接或选择本地文件夹（⌘N）") {
-                    store.installSheetPresented = true
-                }
-            }
-            .padding(Theme.Space.s12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .quietControl(cornerRadius: Theme.Radius.tile)
         }
     }
 }
@@ -683,7 +704,7 @@ private struct FeaturedExample: View {
 // 「装多了会怎样」每一条都是要背的规则；讲了，后面全是推论。
 
 private struct GuideMechanismSection: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var jump: (GuideSection) -> Void
 
     var body: some View {
@@ -799,7 +820,7 @@ private struct GuideMechanismSection: View {
 // 反过来读者会跑去修一个其实正常的东西。
 
 private struct GuideTriageSection: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var jump: (GuideSection) -> Void
 
     var body: some View {
@@ -834,11 +855,9 @@ private struct GuideTriageSection: View {
                     index: 2,
                     title: "输出结构对得上 SKILL.md 里的模板",
                     detail: "弱证据，但肉眼可查。结构对不上，多半没读到正文。",
-                    trailing: store.featuredSkill.map { skill in
-                        AnyView(GuideActionButton(title: "查看完整说明", help: LF("在应用内读 %@ 的 SKILL.md", skill.name)) {
-                            store.readerSkill = skill
-                        })
-                    }
+                    trailing: AnyView(GuideActionButton(title: "去技能库看一份", help: "打开技能库，点选任意技能后可在详情里读 SKILL.md") {
+                        store.nav = .library
+                    })
                 )
                 GuideHairline()
                 evidence(
@@ -962,11 +981,9 @@ private struct GuideTriageSection: View {
                     index: 6,
                     question: "上面都对，还是不理？",
                     detail: L("直接点名：复制调用语，或者在 Claude Code 里直接打 /技能名。自动匹配是模型的语义判断，技能一多就不保准；点名没有歧义，而且清单永远保留每个技能的名字。"),
-                    button: store.featuredSkill.map { skill in
-                        ("复制点名调用语", L("复制：") + AppStore.callPhrase(for: skill), {
-                            store.copyToPasteboard(AppStore.callPhrase(for: skill))
-                        })
-                    }
+                    button: ("复制点名调用语", L("复制教材示例：") + GuideSample.namedPhrase, {
+                        store.copyToPasteboard(GuideSample.namedPhrase)
+                    })
                 )
             }
         }
@@ -1026,7 +1043,7 @@ private struct GuideTriageSection: View {
 /// 页内实时试触发：把这一页最抽象的那件事（谁会被叫醒）变成当场能试的东西。
 /// 走的是菜单栏「试触发」同一套 TriggerLab 口径，只是搬到教学现场。
 private struct TriggerTryout: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @State private var phrase = ""
 
     private var atRiskNames: Set<String> {
@@ -1039,7 +1056,7 @@ private struct TriggerTryout: View {
         return Array(
             TriggerLab.simulate(
                 phrase: query,
-                skills: store.skills,
+                skills: GuidePrivacy.publicSkills(from: store.skills),
                 usage: store.usage,
                 atRiskNames: atRiskNames
             ).prefix(3)
@@ -1145,7 +1162,7 @@ private struct TriggerTryout: View {
 // MARK: - ⑤ SKILL.md 长什么样（+ 快捷键 + 常见问题）
 
 private struct GuideSkillFileSection: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var wide: Bool
 
     var body: some View {
@@ -1168,20 +1185,11 @@ private struct GuideSkillFileSection: View {
         }
     }
 
-    /// 骨架用库里真实技能的 name / description 开头，取不到用中性占位
-    /// 只有散文片段查表，YAML 结构（--- / name: / description:）保持字面量。
-    /// 这三个是 frontmatter 的规范字段名，属于语法不是文案——一旦被译成
-    /// Name / 説明 / 이름，这份「教你怎么写 frontmatter」的示例就把语法教错了。
+    /// 骨架只用教材示例。YAML 字段名保持字面量，属于语法不是文案。
     private var skeletonText: String {
         let body = L("# 正文：流程、模板、红线、示例")
-        if let skill = store.featuredSkill {
-            let desc = skill.description
-                .replacingOccurrences(of: "\n", with: " ")
-                .prefix(48)
-            return "---\nname: \(skill.directory)\ndescription: \(desc)…\n---\n\n\(body)"
-        }
-        return "---\nname: \(L("<目录名>"))\n"
-            + "description: \(L("<做什么。什么时候该用我，把用户会说的原话用「」括起来放前面>"))\n"
+        return "---\nname: \(GuideSample.directory)\n"
+            + "description: \(GuideSample.description)\n"
             + "---\n\n\(body)"
     }
 
@@ -1282,7 +1290,7 @@ private struct GuideSkillFileSection: View {
 /// 常见问题：默认全收起的披露行。它是被查的，不是被读的——
 /// 和上面「读」的内容刻意形成语法差。
 private struct GuideFAQ: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded: Set<Int> = []
 
@@ -1388,34 +1396,20 @@ private struct GuideFAQ: View {
 // 下一行却说「预算还够」）。
 
 private struct GuideLocalSection: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var wide: Bool
 
     var body: some View {
         let total = store.skills.filter { !$0.disabled }.count
         let report = store.doctorReport
         VStack(alignment: .leading, spacing: Theme.Space.s16) {
             GuideSectionHead(section: .local)
-            Group {
-                if wide {
-                    HStack(alignment: .center, spacing: Theme.Space.s20) {
-                        metrics(total: total, report: report)
-                        Spacer(minLength: Theme.Space.s12)
-                        VStack(alignment: .trailing, spacing: Theme.Space.s8) {
-                            statusLine(report)
-                            doctorButton
-                        }
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: Theme.Space.s12) {
-                        metrics(total: total, report: report)
-                        HStack(alignment: .top, spacing: Theme.Space.s12) {
-                            statusLine(report)
-                            Spacer(minLength: 0)
-                            doctorButton
-                        }
-                    }
+            VStack(alignment: .leading, spacing: Theme.Space.s16) {
+                metrics(total: total, report: report)
+                statusLine(report)
+                HStack {
+                    Spacer(minLength: 0)
+                    doctorButton
                 }
             }
             .padding(Theme.Space.s16)
@@ -1467,10 +1461,10 @@ private struct GuideLocalSection: View {
             ? LF("当前清单已超预算，估算有 %d 个技能的描述会被丢掉。技能还在，点名照样能用，只是 Claude 不再知道它们能干什么。", report.atRisk.count)
             : LF("清单占用约 %d%% 预算（估算）。丢的是描述不是技能，超了之后从用得最少的开始丢。", Int(report.usageFraction * 100)))
             .font(Theme.Fonts.callout)
-            .lineSpacing(2)
+            .lineSpacing(3)
             .foregroundStyle(report.overBudget ? Theme.warning : Theme.textSecondary)
-            .multilineTextAlignment(wide ? .trailing : .leading)
-            .frame(maxWidth: 320, alignment: wide ? .trailing : .leading)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
     }
 

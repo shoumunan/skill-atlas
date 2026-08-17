@@ -172,7 +172,7 @@ enum HookTelemetry {
 
     // MARK: 事件读取
 
-    struct HookStats {
+    struct HookStats: Equatable {
         var events = 0
         /// 会话数（与 grep 口径一致：同会话同技能只计一次）
         var sessions = 0

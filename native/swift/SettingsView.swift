@@ -36,7 +36,7 @@ struct SettingsPage: View {
 // MARK: - 场景 Profile（三期 G8）
 
 private struct ProfileGroup: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
 
     var body: some View {
         SettingsGroup(title: "场景 Profile") {
@@ -98,7 +98,7 @@ private struct ProfileGroup: View {
 // MARK: - Hook 实时遥测（三期 G5）
 
 private struct TelemetryGroup: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @State private var installed = false
     @State private var errorText: String?
     @State private var message: String?
@@ -185,7 +185,7 @@ private struct TelemetryGroup: View {
 // MARK: - 本地技能收编（散装 → 本库，人人可用）
 
 private struct AdoptGroup: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @State private var confirming = false
 
     var body: some View {
@@ -328,7 +328,7 @@ private struct SettingsRow<Trailing: View>: View {
 // MARK: - 外观
 
 private struct AppearanceGroup: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @AppStorage("atlasMenuBarEnabled") private var menuBarEnabled = true
     @State private var mode = AppearanceMode.stored
 
@@ -427,7 +427,7 @@ private struct AppearanceGroup: View {
 // MARK: - 技能库
 
 private struct LibraryGroup: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pathsExpanded = false
 
@@ -515,7 +515,7 @@ private struct LibraryGroup: View {
 // MARK: - 从 CC Switch 迁移
 
 private struct MigrationGroup: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
 
     /// 只对有 CC Switch 痕迹的用户显示：有 DB / 已迁移 / 有回滚清单。
     /// 纯本地用户的「收进本库」入口是上面的收编组，这块整组不出现。

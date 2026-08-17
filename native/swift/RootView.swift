@@ -2,21 +2,22 @@ import AppKit
 import SwiftUI
 
 struct RootView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @ObservedObject private var updates = UpdateChecker.shared
     @FocusState private var searchFocused: Bool
-    @State private var entered = false
+    /// 全屏时不再忽略顶部安全区（只让菜单栏），窗口模式忽略以便工具条对齐交通灯。
+    @State private var isFullscreen = false
 
     var body: some View {
-        ZStack {
-            AtlasBackdrop()
-
+        @Bindable var store = store
+        Group {
             if let message = store.fatalError {
                 FatalView(message: message)
             } else {
                 shell
             }
         }
+        .background(AtlasBackdrop())
         .foregroundStyle(Theme.textPrimary)
         .tint(Theme.accent)
         .sheet(item: $store.readerSkill) { skill in
@@ -172,9 +173,6 @@ struct RootView: View {
             applyLaunchPage()
             DispatchQueue.main.async { applyLaunchPage() }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { applyLaunchPage() }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                entered = true
-            }
         }
         .onChange(of: store.searchFocusRequest) { _, new in
             guard new > 0 else { return }
@@ -213,23 +211,21 @@ struct RootView: View {
     private var shell: some View {
         VStack(spacing: 0) {
             ToolbarStrip(searchFocused: $searchFocused, hasAppUpdate: updates.available != nil)
-                .enterEffect(entered, delay: 0)
             HStack(spacing: Theme.Space.s12) {
                 SidebarRail()
-                    .enterEffect(entered, delay: 0.05)
                 PageContainer()
-                    .enterEffect(entered, delay: 0.1)
             }
             .padding(.horizontal, Theme.Space.s12)
             .padding(.bottom, Theme.Space.s12)
         }
-        .ignoresSafeArea()
+        // 窗口：盖住标题栏，和交通灯同一条中线。全屏：尊重安全区，标题贴在菜单栏下，不再垫一条空灰边。
+        .ignoresSafeArea(edges: isFullscreen ? [] : .top)
+        .background(FullscreenTopInset(isFullscreen: $isFullscreen))
     }
 }
 
 struct ToolbarStrip: View {
-    @EnvironmentObject private var store: AppStore
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(AppStore.self) private var store
     var searchFocused: FocusState<Bool>.Binding
     var hasAppUpdate: Bool
 
@@ -245,18 +241,16 @@ struct ToolbarStrip: View {
                     .font(Theme.Fonts.secondary)
                     .monospacedDigit()
                     .foregroundStyle(Theme.textTertiary)
-                    .contentTransition(.opacity)
             }
-            .id(store.nav)
-            .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 4)))
 
             Spacer()
 
-            if store.nav == .library {
-                SearchCapsule(searchFocused: searchFocused)
-                    .frame(width: 300)
-                    .transition(.opacity)
-            }
+            // 搜索框始终占位。切页时插入/移除会逼整条工具栏重排，体感像卡一下。
+            SearchCapsule(searchFocused: searchFocused)
+                .frame(width: 300)
+                .opacity(store.nav == .library ? 1 : 0)
+                .allowsHitTesting(store.nav == .library)
+                .accessibilityHidden(store.nav != .library)
 
             InstallChromeButton()
             RefreshButton()
@@ -284,15 +278,15 @@ struct ToolbarStrip: View {
         .padding(.leading, Theme.Layout.contentLeading)
         .padding(.trailing, Theme.Space.s12)
         .frame(height: Theme.Layout.toolbar)
-        .animation(reduceMotion ? nil : Motion.standard, value: store.nav)
     }
 }
 
 private struct SearchCapsule: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var searchFocused: FocusState<Bool>.Binding
 
     var body: some View {
+        @Bindable var store = store
         let focused = searchFocused.wrappedValue
         HStack(spacing: Theme.Space.s8) {
             Image(systemName: "magnifyingglass")
@@ -335,13 +329,13 @@ private struct SearchCapsule: View {
                     .shadow(color: Theme.accent.opacity(0.25), radius: 4)
             }
         }
-        .help(L("窗口内 ⌘K 聚焦搜索；在任何应用里按 ⌥⌘K 呼出菜单栏快速搜索"))
+        .help(L("窗口内 / 或 ⌘K 聚焦搜索；在任何应用里按 ⌥⌘K 呼出菜单栏快速搜索"))
     }
 }
 
 /// 工具栏主操作：安装技能。带文字的强调色玻璃按钮，入口必须一眼可见。
 private struct InstallChromeButton: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
 
     var body: some View {
         Button {
@@ -365,7 +359,7 @@ private struct InstallChromeButton: View {
 }
 
 private struct RefreshButton: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -403,8 +397,7 @@ private struct RefreshButton: View {
 
 /// 侧栏：文字导航列表（图标 + 标签，参考 CC Switch），宽 176。
 struct SidebarRail: View {
-    @EnvironmentObject private var store: AppStore
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(AppStore.self) private var store
     @Namespace private var navSpace
 
     /// 本机是否有 CC Switch 痕迹（决定底部信任锚点讲哪句承诺）
@@ -447,7 +440,6 @@ struct SidebarRail: View {
         .frame(width: Theme.Layout.sidebar)
         .frame(maxHeight: .infinity)
         .glassChrome(RoundedRectangle(cornerRadius: Theme.Radius.rail, style: .continuous))
-        .animation(reduceMotion ? nil : Motion.control, value: store.nav)
     }
 }
 
@@ -483,7 +475,7 @@ private struct BrandRow: View {
 }
 
 private struct RailItem: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @State private var hovering = false
     var page: NavPage
     var namespace: Namespace.ID
@@ -562,29 +554,23 @@ private struct RailItem: View {
 }
 
 private struct PageContainer: View {
-    @EnvironmentObject private var store: AppStore
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(AppStore.self) private var store
 
     var body: some View {
-        ZStack {
-            Group {
-                if store.data == nil {
-                    SkeletonPage()
-                } else {
-                    switch store.nav {
-                    case .library:
-                        if store.skills.isEmpty { OnboardingView() } else { LibraryPage() }
-                    case .doctor: DoctorPage()
-                    case .guide: GuidePage()
-                    case .settings: SettingsPage()
-                    }
-                }
+        Group {
+            if store.data == nil {
+                SkeletonPage()
+            } else if store.nav == .library {
+                if store.skills.isEmpty { OnboardingView() } else { LibraryPage() }
+            } else if store.nav == .doctor {
+                DoctorPage()
+            } else if store.nav == .guide {
+                GuidePage()
+            } else {
+                SettingsPage()
             }
-            .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 10)))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .animation(reduceMotion ? nil : Motion.standard, value: store.nav)
-        .animation(reduceMotion ? nil : Motion.standard, value: store.data == nil)
     }
 }
 
@@ -600,7 +586,6 @@ struct SkeletonPage: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .shimmer()
             .padding(Theme.Space.s20)
             .contentSurface()
 
@@ -634,7 +619,7 @@ struct SkeletonPage: View {
 }
 
 struct OnboardingView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
 
     var body: some View {
         VStack(spacing: Theme.Space.s20) {
@@ -669,7 +654,7 @@ struct OnboardingView: View {
 }
 
 struct CopyIconButton: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var copied = false
     var text: String
@@ -696,7 +681,7 @@ struct CopyIconButton: View {
 }
 
 struct FatalView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var message: String
 
     var body: some View {

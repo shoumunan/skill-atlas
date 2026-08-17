@@ -141,7 +141,7 @@ private struct RegistryFinder: View {
 // MARK: - 安装技能 sheet（宽 560）
 
 struct InstallSheet: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = InstallerModel()
     @FocusState private var urlFocused: Bool

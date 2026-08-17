@@ -9,6 +9,7 @@ import Darwin
 //   skill-backups/      卸载前备份，保留最近 20 个
 //   migration.json      回滚清单
 //   usage-index.json    使用统计缓存
+//   security-index.json 安全复扫缓存（逐文件 path/mtime/size）
 // 启动时若 Application Support 里还有旧 atlas.json，一次性搬进来后删除。
 // 禁止写入 CC Switch 的数据库和 ~/.cc-switch/skills 原目录。
 
@@ -99,6 +100,10 @@ enum AtlasPaths {
 
     static var usageIndexURL: URL {
         root.appendingPathComponent("usage-index.json")
+    }
+
+    static var securityIndexURL: URL {
+        root.appendingPathComponent("security-index.json")
     }
 
     static var legacySupportDir: URL {

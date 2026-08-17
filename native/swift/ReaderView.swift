@@ -134,7 +134,7 @@ struct SkillDoc {
 
 struct ReaderSheet: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     var skill: Skill
     @State private var doc: SkillDoc?

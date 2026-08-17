@@ -13,7 +13,8 @@ import SwiftUI
 //               里过重。流水线：workbuddy.png（母版，留着重制用）
 //               → tools/glyphify.swift 按白度抠出线稿成透明底模板图
 //               → tools/trimglyph.swift 裁掉透明边并居中进正方画布
-//               → 这里按模板渲染 + 品牌绿渐变、glyphScale 0.60 与其余标同墨量）
+//               → 淡底 + 青色线稿（#2BB3A3），和其余芯片同一套语言
+//               → glyphScale 0.60 与其余标同墨量）
 //   OpenClaw  = openclaw.svg（自绘原创「三道爪痕」glyph，非官方商标——OpenClaw 的
 //               龙虾标带商标风险且官方无 press kit，用抽象爪痕规避；模板渲染反色）
 // UI 只展示这六个平台；OpenCode / Hermes 仅保留数据兼容，不再出现在界面上。
@@ -47,6 +48,9 @@ enum PlatformBrand {
         /// glyph 占芯片的比例：按各标的视觉重量配平——
         /// 双子星是细四角星视觉偏小，放大；X 标粗壮，略缩
         var glyphScale: CGFloat = 0.62
+        /// 线稿跟品牌色走（WorkBuddy）：淡底 + 青色标，和 Claude/Codex 同一套芯片语言。
+        /// 不要实色底板——满饱和绿块会在一排淡色芯片里独重。
+        var tintedGlyph: Bool = false
     }
 
     static func spec(for platform: AgentPlatform) -> Spec? {
@@ -60,9 +64,10 @@ enum PlatformBrand {
         )
         case .grokbuild: return Spec(file: "xai", template: true, tint: Color(hex: 0x8E8E93), glyphScale: 0.58)
         case .workbuddy: return Spec(
-            file: "workbuddy-trim", template: true, tint: Color(hex: 0x01C886),
-            gradient: [Color(hex: 0x0FD08F), Color(hex: 0x00A97A)],
-            glyphScale: 0.60
+            file: "workbuddy-trim", template: true,
+            tint: Color(hex: 0x2BB3A3),
+            glyphScale: 0.60,
+            tintedGlyph: true
         )
         case .openclaw: return Spec(file: "openclaw", template: true, tint: Color(hex: 0xE8503A), glyphScale: 0.66)
         case .opencode, .hermes: return nil
@@ -161,6 +166,7 @@ struct PlatformLogo: View {
     /// 置灰时统一三级文本色；彩标（Claude）走原图色，这里的样式不生效
     private func glyphStyle(spec: PlatformBrand.Spec) -> AnyShapeStyle {
         guard lit else { return AnyShapeStyle(Theme.textTertiary) }
+        if spec.tintedGlyph { return AnyShapeStyle(spec.tint) }
         if let gradient = spec.gradient {
             return AnyShapeStyle(
                 LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -177,7 +183,7 @@ struct PlatformLogo: View {
 
 /// 列表行内可点击的挂载开关。Atlas 技能单击即建/删软链；其它来源只展示。
 struct PlatformStrip: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var skill: Skill
     var platforms: [AgentPlatform]
     var size: CGFloat = 18
@@ -219,7 +225,7 @@ struct PlatformStrip: View {
 
 /// 详情头部：logo 开关，无文字 chip
 struct PlatformToggleRow: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     var skill: Skill
     var size: CGFloat = 26
 
@@ -229,7 +235,7 @@ struct PlatformToggleRow: View {
 }
 
 struct PlatformFilterStrip: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
 
     var body: some View {
         // 只给图标，第一次打开的人认不出是哪个平台；宽度够就带上名称，
@@ -244,7 +250,8 @@ struct PlatformFilterStrip: View {
 
     /// 极窄时的兜底：复用 FilterMenu，菜单里逐行列出平台名（名称照样看得到）
     private var compactMenu: some View {
-        FilterMenu(
+        @Bindable var store = store
+        return FilterMenu(
             label: "平台",
             selection: $store.platform,
             options: ["全部"] + store.visiblePlatforms.map(\.label),

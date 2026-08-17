@@ -30,7 +30,9 @@ public struct FluidGradient: View {
                       highlights: highlights,
                       speed: speed,
                       blurValue: $blurValue)
-        .blur(radius: pow(blurValue, blur))
+        // 原实现用 min(宽,高)^blur，1380×860 窗 ≈ 160pt 高斯模糊。
+        // 叠在桌面材质上每帧都要重采样，整窗会跟着掉帧。封顶后观感仍软。
+        .blur(radius: min(40, pow(max(blurValue, 1), blur)))
         .accessibility(hidden: true)
         .clipped()
     }

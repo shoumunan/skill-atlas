@@ -9,8 +9,8 @@ import Foundation
 //   硬编码密钥 · 外链清单
 // 纯静态、离线、毫秒级；安装时强制过闸，已装技能由体检页复扫。
 
-struct SecurityFinding: Identifiable, Hashable {
-    enum Severity: Int, Comparable {
+struct SecurityFinding: Identifiable, Hashable, Codable {
+    enum Severity: Int, Comparable, Codable {
         case critical = 0, warning = 1, info = 2
         static func < (lhs: Severity, rhs: Severity) -> Bool { lhs.rawValue < rhs.rawValue }
     }
@@ -29,16 +29,83 @@ struct SecurityFinding: Identifiable, Hashable {
 }
 
 enum SecurityScanner {
+    /// 缓存版本：规则或 Finding 形态变了就 +1，避免读到过期命中
+    private static let cacheVersion = 1
+
+    private struct FileEntry: Codable {
+        var mtime: Double
+        var size: Int
+        var findings: [SecurityFinding]
+    }
+
+    private struct Cache: Codable {
+        var version: Int
+        var files: [String: FileEntry]
+    }
+
     /// 单技能目录静态扫描。只读，最多 200 个文本文件、单文件 ≤ 1 MB、深度 ≤ 3。
+    /// 按逐文件 (path, mtime, size) 命中 `security-index.json`，未变的文件不重读。
     static func scan(directory: URL) -> [SecurityFinding] {
+        var cache = loadCache()
+        var liveFiles = Set<String>()
+        let findings = scanDirectory(directory, cache: &cache, liveFiles: &liveFiles)
+        saveCache(cache)
+        return findings
+    }
+
+    /// 已装技能增量复扫：一次载入/落盘缓存，按目录归并发现。
+    static func scanInstalled(targets: [(directory: String, path: String)]) -> [String: [SecurityFinding]] {
+        var cache = loadCache()
+        var result: [String: [SecurityFinding]] = [:]
+        var liveFiles = Set<String>()
+        let prefixes = targets.map { $0.path.hasSuffix("/") ? $0.path : $0.path + "/" }
+        for target in targets {
+            let url = URL(fileURLWithPath: target.path, isDirectory: true)
+            let findings = scanDirectory(url, cache: &cache, liveFiles: &liveFiles)
+            if !findings.isEmpty { result[target.directory] = findings }
+        }
+        cache.files = cache.files.filter { key, _ in
+            liveFiles.contains(key) || !prefixes.contains(where: { key.hasPrefix($0) })
+        }
+        saveCache(cache)
+        return result
+    }
+
+    private static func loadCache() -> Cache {
+        guard let data = try? Data(contentsOf: AtlasPaths.securityIndexURL),
+              let cache = try? JSONDecoder().decode(Cache.self, from: data),
+              cache.version == cacheVersion else {
+            return Cache(version: cacheVersion, files: [:])
+        }
+        return cache
+    }
+
+    private static func saveCache(_ cache: Cache) {
+        let fileManager = FileManager.default
+        try? fileManager.createDirectory(
+            at: AtlasPaths.securityIndexURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        if let data = try? JSONEncoder().encode(cache) {
+            try? data.write(to: AtlasPaths.securityIndexURL, options: .atomic)
+        }
+    }
+
+    private static let textExtensions: Set<String> = [
+        "md", "sh", "bash", "zsh", "py", "js", "ts", "rb", "pl", "swift", "txt", "json", "yaml", "yml", "toml",
+    ]
+    private static let scriptExtensions: Set<String> = ["sh", "bash", "zsh", "py", "js", "ts", "rb", "pl"]
+
+    private static func scanDirectory(
+        _ directory: URL,
+        cache: inout Cache,
+        liveFiles: inout Set<String>
+    ) -> [SecurityFinding] {
         var findings: [SecurityFinding] = []
         let fileManager = FileManager.default
-        let textExtensions: Set<String> = ["md", "sh", "bash", "zsh", "py", "js", "ts", "rb", "pl", "swift", "txt", "json", "yaml", "yml", "toml"]
-        let scriptExtensions: Set<String> = ["sh", "bash", "zsh", "py", "js", "ts", "rb", "pl"]
-
         guard let enumerator = fileManager.enumerator(
             at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
             options: [.skipsHiddenFiles]
         ) else { return [] }
 
@@ -47,18 +114,31 @@ enum SecurityScanner {
             if enumerator.level > 3 { enumerator.skipDescendants(); continue }
             let ext = url.pathExtension.lowercased()
             guard textExtensions.contains(ext) else { continue }
-            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            let values = try? url.resourceValues(forKeys: [
+                .isRegularFileKey, .fileSizeKey, .contentModificationDateKey,
+            ])
             guard values?.isRegularFile == true, (values?.fileSize ?? 0) <= 1_048_576 else { continue }
             guard scanned < 200 else { break }
             scanned += 1
-            guard let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
-            let relative = url.path.replacingOccurrences(of: directory.path + "/", with: "")
-            findings.append(contentsOf: scanFile(
-                content: content,
-                relativePath: relative,
-                isMarkdown: ext == "md",
-                isScript: scriptExtensions.contains(ext)
-            ))
+
+            let path = url.path
+            liveFiles.insert(path)
+            let mtime = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
+            let size = values?.fileSize ?? 0
+            if let hit = cache.files[path], hit.mtime == mtime, hit.size == size {
+                findings.append(contentsOf: hit.findings)
+            } else {
+                guard let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                let relative = path.replacingOccurrences(of: directory.path + "/", with: "")
+                let fileFindings = scanFile(
+                    content: content,
+                    relativePath: relative,
+                    isMarkdown: ext == "md",
+                    isScript: scriptExtensions.contains(ext)
+                )
+                cache.files[path] = FileEntry(mtime: mtime, size: size, findings: fileFindings)
+                findings.append(contentsOf: fileFindings)
+            }
             if findings.count > 60 { break }
         }
         return Array(findings.sorted { $0.severity < $1.severity }.prefix(60))
@@ -117,15 +197,10 @@ enum SecurityScanner {
         var findings: [SecurityFinding] = []
         let nsContent = content as NSString
         let fullRange = NSRange(location: 0, length: nsContent.length)
+        let lineStarts = lineStartOffsets(in: nsContent)
 
         func lineNumber(at location: Int) -> Int {
-            var line = 1
-            var index = 0
-            while index < location, index < nsContent.length {
-                if nsContent.character(at: index) == 10 { line += 1 }
-                index += 1
-            }
-            return line
+            lineAt(starts: lineStarts, location: location)
         }
 
         func excerpt(at location: Int) -> String {
@@ -221,6 +296,28 @@ enum SecurityScanner {
         }
 
         return findings
+    }
+
+    /// 单遍记下每个换行位置，命中行号用二分，避免按命中从文件头重数（O(n²)）。
+    private static func lineStartOffsets(in nsContent: NSString) -> [Int] {
+        var starts = [0]
+        let length = nsContent.length
+        var index = 0
+        while index < length {
+            if nsContent.character(at: index) == 10 { starts.append(index + 1) }
+            index += 1
+        }
+        return starts
+    }
+
+    private static func lineAt(starts: [Int], location: Int) -> Int {
+        var low = 0
+        var high = starts.count
+        while low + 1 < high {
+            let mid = (low + high) / 2
+            if starts[mid] <= location { low = mid } else { high = mid }
+        }
+        return low + 1
     }
 }
 

@@ -6,7 +6,7 @@ import SwiftUI
 // 只动 ~/.cc-switch/skills 里校验通过的目录（移入废纸篓）；数据库永远不碰。
 
 struct CleanupSheet: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     private enum Stage {
