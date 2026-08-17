@@ -14,6 +14,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Select Xcode 16.2
+        # macos-14 运行器默认选中 Xcode 15.4（Swift 5.10），
+        # 那个版本的 actor 隔离推断明显弱于本地开发机，
+        # View 里同步调 @MainActor store 方法会被误判成跨隔离域访问而编译失败。
+        # 16.2 是这台镜像上预装的最新版，换过去两条构建路径（SwiftPM / swiftc 兜底）都能过。
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app
+
       - name: Validate tag and app version
         shell: bash
         run: |
@@ -28,7 +35,7 @@ jobs:
         shell: bash
         run: |
           chmod +x 构建原生应用.command 打包DMG.command
-          ATLAS_FORCE_VENDOR=1 ./打包DMG.command
+          ./打包DMG.command
 
       - name: Publish GitHub Release
         shell: bash

@@ -250,6 +250,7 @@ struct CleanupSheet: View {
         stage = .report
     }
 
+    @MainActor
     private func runCleanup() {
         stage = .working
         store.pauseWatching()
