@@ -90,7 +90,7 @@
 "从未使用或超 90 天未用。悬停行内单个停用，可回收 ~%d token。" = "Never used or idle for 90+ days. Hover a row to disable one; reclaim ~%d tokens.";
 "仓库不存在或无权访问：%@" = "Repository missing or access denied: %@";
 "仓库状态" = "Repository status";
-"仓库里没有找到 SKILL.md（检查了根目录与一层子目录）。" = "No SKILL.md found in the repository (checked root and first-level subfolders).";
+"仓库里没有找到 SKILL.md（检查了根目录、一层子目录，以及 skills/<name> 两层布局）。" = "No SKILL.md found in the repository (checked root, first-level subfolders, and skills/<name>).";
 "以后可在设置页随时迁入" = "You can migrate later from Settings";
 "会移除本应用建的平台软链。库内目录会先备份再处理。CC Switch 原文件不会删除。" = "Removes the symlinks this app created. The library folder is backed up first. CC Switch originals are never deleted.";
 "会自己规划步骤、调用工具把任务跑完的 AI。Skill 是给它看的说明书。" = "An AI that plans steps and calls tools to finish the task on its own. A skill is its instruction manual.";

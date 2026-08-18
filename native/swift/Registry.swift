@@ -10,8 +10,8 @@ import Foundation
 // 猜路径，命中率由别人的仓库布局决定、会无声退化；而且那条路要把注册表返回的字符串
 // 直接拼进文件系统路径，凭空开出一个路径穿越面。
 // 降级版零新增解析、零新增穿越面：唯一的路径入口仍是 InstallerModel.parse（它硬限
-// host == github.com），代价只是遇到 skills/<name> 两层布局时，用户要自己去 GitHub
-// 把 /tree/ 链接复制过来——而 detect 本来就会扫一层子目录，多数情况不用管。
+// host == github.com）。detect 会扫一层子目录，以及没有 SKILL.md 的目录再往下
+// 一层（skills/<name>/SKILL.md）；注册表仍只填仓库根地址，不猜子路径。
 
 struct RegistrySkill: Identifiable, Hashable, Decodable {
     var id: String

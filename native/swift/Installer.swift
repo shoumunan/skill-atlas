@@ -3,7 +3,7 @@ import Foundation
 // MARK: - 粘贴 GitHub 链接一键安装
 //
 // 流程：解析 URL → git clone --depth 1 到临时目录 → 检测 SKILL.md
-// （根目录单技能 / 一层子目录多技能勾选 / URL 子路径直装）→
+// （根目录单技能 / 一层或 skills/<name> 两层 / URL 子路径直装）→
 // 真实拷贝到 ~/.skill-atlas/skills/<name>（保留 .git 以便检查更新），
 // 再按勾选平台在 Claude / Codex / GrokBuild 等目录建软链。
 // 同名冲突跳过不覆盖。写入期间暂停 FSEvents 监听。
@@ -192,7 +192,7 @@ final class InstallerModel: ObservableObject {
                 candidates = found
                 writeScanProbeIfRequested()
                 if found.isEmpty {
-                    throw InstallError(L("仓库里没有找到 SKILL.md（检查了根目录与一层子目录）。"))
+                    throw InstallError(L("仓库里没有找到 SKILL.md（检查了根目录、一层子目录，以及 skills/<name> 两层布局）。"))
                 }
                 stage = .selecting
                 statusText = ""
@@ -236,9 +236,7 @@ final class InstallerModel: ObservableObject {
         store.pauseWatching()
         var outcome: [InstallResult] = []
         for candidate in chosen {
-            let source = candidate.relativePath == "."
-                ? cloneDir
-                : cloneDir.appendingPathComponent(candidate.relativePath)
+            let source = Self.resolve(cloneDir, relative: candidate.relativePath)
             let target = atlasRoot.appendingPathComponent(candidate.directory)
             do {
                 // 落盘兜底：directory 来自第三方仓库里的目录名，appendingPathComponent
@@ -414,13 +412,20 @@ final class InstallerModel: ObservableObject {
 
     // MARK: 检测
 
+    /// 相对路径按 `/` 拆开再拼接，避免 `appendingPathComponent("a/b")` 把斜杠当文件名。
+    private static func resolve(_ root: URL, relative: String) -> URL {
+        if relative == "." { return root }
+        return relative.split(separator: "/").reduce(root) {
+            $0.appendingPathComponent(String($1))
+        }
+    }
+
     private func detect(in dir: URL, ref: RepoRef) throws -> [InstallCandidate] {
         let fileManager = FileManager.default
         let atlasRoot = AtlasPaths.libraryRoot
 
         func candidate(relative: String, directory: String) -> InstallCandidate? {
-            let base = relative == "." ? dir : dir.appendingPathComponent(relative)
-            let skillFile = base.appendingPathComponent("SKILL.md")
+            let skillFile = Self.resolve(dir, relative: relative).appendingPathComponent("SKILL.md")
             guard fileManager.fileExists(atPath: skillFile.path) else { return nil }
             let meta = SkillScanner.readFrontmatter(skillFile)
             let conflict = fileManager.fileExists(atPath: atlasRoot.appendingPathComponent(directory).path)
@@ -432,6 +437,14 @@ final class InstallerModel: ObservableObject {
                 conflict: conflict,
                 selected: !conflict
             )
+        }
+
+        func childDirectories(of parent: URL) -> [URL] {
+            ((try? fileManager.contentsOfDirectory(
+                at: parent, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
+            )) ?? [])
+            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
         }
 
         // URL 带子路径 → 直装该子目录
@@ -446,14 +459,26 @@ final class InstallerModel: ObservableObject {
         if let root = candidate(relative: ".", directory: ref.repo) {
             return [root]
         }
-        // 扫一层子目录
-        let entries = (try? fileManager.contentsOfDirectory(
-            at: dir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
-        )) ?? []
-        return entries
-            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
-            .compactMap { candidate(relative: $0.lastPathComponent, directory: $0.lastPathComponent) }
-            .sorted { $0.directory < $1.directory }
+        // 一层子目录；没有 SKILL.md 的目录再往下看一层（skills/<name>/SKILL.md）
+        // 同名叶目录只留较浅的那份，避免勾选两项却装进同一个库目录。
+        var found: [InstallCandidate] = []
+        var seen: Set<String> = []
+        for entry in childDirectories(of: dir) {
+            let name = entry.lastPathComponent
+            if let hit = candidate(relative: name, directory: name) {
+                found.append(hit)
+                seen.insert(name)
+                continue
+            }
+            for nested in childDirectories(of: entry) {
+                let leaf = nested.lastPathComponent
+                guard !seen.contains(leaf),
+                      let hit = candidate(relative: "\(name)/\(leaf)", directory: leaf) else { continue }
+                found.append(hit)
+                seen.insert(leaf)
+            }
+        }
+        return found
     }
 }
 

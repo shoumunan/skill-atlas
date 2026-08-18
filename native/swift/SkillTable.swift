@@ -275,10 +275,36 @@ final class SkillTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
 /// 系统「始终显示滚动条」会在 tile 里把样式打回带槽的 legacy。
 /// 滑块自己画、槽不画：即使样式被改回去，右边也不会出现灰轨道。
+/// 系统 overlay 滑块约 15pt，和行尾 18pt 平台图标抢位置，所以宽度自己收。
 final class OverlayOnlyScroller: NSScroller {
+    private static let barWidth: CGFloat = 9
+    private static let knobWidth: CGFloat = 4
+
     override class var isCompatibleWithOverlayScrollers: Bool { true }
 
+    override class func scrollerWidth(for controlSize: NSControl.ControlSize, scrollerStyle: NSScroller.Style) -> CGFloat {
+        barWidth
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        drawKnob()
+    }
+
     override func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {}
+
+    override func drawKnob() {
+        let slot = rect(for: .knob)
+        guard slot.height > 2 else { return }
+        let knob = NSRect(
+            x: slot.midX - Self.knobWidth / 2,
+            y: slot.minY,
+            width: Self.knobWidth,
+            height: slot.height
+        )
+        let alpha: CGFloat = hitPart == .knob ? 0.42 : 0.28
+        NSColor.labelColor.withAlphaComponent(alpha).setFill()
+        NSBezierPath(roundedRect: knob, xRadius: Self.knobWidth / 2, yRadius: Self.knobWidth / 2).fill()
+    }
 }
 
 final class OverlayScrollView: NSScrollView {
