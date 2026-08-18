@@ -1,7 +1,7 @@
 {
-  "version": "1.6.4",
-  "notes": "v1.6.4：技能列表换成原生 AppKit 表格，滚动不再靠 SwiftUI List 逐帧重排；去掉常驻的流动渐变背景与大面积毛玻璃材质——这些效果会逼 WindowServer 每次布局都重新采样桌面模糊，是界面发肉的主因，换成纯色背景与面板色后手感明显跟手。状态管理迁移到 Swift 新的 @Observable，配合搜索防抖、体检报告与后台扫描解耦，减少不该刷新的视图跟着重绘。安全复扫与使用记录索引都改成增量缓存（前者按文件 mtime/size，后者按已读字节偏移），不用每次全量重扫/重析整个文件。技能库新增 J/K 上下选行、`/` 聚焦搜索；修了全屏模式下顶部多出一条灰边的问题。含 v1.6.0 起的功能：场景 Profile（按场景勾选真正要用的技能，落地走 Claude Code 自己的 skillOverrides）、单技能试跑（干净会话里验证会不会被触发，不是安全沙箱）、注册表发现轻量版（搜 skills.sh 填仓库地址）、Hook 实时遥测、描述开药（改写 SKILL.md 描述前置触发句）、OpenClaw/WorkBuddy 平台支持，以及一批安全修复（allowed-tools 裸星号漏报、hook 脚本注入面、软链误删、同秒备份覆盖、隐藏 Unicode 误判）。含 v1.4.x 全部功能。",
+  "version": "1.6.5",
+  "notes": "v1.6.5：粘贴 GitHub 仓库根地址时，也能自动发现 skills/<name>/SKILL.md 两层布局；技能列表滚动条改细，不再和行尾平台图标抢位置。含 v1.6.4：技能列表换成原生 AppKit 表格，滚动不再靠 SwiftUI List 逐帧重排；去掉常驻的流动渐变背景与大面积毛玻璃材质。含 v1.6.0 起的功能：场景 Profile、单技能试跑、注册表发现轻量版、Hook 实时遥测、描述开药、OpenClaw/WorkBuddy 平台支持，以及一批安全修复。含 v1.4.x 全部功能。",
   "download": "https://github.com/shoumunan/skill-atlas/releases",
-  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v1.6.4/Skill.Atlas-1.6.4.dmg",
-  "sha256": "b238bef326d1755fa4537b28e81bd805a3f5dfe0db7bfbdd25a326d9845df119"
+  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v1.6.5/Skill.Atlas-1.6.5.dmg",
+  "sha256": "751ff1a11fb9e7de385b6638a8c26cc464d9c8b44ea238a3dcae586a76375184"
 }
