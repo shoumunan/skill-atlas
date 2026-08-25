@@ -20,7 +20,7 @@ struct AtlasError: LocalizedError {
 }
 
 enum AgentPlatform: String, CaseIterable, Identifiable, Codable {
-    case claude, codex, gemini, opencode, hermes, grokbuild, workbuddy, openclaw
+    case claude, codex, gemini, opencode, hermes, grokbuild, cursor, workbuddy, openclaw
 
     var id: String { rawValue }
 
@@ -32,6 +32,7 @@ enum AgentPlatform: String, CaseIterable, Identifiable, Codable {
         case .opencode: return "OpenCode"
         case .hermes: return "Hermes"
         case .grokbuild: return "GrokBuild"
+        case .cursor: return "Cursor"
         case .workbuddy: return "WorkBuddy"
         case .openclaw: return "OpenClaw"
         }
@@ -50,6 +51,7 @@ enum AgentPlatform: String, CaseIterable, Identifiable, Codable {
             return home.appendingPathComponent(".opencode/skills")
         case .hermes: return home.appendingPathComponent(".hermes/skills")
         case .grokbuild: return home.appendingPathComponent(".grok/skills")
+        case .cursor: return home.appendingPathComponent(".cursor/skills")
         case .workbuddy: return home.appendingPathComponent(".workbuddy/skills")
         case .openclaw: return home.appendingPathComponent(".openclaw/skills")
         }

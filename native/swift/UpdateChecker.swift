@@ -8,7 +8,7 @@ import Foundation
 // 有新版 / 已最新 / 暂时无法检查更新。
 // 启动 10 秒后若距上次成功检查 ≥7 天则静默查一次；有新版时工具栏亮点。
 // 有新版时首选「自动更新」（SelfUpdater 应用内下载换装重启），
-// 「打开下载页」降级为手动逃生门。
+// 「打开下载页」降级为手动逃生门。可见路径走 AppUpdateSheet，不再弹系统 NSAlert。
 
 struct Appcast: Equatable {
     var version: String
@@ -33,6 +33,8 @@ final class UpdateChecker: ObservableObject {
     private static let lastCheckKey = "atlasLastSilentUpdateCheck"
 
     @Published var available: Appcast?
+    /// 应用自更新 sheet。id 在同一次会话里保持不变，stage 切换不会把窗拆掉重开。
+    @Published var session: AppUpdateSession?
 
     static var feedURL: URL {
         if let override = UserDefaults.standard.string(forKey: "atlasAppcastURL"),
@@ -61,6 +63,7 @@ final class UpdateChecker: ObservableObject {
                 let outcome = await Self.fetch()
                 apply(outcome)
                 if case .available(let feed) = outcome {
+                    presentAvailable(feed)
                     SelfUpdater.shared.install(feed)
                 }
             }
@@ -74,14 +77,53 @@ final class UpdateChecker: ObservableObject {
     func checkFromMenu() {
         // 没配置更新源就别去打网络——诚实告知，而不是弹「网络错误」
         guard Self.feedConfigured else {
-            Self.presentUnconfiguredAlert()
+            presentUnconfigured()
             return
         }
         Task {
             let outcome = await Self.fetch()
             apply(outcome)
-            Self.presentAlert(outcome)
+            present(outcome)
         }
+    }
+
+    func presentAvailable(_ feed: Appcast) {
+        beginSession(stage: .available, feed: feed)
+    }
+
+    func enterInstalling(_ feed: Appcast) {
+        if var current = session, current.feed?.version == feed.version {
+            current.stage = .installing
+            session = current
+        } else {
+            beginSession(stage: .installing, feed: feed)
+        }
+    }
+
+    func enterInstallFailed(_ feed: Appcast, message: String) {
+        if var current = session {
+            current.stage = .installFailed
+            current.feed = feed
+            current.message = message
+            session = current
+        } else {
+            beginSession(stage: .installFailed, feed: feed, message: message)
+        }
+    }
+
+    func dismissSession() {
+        session = nil
+    }
+
+    static func openDownload(_ feed: Appcast) {
+        if let url = URL(string: feed.download) { NSWorkspace.shared.open(url) }
+    }
+
+    static func revealMainWindow() {
+        if let window = NSApp.windows.first(where: { $0.contentView != nil }) {
+            window.makeKeyAndOrderFront(nil)
+        }
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: 网络
@@ -197,49 +239,29 @@ final class UpdateChecker: ObservableObject {
         return String(data: data, encoding: .utf8) ?? "{}"
     }
 
-    static func presentAlert(_ outcome: UpdateOutcome) {
-        let alert = NSAlert()
+    private func present(_ outcome: UpdateOutcome) {
         switch outcome {
         case .available(let feed):
-            alert.messageText = LF("发现新版本 %@", feed.version)
-            let notes = feed.notes.isEmpty ? LF("当前版本 %@。", currentVersion) : feed.notes
-            alert.informativeText = notes + "\n\n" + L("「自动更新」会下载、校验并原地换装，然后自动重启。")
-            alert.addButton(withTitle: L("自动更新"))
-            alert.addButton(withTitle: L("稍后"))
-            alert.addButton(withTitle: L("打开下载页"))
-            NSApp.activate(ignoringOtherApps: true)
-            switch alert.runModal() {
-            case .alertFirstButtonReturn:
-                SelfUpdater.shared.install(feed)
-            case .alertThirdButtonReturn:
-                if let url = URL(string: feed.download) { NSWorkspace.shared.open(url) }
-            default:
-                break
-            }
-        case .upToDate:
-            alert.messageText = L("已是最新版本")
-            alert.informativeText = LF("当前版本 %@。", currentVersion)
-            alert.addButton(withTitle: "好")
-            NSApp.activate(ignoringOtherApps: true)
-            alert.runModal()
+            beginSession(stage: .available, feed: feed)
+        case .upToDate(let current):
+            beginSession(stage: .upToDate, current: current)
         case .failed(let reason):
-            alert.messageText = L("暂时无法检查更新")
-            alert.informativeText = reason.contains("404")
-                ? L("更新源仓库还没有 appcast.json：把项目根目录的 appcast.json 推到 github.com/shoumunan/skill-atlas 主分支即可生效。")
-                : LF("请检查网络后重试。（%@）", reason)
-            alert.addButton(withTitle: "好")
-            NSApp.activate(ignoringOtherApps: true)
-            alert.runModal()
+            beginSession(stage: .failed, message: reason)
         }
     }
 
-    /// 本地构建、未配置 appcast 时的诚实提示
-    static func presentUnconfiguredAlert() {
-        let alert = NSAlert()
-        alert.messageText = L("本地构建版本，未配置更新源")
-        alert.informativeText = LF("当前版本 %@。用「构建原生应用.command」重新构建即为最新。\n如需自动更新：把 appcast.json 托管到任意可访问地址后，在终端执行\ndefaults write local.skill-atlas.dashboard atlasAppcastURL \"<地址>\"", currentVersion)
-        alert.addButton(withTitle: "好")
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
+    private func presentUnconfigured() {
+        beginSession(stage: .unconfigured)
+    }
+
+    private func beginSession(stage: AppUpdateSession.Stage, feed: Appcast? = nil, current: String? = nil, message: String = "") {
+        Self.revealMainWindow()
+        session = AppUpdateSession(
+            id: session?.id ?? UUID(),
+            stage: stage,
+            feed: feed,
+            current: current ?? Self.currentVersion,
+            message: message
+        )
     }
 }

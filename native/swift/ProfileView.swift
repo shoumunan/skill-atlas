@@ -47,10 +47,10 @@ struct ProfileSheet: View {
                         .fill(Theme.accent.opacity(0.12))
                 }
             VStack(alignment: .leading, spacing: 1) {
-                Text(L("场景 Profile"))
+                Text(L("场景"))
                     .font(Theme.Fonts.panelTitle)
                     .foregroundStyle(Theme.textPrimary)
-                Text(L("一组场景里该出现的技能。非成员会被摘出模型的自动清单，随时可撤。"))
+                Text(L("只给当前工作留需要的技能。随时可撤。"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
             }
@@ -398,131 +398,6 @@ struct ProfileSheet: View {
             }
             .buttonStyle(PressableButtonStyle())
             .accentGlass(Capsule(style: .continuous))
-        }
-    }
-}
-
-/// 单技能试跑的确认页（三期 G3）：开会话前把「隔离了什么、没隔离什么」摊开。
-/// 这个功能最容易被误当成安全沙箱，所以警示写在最显眼处，不折叠。
-struct SandboxSheet: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(spacing: 0) {
-            header
-            Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 1)
-            content.padding(Theme.Space.s20)
-        }
-        .frame(width: 600, height: 460)
-        .background(.regularMaterial)
-    }
-
-    private var header: some View {
-        HStack(spacing: Theme.Space.s12) {
-            Image(systemName: "flask")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 28, height: 28)
-                .background {
-                    RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                        .fill(Theme.accent.opacity(0.12))
-                }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(L("单技能试跑"))
-                    .font(Theme.Fonts.panelTitle)
-                    .foregroundStyle(Theme.textPrimary)
-                Text(store.sandboxTarget?.name ?? "")
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textTertiary)
-            }
-            Spacer()
-            Button {
-                store.sandboxTarget = nil
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 28, height: 28)
-                    .quietControl()
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut(.cancelAction)
-        }
-        .padding(.horizontal, Theme.Space.s20)
-        .padding(.vertical, Theme.Space.s16)
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        if let skill = store.sandboxTarget {
-            let plan = SkillSandbox.plan(for: skill)
-            VStack(alignment: .leading, spacing: Theme.Space.s12) {
-                VStack(alignment: .leading, spacing: Theme.Space.s4) {
-                    Label(LF("会开一个新的 Terminal 会话，技能清单里只有「%@」一个。", skill.name), systemImage: "checkmark.circle")
-                        .font(Theme.Fonts.calloutEmphasis)
-                        .foregroundStyle(Theme.healthy)
-                    Text(L("你库里其余的技能、内置技能都不加载，这样才能干净地判断它到底会不会被触发。"))
-                        .font(Theme.Fonts.secondary)
-                        .foregroundStyle(Theme.textSecondary)
-                }
-                .padding(Theme.Space.s8 + 2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background {
-                    RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                        .fill(Theme.healthy.opacity(0.10))
-                }
-
-                VStack(alignment: .leading, spacing: Theme.Space.s4) {
-                    Label(L("它不隔离这些"), systemImage: "exclamationmark.triangle.fill")
-                        .font(Theme.Fonts.calloutEmphasis)
-                        .foregroundStyle(Theme.warning)
-                    ForEach(Array(plan.caveats.enumerated()), id: \.offset) { _, line in
-                        Text("· " + line)
-                            .font(Theme.Fonts.secondary)
-                            .foregroundStyle(Theme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(Theme.Space.s8 + 2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background {
-                    RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                        .fill(Theme.warning.opacity(0.10))
-                }
-
-                Text(plan.command.replacingOccurrences(of: AtlasPaths.home.path, with: "~"))
-                    .font(Theme.Fonts.mono)
-                    .foregroundStyle(Theme.textTertiary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(Theme.Space.s8)
-                    .quietControl(cornerRadius: Theme.Radius.control)
-
-                Spacer()
-                HStack {
-                    Spacer()
-                    Button {
-                        store.confirmSandbox()
-                        dismiss()
-                    } label: {
-                        HStack(spacing: Theme.Space.s4) {
-                            Image(systemName: "play.circle")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text(L("开一个试跑会话"))
-                                .font(Theme.Fonts.calloutEmphasis)
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, Theme.Space.s16)
-                        .frame(height: 28)
-                        .contentShape(Capsule())
-                    }
-                    .buttonStyle(PressableButtonStyle())
-                    .accentGlass(Capsule(style: .continuous))
-                    .keyboardShortcut(.defaultAction)
-                }
-            }
         }
     }
 }

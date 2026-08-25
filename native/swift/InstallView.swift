@@ -23,7 +23,7 @@ private struct RegistryFinder: View {
                 HStack(spacing: Theme.Space.s4) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
-                    Text(L("不知道装什么？搜公开注册表"))
+                    Text(L("不知道装什么？搜一搜"))
                         .font(Theme.Fonts.secondary)
                 }
                 .foregroundStyle(Theme.accent)
@@ -46,7 +46,7 @@ private struct RegistryFinder: View {
                 .frame(height: 28)
                 .quietControl(cornerRadius: Theme.Radius.control)
 
-                Text(L("搜索词会发往第三方服务 skills.sh。选中只是把仓库地址填进上面的输入框，装不装、装之前扫不扫，仍由你决定。"))
+                Text(L("搜索会发到 skills.sh。点一下只是填地址。"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -158,8 +158,12 @@ struct InstallSheet: View {
         .frame(width: 560)
         .background(.regularMaterial)
         .onAppear {
-            // 调试钩子：-atlasInstallURL <url> 预填并自动开始（验收截图用）
-            if let preset = UserDefaults.standard.string(forKey: "atlasInstallURL"), model.urlText.isEmpty {
+            model.selectedPlatforms = store.preferredPlatforms
+            // 空库示例 / 调试钩子：预填链接并开装
+            let pending = store.pendingInstallURL
+            store.pendingInstallURL = nil
+            let preset = pending ?? UserDefaults.standard.string(forKey: "atlasInstallURL")
+            if let preset, model.urlText.isEmpty {
                 model.urlText = preset
                 if UserDefaults.standard.bool(forKey: "atlasInstallCodex") {
                     model.selectedPlatforms.insert(AgentPlatform.codex.rawValue)
@@ -168,6 +172,9 @@ struct InstallSheet: View {
             } else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { urlFocused = true }
             }
+        }
+        .onChange(of: model.selectedPlatforms) { _, new in
+            if !new.isEmpty { store.preferredPlatforms = new }
         }
         .onChange(of: model.stage) { _, stage in
             // 调试钩子：-atlasInstallGo 1 检测完成后自动安装选中项（验收用）
@@ -194,7 +201,7 @@ struct InstallSheet: View {
                 Text(L("安装技能"))
                     .font(Theme.Fonts.panelTitle)
                     .foregroundStyle(Theme.textPrimary)
-                Text(L("粘贴 GitHub 仓库链接，或选择本地文件夹，装入 Skill Atlas 技能库"))
+                Text(L("粘贴链接，或选一个文件夹"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
             }
@@ -282,13 +289,13 @@ struct InstallSheet: View {
                         .fill(Theme.warning.opacity(0.08))
                 }
             }
-            Text(L("支持 GitHub 仓库、/tree/<分支>/<子目录>，以及本机已有 SKILL.md 的文件夹。"))
+            Text(L("GitHub 链接，或本机一个文件夹。"))
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textTertiary)
             if SkillRegistry.enabled {
                 RegistryFinder(urlText: $model.urlText)
             }
-            Text(L("已经装在 ~/.claude/skills 等平台目录里的技能不用重装：它们会出现在技能库列表，选中后在「管理」区一键收进本库接管。"))
+            Text(L("已经装在软件里的不用重装。技能库里能看见，点一下就能收进来。"))
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -298,7 +305,7 @@ struct InstallSheet: View {
                     panel.canChooseFiles = false
                     panel.canChooseDirectories = true
                     panel.allowsMultipleSelection = false
-                    panel.message = L("选择包含 SKILL.md 的技能文件夹，或含多个技能子目录的文件夹")
+                    panel.message = L("选一个技能文件夹。一次装多个也可以。")
                     if panel.runModal() == .OK, let url = panel.url {
                         model.urlText = url.path
                         model.start()
@@ -346,8 +353,8 @@ struct InstallSheet: View {
         return VStack(alignment: .leading, spacing: Theme.Space.s12) {
             HStack {
                 Text(model.candidates.count == 1
-                    ? L("检测到 1 个技能")
-                    : LF("检测到 %d 个技能，勾选要安装的", model.candidates.count))
+                    ? L("这个仓库里有 1 个技能")
+                    : LF("这个仓库里有 %d 个技能，勾要装的", model.candidates.count))
                     .font(Theme.Fonts.calloutEmphasis)
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
@@ -372,36 +379,9 @@ struct InstallSheet: View {
             }
             .frame(height: min(CGFloat(model.candidates.count) * 44 + 4, 260))
             .panelScroll()
-            HStack(spacing: Theme.Space.s8) {
-                ForEach(store.visiblePlatforms) { platform in
-                    let on = model.selectedPlatforms.contains(platform.rawValue)
-                    Button {
-                        if on { model.selectedPlatforms.remove(platform.rawValue) }
-                        else { model.selectedPlatforms.insert(platform.rawValue) }
-                    } label: {
-                        HStack(spacing: Theme.Space.s4 + 1) {
-                            PlatformLogo(platform: platform, size: 18, lit: on)
-                            Text(platform.displayName)
-                                .font(on ? Theme.Fonts.calloutEmphasis : Theme.Fonts.callout)
-                                .foregroundStyle(on ? Theme.textPrimary : Theme.textTertiary)
-                        }
-                        .padding(.horizontal, Theme.Space.s8)
-                        .frame(height: 28)
-                        .background {
-                            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                                .fill(on ? Theme.accent.opacity(0.10) : Color.primary.opacity(0.04))
-                        }
-                        .overlay {
-                            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                                .strokeBorder(on ? Theme.accent.opacity(0.35) : Color.primary.opacity(0.08), lineWidth: 0.5)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .help(on ? LF("安装后挂到 %@", platform.displayName) : LF("不挂 %@", platform.displayName))
-                }
-            }
+            PlatformPrefStrip(selection: $model.selectedPlatforms, installSession: true)
             HStack {
-                Text(L("装入本库，再按勾选平台建软链"))
+                Text(L("装进本库，并点亮勾选的软件"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
                 Spacer()
@@ -433,11 +413,11 @@ struct InstallSheet: View {
                 Image(systemName: "exclamationmark.octagon.fill")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.error)
-                Text("静态扫描发现可疑内容，请逐条核对原文")
+                Text(L("装之前请看一眼"))
                     .font(Theme.Fonts.calloutEmphasis)
                     .foregroundStyle(Theme.textPrimary)
             }
-            Text("公开市场约 1/4 技能有安全缺陷。以下是命中行原文：确认来源可信再放行，或返回取消勾选。")
+            Text(L("这些不一定有问题。来源信不信，你自己看。"))
                 .font(Theme.Fonts.secondary)
                 .lineSpacing(2)
                 .foregroundStyle(Theme.textSecondary)
@@ -465,7 +445,7 @@ struct InstallSheet: View {
                 Button {
                     model.backToSelection()
                 } label: {
-                    Text("返回选择")
+                    Text(L("返回"))
                         .font(Theme.Fonts.calloutEmphasis)
                         .foregroundStyle(Theme.textPrimary)
                         .padding(.horizontal, Theme.Space.s12)
@@ -479,7 +459,7 @@ struct InstallSheet: View {
                 Button(role: .destructive) {
                     model.confirmReviewAndInstall(store: store)
                 } label: {
-                    Text("已核对来源，仍要安装")
+                    Text(L("我看过了，仍要装"))
                         .font(Theme.Fonts.calloutEmphasis)
                 }
             }
@@ -491,12 +471,24 @@ struct InstallSheet: View {
     private var doneStage: some View {
         let ok = model.results.filter(\.installed).count
         let skipped = model.results.count - ok
+        let firstDir = model.results.first(where: \.installed)?.directory
+        let phrase: String = {
+            if let firstDir, let skill = store.skills.first(where: { $0.directory == firstDir }) {
+                return AppStore.callPhrase(for: skill)
+            }
+            if let firstDir {
+                return LF("请使用 %@ 帮我完成：<描述你的目标>", firstDir)
+            }
+            return ""
+        }()
         return VStack(alignment: .leading, spacing: Theme.Space.s12) {
             HStack(spacing: Theme.Space.s8) {
                 Image(systemName: ok > 0 ? "checkmark.circle.fill" : "info.circle.fill")
                     .font(.system(size: 14))
                     .foregroundStyle(ok > 0 ? Theme.healthy : Theme.warning)
-                Text(LF("成功 %lld · 跳过 %lld", ok, skipped))
+                Text(ok > 0
+                     ? (skipped > 0 ? LF("装好了 %lld 个，跳过 %lld 个", ok, skipped) : LF("装好了 %lld 个", ok))
+                     : L("这次没有装进去"))
                     .font(Theme.Fonts.calloutEmphasis)
                     .foregroundStyle(Theme.textPrimary)
             }
@@ -519,28 +511,74 @@ struct InstallSheet: View {
                     .frame(height: 26)
                 }
             }
+            if ok > 0, !phrase.isEmpty {
+                VStack(alignment: .leading, spacing: Theme.Space.s8) {
+                    Text(L("复制这句，打开软件贴进去。"))
+                        .font(Theme.Fonts.callout)
+                        .foregroundStyle(Theme.textSecondary)
+                    HStack(alignment: .top, spacing: Theme.Space.s8) {
+                        Text(phrase)
+                            .font(Theme.Fonts.body)
+                            .foregroundStyle(Theme.textPrimary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        CopyIconButton(text: phrase, help: L("复制调用语"))
+                    }
+                    .padding(Theme.Space.s12)
+                    .quietControl(cornerRadius: Theme.Radius.row)
+                    OpenHostButtons(
+                        platforms: store.visiblePlatforms.filter { model.selectedPlatforms.contains($0.rawValue) },
+                        phrase: phrase
+                    )
+                }
+            }
             HStack {
                 Button(L("再装一个")) { model.reset() }
                     .buttonStyle(.link)
                     .font(Theme.Fonts.secondaryEmphasis)
                 Spacer()
-                Button {
-                    model.reset()
-                    dismiss()
-                } label: {
-                    Text(L("完成"))
-                        .font(Theme.Fonts.calloutEmphasis)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, Theme.Space.s16)
-                        .frame(height: 28)
-                        .background {
-                            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                                .fill(Theme.accent)
+                if ok > 0 {
+                    Button {
+                        if let firstDir, let skill = store.skills.first(where: { $0.directory == firstDir }) {
+                            store.select(skill.name)
+                        } else {
+                            store.nav = .library
                         }
-                        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                        model.reset()
+                        dismiss()
+                    } label: {
+                        Text(L("去技能库"))
+                            .font(Theme.Fonts.calloutEmphasis)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, Theme.Space.s16)
+                            .frame(height: 28)
+                            .background {
+                                RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                                    .fill(Theme.accent)
+                            }
+                            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                } else {
+                    Button {
+                        model.reset()
+                        dismiss()
+                    } label: {
+                        Text(L("完成"))
+                            .font(Theme.Fonts.calloutEmphasis)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, Theme.Space.s16)
+                            .frame(height: 28)
+                            .background {
+                                RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                                    .fill(Theme.accent)
+                            }
+                            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                    .keyboardShortcut(.defaultAction)
                 }
-                .buttonStyle(PressableButtonStyle())
-                .keyboardShortcut(.defaultAction)
             }
         }
     }
@@ -569,7 +607,7 @@ private struct CandidateRow: View {
                         .foregroundStyle(candidate.conflict ? Theme.textTertiary : Theme.textPrimary)
                     Text(candidate.conflict
                         ? L("本地已有同名目录，将跳过（不覆盖）")
-                        : candidate.description.isEmpty ? L("（SKILL.md 未写描述）") : candidate.description)
+                        : candidate.description.isEmpty ? L("（还没写介绍）") : candidate.description)
                         .font(Theme.Fonts.secondary)
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)
@@ -606,6 +644,7 @@ private struct CandidateRow: View {
 /// 安全发现行：严重度图标 + 规则 + 位置 + 命中行原文（mono）
 struct FindingRow: View {
     var finding: SecurityFinding
+    var onOpen: (() -> Void)? = nil
 
     private var tint: Color {
         switch finding.severity {
@@ -633,11 +672,19 @@ struct FindingRow: View {
                     .font(Theme.Fonts.secondaryEmphasis)
                     .foregroundStyle(Theme.textPrimary)
                 Spacer(minLength: Theme.Space.s4)
+                if let onOpen {
+                    Button(L("打开核对")) { onOpen() }
+                        .buttonStyle(.plain)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.accent)
+                        .help(L("用默认编辑器打开命中文件"))
+                }
                 Text(finding.line > 0 ? "\(finding.file):\(finding.line)" : finding.file)
                     .font(Theme.Fonts.mono)
                     .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .help(finding.line > 0 ? "\(finding.file):\(finding.line)" : finding.file)
             }
             if !finding.excerpt.isEmpty {
                 Text(finding.excerpt)

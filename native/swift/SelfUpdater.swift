@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import CryptoKit
 import Foundation
 
@@ -13,19 +14,18 @@ import Foundation
 //    会被 Gatekeeper 拦启动，更新完打不开比不更新更糟。
 // 5. 写一个等待本进程退出的 shell 助手：备份旧包 → ditto 新包 → 失败回滚 → open 重启。
 //    日志落 ~/.skill-atlas/update.log，出问题有账可查。
-// 6. 应用自身 terminate，换装交给助手。任何一步失败都弹错并给「打开下载页」逃生门。
+// 6. 应用自身 terminate，换装交给助手。任何一步失败都回到 AppUpdateSheet 并给「打开下载页」逃生门。
 // 运行中的包在 App Translocation 路径时不做（那是系统只读挂载点，换了也白换）。
 
 @MainActor
-final class SelfUpdater: NSObject {
+final class SelfUpdater: NSObject, ObservableObject {
     static let shared = SelfUpdater()
     /// GitHub 仓库（appcast 没给 dmg 直链时按它查 Releases API）
     static let repo = "shoumunan/skill-atlas"
 
     private(set) var busy = false
-    private var panel: NSPanel?
-    private var statusLabel: NSTextField?
-    private var progressBar: NSProgressIndicator?
+    @Published var statusText = ""
+    @Published var progress = 0.0
 
     func install(_ feed: Appcast) {
         guard !busy else { return }
@@ -39,13 +39,14 @@ final class SelfUpdater: NSObject {
             return
         }
         busy = true
-        showPanel(version: feed.version)
+        statusText = L("准备中…")
+        progress = 0
+        UpdateChecker.shared.enterInstalling(feed)
         Task {
             do {
                 try await run(feed, target: target)
                 // 成功路径在 run 里 terminate，不会回到这里
             } catch {
-                closePanel()
                 busy = false
                 Self.fail(feed, (error as? AtlasError)?.message ?? error.localizedDescription)
             }
@@ -236,52 +237,9 @@ final class SelfUpdater: NSObject {
         return (process.terminationStatus, read(out), read(err))
     }
 
-    // MARK: 进度小窗（AppKit 面板，不依赖任何窗口在开着）
-
-    private func showPanel(version: String) {
-        let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 92),
-            styleMask: [.titled],
-            backing: .buffered,
-            defer: false
-        )
-        panel.title = LF("更新到 %@", version)
-        panel.isFloatingPanel = true
-        panel.level = .floating
-        panel.isReleasedWhenClosed = false
-
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 92))
-        let label = NSTextField(labelWithString: L("准备中…"))
-        label.frame = NSRect(x: 20, y: 52, width: 340, height: 18)
-        label.font = NSFont.systemFont(ofSize: 12)
-        content.addSubview(label)
-        let bar = NSProgressIndicator(frame: NSRect(x: 20, y: 24, width: 340, height: 16))
-        bar.style = .bar
-        bar.isIndeterminate = false
-        bar.minValue = 0
-        bar.maxValue = 1
-        bar.doubleValue = 0
-        content.addSubview(bar)
-        panel.contentView = content
-        panel.center()
-        panel.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-
-        self.panel = panel
-        self.statusLabel = label
-        self.progressBar = bar
-    }
-
     private func setStatus(_ text: String, progress: Double) {
-        statusLabel?.stringValue = text
-        progressBar?.doubleValue = progress
-    }
-
-    private func closePanel() {
-        panel?.orderOut(nil)
-        panel = nil
-        statusLabel = nil
-        progressBar = nil
+        statusText = text
+        self.progress = progress
     }
 
     // MARK: 失败逃生门
@@ -298,14 +256,6 @@ final class SelfUpdater: NSObject {
             }
             exit(1)
         }
-        let alert = NSAlert()
-        alert.messageText = L("自动更新未完成")
-        alert.informativeText = message + "\n" + L("可以改用手动方式：打开下载页下载 DMG 覆盖安装。")
-        alert.addButton(withTitle: L("打开下载页"))
-        alert.addButton(withTitle: L("稍后"))
-        NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn, let url = URL(string: feed.download) {
-            NSWorkspace.shared.open(url)
-        }
+        UpdateChecker.shared.enterInstallFailed(feed, message: message)
     }
 }

@@ -116,16 +116,11 @@ struct MenuBarPalette: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
     @FocusState private var searchFocused: Bool
-    @FocusState private var topicFocused: Bool
     @State private var query = ""
     @State private var selection = 0
     @State private var copiedName: String?
-    /// 模式：搜技能（回车发起）/ 试触发（这句话会唤醒谁）
+    /// 模式：搜技能（回车复制）/ 试触发（这句话会唤醒谁）
     @State private var triggerMode = false
-    /// 发起第二步：已选技能，等待主题
-    @State private var launchTarget: Skill?
-    @State private var topic = ""
-    @State private var launchError: String?
 
     /// 结果按使用频率加权：常用的排前面（第一轮使用统计的直接复用）
     private var results: [Skill] {
@@ -150,20 +145,16 @@ struct MenuBarPalette: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let target = launchTarget {
-                launchStep(target)
+            modeTabs
+                .padding(.horizontal, Theme.Space.s8)
+                .padding(.top, Theme.Space.s8)
+            searchField
+                .padding(Theme.Space.s8)
+            Divider()
+            if triggerMode {
+                triggerList
             } else {
-                modeTabs
-                    .padding(.horizontal, Theme.Space.s8)
-                    .padding(.top, Theme.Space.s8)
-                searchField
-                    .padding(Theme.Space.s8)
-                Divider()
-                if triggerMode {
-                    triggerList
-                } else {
-                    searchList
-                }
+                searchList
             }
             Divider()
             footer
@@ -171,11 +162,8 @@ struct MenuBarPalette: View {
         .frame(width: 360)
         .onAppear {
             query = ""
-            topic = ""
             selection = 0
             copiedName = nil
-            launchTarget = nil
-            launchError = nil
             // 浮层动画结束后再聚焦，太早会丢
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { searchFocused = true }
         }
@@ -187,7 +175,7 @@ struct MenuBarPalette: View {
     private var modeTabs: some View {
         HStack(spacing: 2) {
             modeTab(L("搜技能"), active: !triggerMode) { triggerMode = false }
-            modeTab(L("试触发"), active: triggerMode) { triggerMode = true }
+            modeTab(L("试一句话"), active: triggerMode) { triggerMode = true }
             Spacer()
         }
     }
@@ -216,7 +204,7 @@ struct MenuBarPalette: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
             TextField(
-                triggerMode ? L("输入你打算说的话，看谁会抢答") : L("搜索技能，⏎ 发起 · ⌥⏎ 复制"),
+                triggerMode ? L("打你打算说的话，看谁会抢答") : L("搜技能或要做的事，回车复制"),
                 text: $query
             )
                 .textFieldStyle(.plain)
@@ -241,13 +229,13 @@ struct MenuBarPalette: View {
         }
     }
 
-    // MARK: 搜技能列表（⏎ 发起 / ⌥⏎ 复制）
+    // MARK: 搜技能列表（回车复制调用语）
 
     private var searchList: some View {
         let list = results
         return Group {
             if list.isEmpty {
-                Text(store.skills.isEmpty ? L("还没有可用的技能") : LF("没有匹配「%@」的技能", query))
+                Text(store.skills.isEmpty ? L("还没有技能") : LF("没有匹配「%@」的技能", query))
                     .font(Theme.Fonts.secondary)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -261,7 +249,7 @@ struct MenuBarPalette: View {
                             selected: index == selection,
                             copied: copiedName == skill.name
                         ) {
-                            beginLaunch(skill)
+                            copyAndClose(skill)
                         }
                         .onHover { if $0 { selection = index } }
                     }
@@ -283,7 +271,7 @@ struct MenuBarPalette: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Theme.Space.s20)
             } else if candidates.isEmpty {
-                Text(L("没有技能会响应这句话。要么点名调用，要么去改描述"))
+                Text(L("没有技能会接这句话。试试点名。"))
                     .font(Theme.Fonts.secondary)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -304,84 +292,6 @@ struct MenuBarPalette: View {
         }
     }
 
-    // MARK: 发起第二步（F2：主题 → 建目录 → Terminal）
-
-    private func launchStep(_ skill: Skill) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s8) {
-            HStack(spacing: Theme.Space.s8) {
-                CategoryIcon(category: skill.category, size: 22, style: .quiet)
-                Text(skill.name)
-                    .font(.system(size: 12.5, weight: .medium))
-                Spacer()
-                Button {
-                    launchTarget = nil
-                    DispatchQueue.main.async { searchFocused = true }
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 20, height: 20)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(L("返回（Esc）"))
-            }
-            TextField(L("主题（回车发起，可留空）"), text: $topic)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .focused($topicFocused)
-                .onSubmit { performLaunch(skill) }
-                .onExitCommand {
-                    launchTarget = nil
-                    DispatchQueue.main.async { searchFocused = true }
-                }
-                .padding(.horizontal, Theme.Space.s8)
-                .frame(height: 30)
-                .background {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color.primary.opacity(0.05))
-                }
-            let recents = SkillLauncher.recentTopics(for: skill)
-            if !recents.isEmpty {
-                HStack(spacing: Theme.Space.s4) {
-                    ForEach(recents.prefix(3), id: \.self) { recent in
-                        Button {
-                            topic = recent
-                        } label: {
-                            Text(recent)
-                                .font(Theme.Fonts.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .padding(.horizontal, Theme.Space.s8)
-                                .frame(height: 18)
-                                .background {
-                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                        .fill(Color.primary.opacity(0.05))
-                                }
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-            Text(SkillLauncher.sessionDirectory(for: skill, topic: topic).path
-                .replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                .font(Theme.Fonts.mono)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            if let launchError {
-                Text(launchError)
-                    .font(Theme.Fonts.secondary)
-                    .foregroundStyle(Theme.error)
-            }
-        }
-        .padding(Theme.Space.s8 + 2)
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { topicFocused = true }
-        }
-    }
-
     private var footer: some View {
         HStack {
             Button {
@@ -395,11 +305,9 @@ struct MenuBarPalette: View {
             }
             .buttonStyle(.plain)
             Spacer()
-            Text(launchTarget != nil
-                ? L("⏎ 发起 · ⌥⏎ 仅复制 · Esc 返回")
-                : triggerMode
-                    ? L("点结果跳到主窗口详情 · ⌥⌘K 呼出")
-                    : L("⏎ 发起 · ⌥⏎ 复制调用语 · ⌥⌘K 呼出"))
+            Text(triggerMode
+                    ? L("点结果去详情")
+                    : L("回车复制调用语"))
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -414,36 +322,7 @@ struct MenuBarPalette: View {
         let list = results
         guard list.indices.contains(selection) else { return }
         let skill = list[selection]
-        // ⌥⏎ = 纯复制（旧行为）；⏎ = 进入发起流程
-        if NSEvent.modifierFlags.contains(.option) {
-            copyAndClose(skill)
-        } else {
-            beginLaunch(skill)
-        }
-    }
-
-    private func beginLaunch(_ skill: Skill) {
-        if NSEvent.modifierFlags.contains(.option) {
-            copyAndClose(skill)
-            return
-        }
-        launchTarget = skill
-        topic = ""
-        launchError = nil
-    }
-
-    private func performLaunch(_ skill: Skill) {
-        if NSEvent.modifierFlags.contains(.option) {
-            store.copyToPasteboard(SkillLauncher.command(for: skill, topic: topic))
-            closePanel()
-            return
-        }
-        do {
-            _ = try SkillLauncher.launch(skill: skill, topic: topic)
-            closePanel()
-        } catch {
-            launchError = error.localizedDescription
-        }
+        copyAndClose(skill)
     }
 
     private func copyAndClose(_ skill: Skill) {
@@ -457,7 +336,6 @@ struct MenuBarPalette: View {
 
     private func closePanel() {
         copiedName = nil
-        launchTarget = nil
         dismiss()
     }
 }
@@ -489,10 +367,10 @@ private struct TriggerRow: View {
                             flag(L("已停用"), tint: .secondary)
                         }
                         if candidate.atRisk {
-                            flag(L("丢弃风险"), tint: Theme.warning)
+                            flag(L("可能被藏"), tint: Theme.warning)
                         }
                         if !candidate.buried.isEmpty {
-                            flag(LF("埋深 %lld", candidate.buried.count), tint: Theme.warning)
+                            flag(L("关键词靠后"), tint: Theme.warning)
                         }
                     }
                     Text(LF("命中：%@", candidate.matched.prefix(4).joined(separator: "、")))

@@ -7,7 +7,7 @@ import Foundation
 //   动态上下文 !`cmd`（命令在模型看到内容之前执行）· curl|sh 管道 · Base64 藏命令
 //   隐藏 Unicode（零宽/双向控制/标签字符）· allowed-tools 全权声明（解析但不强制=安全幻觉）
 //   硬编码密钥 · 外链清单
-// 纯静态、离线、毫秒级；安装时强制过闸，已装技能由体检页复扫。
+// 纯静态、离线、毫秒级；安装时强制过闸，已装技能后台复扫，挡住使用的命中写在技能详情顶部。
 
 struct SecurityFinding: Identifiable, Hashable, Codable {
     enum Severity: Int, Comparable, Codable {
@@ -26,11 +26,23 @@ struct SecurityFinding: Identifiable, Hashable, Codable {
     var excerpt: String
 
     var id: String { "\(file):\(line):\(rule):\(excerpt.hashValue)" }
+
+    /// 给第一次看到命中的人看：规则名换成一句能决定「先别用 / 打开看一眼」的话。
+    var beginnerNote: String {
+        if rule.contains("动态执行") { return L("有一段像会执行代码的写法") }
+        if rule.contains("外链") { return L("引用的网址可能打不开") }
+        if rule.contains("管道") || rule.contains("curl") { return L("有一段会下载后直接执行的写法") }
+        if rule.contains("密钥") { return L("像是写进文件里的密钥") }
+        if rule.contains("Unicode") { return L("有看不见的特殊字符") }
+        if rule.contains("Base64") { return L("有一段编码过的长数据") }
+        if rule.contains("全权") { return L("声明了几乎所有工具权限") }
+        return L(rule)
+    }
 }
 
 enum SecurityScanner {
     /// 缓存版本：规则或 Finding 形态变了就 +1，避免读到过期命中
-    private static let cacheVersion = 1
+    private static let cacheVersion = 2
 
     private struct FileEntry: Codable {
         var mtime: Double
@@ -164,7 +176,8 @@ enum SecurityScanner {
         pattern: #"(^|\n)\s*!`[^`]+`"#
     )
     private static let evalCall = try! NSRegularExpression(
-        pattern: #"\beval\b|\bexec\s*\(|child_process|os\.system\s*\(|subprocess\.(run|call|Popen)"#
+        // 不报 `.exec(`：JS 正则 / 字符串方法，不是动态执行
+        pattern: #"\beval\s*\(|(?<![.\w])exec\s*\(|child_process|os\.system\s*\(|subprocess\.(run|call|Popen)"#
     )
     private static let secretPattern = try! NSRegularExpression(
         pattern: #"sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_\-]{35}|-----BEGIN [A-Z ]*PRIVATE KEY-----"#
@@ -318,66 +331,5 @@ enum SecurityScanner {
             if starts[mid] <= location { low = mid } else { high = mid }
         }
         return low + 1
-    }
-}
-
-
-// MARK: - 外链存活探测（防「几个月后变恶意/端点悄悄死掉」，md2card 教训）
-
-struct DeadLink {
-    var url: String
-    var reason: String
-}
-
-enum LinkProber {
-    /// 只把「确定死了」算死：DNS/超时/连接错误、404/410、5xx。
-    /// 403/405/429 多是反爬或方法限制，不误报。
-    static func probe(urls: [String]) async -> [String: String] {
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 6
-        config.timeoutIntervalForResource = 8
-        config.waitsForConnectivity = false
-        let session = URLSession(configuration: config)
-
-        var dead: [String: String] = [:]
-        // 并发 4 路，避免打爆网络
-        await withTaskGroup(of: (String, String?).self) { group in
-            var iterator = urls.makeIterator()
-            var active = 0
-            func addNext() {
-                guard let url = iterator.next() else { return }
-                active += 1
-                group.addTask {
-                    (url, await Self.probeOne(url, session: session))
-                }
-            }
-            for _ in 0..<4 { addNext() }
-            for await (url, reason) in group {
-                active -= 1
-                if let reason { dead[url] = reason }
-                addNext()
-            }
-        }
-        return dead
-    }
-
-    private static func probeOne(_ urlText: String, session: URLSession) async -> String? {
-        guard let url = URL(string: urlText) else { return nil }
-        var request = URLRequest(url: url)
-        request.httpMethod = "HEAD"
-        do {
-            let (_, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return nil }
-            switch http.statusCode {
-            case 404, 410: return "HTTP \(http.statusCode)"
-            case 500...599: return "HTTP \(http.statusCode)"
-            default: return nil
-            }
-        } catch {
-            let nsError = error as NSError
-            // 取消/无网不算链接死
-            if nsError.code == NSURLErrorNotConnectedToInternet { return nil }
-            return nsError.localizedDescription
-        }
     }
 }

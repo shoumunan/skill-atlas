@@ -12,7 +12,7 @@ v3 原型把窗口换成了系统 `NavigationSplitView` + sidebar List + 斑马�
 - 内容全部 L1 `ContentSurface`；列表 `ScrollView` + `LazyVStack` + `panelScroll`（`.scrollIndicators(.never)`），无斑马纹 List
 - 玻璃只给 chrome（侧栏、搜索胶囊、安装/刷新圆钮）
 
-侧栏五级：技能库（默认）/ 更新（角标=可更新数）/ 体检 / 怎么用 / 设置。独立总览页已删除。
+侧栏两项：我的技能（默认，角标=可更新数）/ 设置。检查与怎么用不再是一级页；挡住使用的问题写在技能详情，整理建议在设置 → 维护。独立总览页已删除。
 
 ## 2. 目录：对标 CC Switch，一个文件夹
 

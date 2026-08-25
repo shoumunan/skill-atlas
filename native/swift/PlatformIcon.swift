@@ -8,6 +8,7 @@ import SwiftUI
 //   Codex     = openai.svg（OpenAI 标准黑，模板渲染随明暗反色）
 //   Gemini    = gemini-color.svg（官方四色渐变，原色渲染）
 //   Grok      = xai.svg（xAI 官方 X 标，模板渲染随明暗反色）
+//   Cursor    = cursor.svg（Simple Icons 官方晶标，模板渲染随明暗反色）
 //   WorkBuddy = workbuddy-trim.png（从官方 app icon 提炼的单色线稿。原图是「绿底 +
 //               白线」的完整 app 图标，自带底板、满饱和，混在一排「透明底细笔画标」
 //               里过重。流水线：workbuddy.png（母版，留着重制用）
@@ -27,6 +28,7 @@ extension AgentPlatform {
         case .codex: return "Codex"
         case .gemini: return "Gemini"
         case .grokbuild: return "Grok"
+        case .cursor: return "Cursor"
         case .workbuddy: return "WorkBuddy"
         case .openclaw: return "OpenClaw"
         case .opencode: return "OpenCode"
@@ -63,6 +65,7 @@ enum PlatformBrand {
             glyphScale: 0.78
         )
         case .grokbuild: return Spec(file: "xai", template: true, tint: Color(hex: 0x8E8E93), glyphScale: 0.58)
+        case .cursor: return Spec(file: "cursor", template: true, tint: Color(hex: 0x5B6CFF), glyphScale: 0.64)
         case .workbuddy: return Spec(
             file: "workbuddy-trim", template: true,
             tint: Color(hex: 0x2BB3A3),
@@ -212,13 +215,13 @@ struct PlatformStrip: View {
     private func helpText(platform: AgentPlatform, lit: Bool, togglable: Bool) -> String {
         if togglable {
             return lit
-                ? LF("停用 %@ 挂载（删软链）", platform.displayName)
-                : LF("启用 %@ 挂载（建软链）", platform.displayName)
+                ? LF("关掉 %@", platform.displayName)
+                : LF("点亮 %@", platform.displayName)
         }
         switch skill.origin {
-        case .ccSwitch: return LF("%@：%@（CC Switch 只读，先迁移）", platform.displayName, lit ? L("已启用") : L("未启用"))
-        case .local: return LF("%@：%@（详情页「管理」收进本库后可开关）", platform.displayName, lit ? L("本地直装") : L("未挂载"))
-        case .atlas: return LF("%@：已停用技能不参与挂载", platform.displayName)
+        case .ccSwitch: return LF("%@：先迁进来才能开关", platform.displayName)
+        case .local: return LF("%@：收进本库后才能开关", platform.displayName)
+        case .atlas: return LF("%@：已停用，先恢复", platform.displayName)
         }
     }
 }
@@ -238,13 +241,13 @@ struct PlatformFilterStrip: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
-        // 只给图标，第一次打开的人认不出是哪个平台；宽度够就带上名称，
-        // 详情栏展开/窗口变窄时自动退回纯图标（父级用 layoutPriority 保证
-        // 右侧菜单先拿到空间，这里拿到的才是真实剩余宽度）
+        // 宽度够：六个都带名称。筛中后右侧会冒出「清除」，条被挤窄——
+        // 若直接掉进纯图标，人选了谁反而看不出来。中间档只给选中项留名字。
         ViewThatFits(in: .horizontal) {
-            strip(labeled: true)     // 宽：图标 + 名称
-            strip(labeled: false)    // 中：纯图标
-            compactMenu              // 窄：退成下拉，与类别/状态/来源同款
+            strip(labels: .all)
+            strip(labels: .activeOnly)
+            strip(labels: .none)
+            compactMenu
         }
     }
 
@@ -261,11 +264,14 @@ struct PlatformFilterStrip: View {
         )
     }
 
-    private func strip(labeled: Bool) -> some View {
+    private enum LabelMode { case all, activeOnly, none }
+
+    private func strip(labels: LabelMode) -> some View {
         let filtering = store.platform != "全部"
         return HStack(spacing: 2) {
             ForEach(store.visiblePlatforms) { platform in
                 let active = store.platform == platform.label
+                let showName = labels == .all || (labels == .activeOnly && active)
                 Button {
                     store.platform = active ? "全部" : platform.label
                 } label: {
@@ -273,7 +279,7 @@ struct PlatformFilterStrip: View {
                         // 没在筛选时全部点亮（品牌色本身就是识别信息）；
                         // 一旦筛选，只有选中的保持点亮，其余去色让状态一眼可读
                         PlatformLogo(platform: platform, size: 18, lit: !filtering || active)
-                        if labeled {
+                        if showName {
                             Text(platform.displayName)
                                 .font(active ? Theme.Fonts.secondaryEmphasis : Theme.Fonts.secondary)
                                 .foregroundStyle(
@@ -282,7 +288,7 @@ struct PlatformFilterStrip: View {
                                 .fixedSize()
                         }
                     }
-                    .padding(.horizontal, labeled ? Theme.Space.s4 + 2 : 2)
+                    .padding(.horizontal, showName ? Theme.Space.s4 + 2 : 2)
                     .frame(height: 24)
                     .background {
                         if active {

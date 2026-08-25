@@ -1,7 +1,7 @@
 {
-  "version": "1.6.5",
-  "notes": "v1.6.5：粘贴 GitHub 仓库根地址时，也能自动发现 skills/<name>/SKILL.md 两层布局；技能列表滚动条改细，不再和行尾平台图标抢位置。含 v1.6.4：技能列表换成原生 AppKit 表格，滚动不再靠 SwiftUI List 逐帧重排；去掉常驻的流动渐变背景与大面积毛玻璃材质。含 v1.6.0 起的功能：场景 Profile、单技能试跑、注册表发现轻量版、Hook 实时遥测、描述开药、OpenClaw/WorkBuddy 平台支持，以及一批安全修复。含 v1.4.x 全部功能。",
+  "version": "1.7.0",
+  "notes": "v1.7.0：侧栏收成「我的技能 / 设置」。检查和怎么用不再单独占一页；挡住使用的问题写在技能详情，整理建议收进设置里的维护。",
   "download": "https://github.com/shoumunan/skill-atlas/releases",
-  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v1.6.5/Skill.Atlas-1.6.5.dmg",
-  "sha256": "751ff1a11fb9e7de385b6638a8c26cc464d9c8b44ea238a3dcae586a76375184"
+  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v1.7.0/Skill.Atlas-1.7.0.dmg",
+  "sha256": "8b12515498ecf5d25325b5831afeffee442038508bc94818ef6c06bdbd02032e"
 }

@@ -164,7 +164,7 @@ struct ReaderSheet: View {
                     Image(systemName: "doc.questionmark")
                         .font(.system(size: 28))
                         .foregroundStyle(Theme.textTertiary)
-                    Text(L("读不到 SKILL.md"))
+                    Text(L("读不到这份说明"))
                         .font(Theme.Fonts.rowTitle)
                         .foregroundStyle(Theme.textSecondary)
                 }
@@ -183,7 +183,7 @@ struct ReaderSheet: View {
                 Text(skill.name)
                     .font(Theme.Fonts.panelTitle)
                     .foregroundStyle(Theme.textPrimary)
-                Text(L("SKILL.md 完整说明"))
+                Text(L("完整说明"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
             }

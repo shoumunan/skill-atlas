@@ -22,15 +22,13 @@ enum LaunchArgs {
 }
 
 enum NavPage: String, CaseIterable, Identifiable, Hashable {
-    case library, doctor, guide, settings
+    case library, settings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .library: return L("技能库")
-        case .doctor: return L("体检")
-        case .guide: return L("指南")
+        case .library: return L("我的技能")
         case .settings: return L("设置")
         }
     }
@@ -38,18 +36,14 @@ enum NavPage: String, CaseIterable, Identifiable, Hashable {
     var symbol: String {
         switch self {
         case .library: return "books.vertical"
-        case .doctor: return "heart.text.square"
-        case .guide: return "text.book.closed"
         case .settings: return "gearshape"
         }
     }
 
     var help: String {
         switch self {
-        case .library: return L("安装、挂载、更新、卸载技能（⌘1）。J/K 或方向键选行，/ 搜索")
-        case .doctor: return L("挂载异常、预算、重叠、长期未用（⌘2）")
-        case .guide: return L("三步把技能用起来（⌘3）")
-        case .settings: return L("外观、本库、迁移、应用更新（⌘4）")
+        case .library: return L("找技能、看用途、复制调用语（⌘1）")
+        case .settings: return L("外观和本库（⌘2）")
         }
     }
 }
@@ -98,9 +92,7 @@ final class AppStore {
     private var libraryGeneration = 0
     @ObservationIgnored private var doctorReportCache: (revision: Int, window: Int, report: DoctorReport)?
     /// 只让读了 `doctorReport` 的视图刷新，不再带动整棵树。
-    private var cachedDoctorReport = DoctorReport() {
-        didSet { doctorBadgeCache = nil }
-    }
+    private var cachedDoctorReport = DoctorReport()
     @ObservationIgnored private var doctorComputeTask: Task<Void, Never>?
     @ObservationIgnored private var deferredWork: Task<Void, Never>?
     @ObservationIgnored private var firstLaunchDeferred = true
@@ -109,13 +101,16 @@ final class AppStore {
 
     var nav: NavPage = .library
     var selectedName: String?
+    /// 从技能详情跳到设置「维护」时展开该组，并尽量把这一条顶到前面。
+    var revealMaintenance = false
+    var maintenanceFocusSkillName: String?
     var search = "" { didSet { scheduleSearchDebounce() } }
     /// 过滤用的防抖搜索词：输入即时回显，过滤延迟 200ms——每击键全量过滤 + 整表 reloadData 会发肉
     private(set) var debouncedSearch = ""
     @ObservationIgnored private var searchDebounce: Task<Void, Never>?
     var category = "全部"
     var platform = "全部"
-    /// 状态筛选：全部 / 可更新 / 已停用（健康状态的入口统一收在体检页）
+    /// 状态筛选：全部 / 可更新 / 已停用（挂载/安全问题写在详情顶部；整理建议在设置 → 维护）
     var stateFilter = "全部"
     var sourceFilter = "全部"
     var favoritesOnly = false
@@ -127,13 +122,11 @@ final class AppStore {
     /// 使用频率统计（key = 技能目录名；后台增量索引会话日志）
     var usage: [String: SkillUsage] = [:] {
         didSet {
-            // 默认按名称排：使用统计落地不必让 145 行过滤缓存失效。
-            // 按频率/近用排序，或人正在看体检/指南时，才抬世代。
+            // 默认按名称排：使用统计落地不必让过滤缓存失效。
+            // 按频率/近用排序时才抬世代。
             if sortOrder == "使用频率" || sortOrder == "最近使用" {
                 dataRevision += 1
                 libraryGeneration += 1
-            } else if nav == .doctor || nav == .guide {
-                dataRevision += 1
             }
             scheduleDoctorReport()
         }
@@ -152,6 +145,12 @@ final class AppStore {
 
     /// 安装技能 sheet（⌘N / 筛选行「+ 安装」/ 空状态主按钮）
     var installSheetPresented = false
+    /// 打开安装窗时预填并开装（空库示例技能）
+    var pendingInstallURL: String?
+    /// 新装默认点亮的平台。空库勾一次，之后都跟着走。
+    var preferredPlatforms: Set<String> = PreferredPlatforms.current {
+        didSet { PreferredPlatforms.save(preferredPlatforms) }
+    }
 
     /// 从 CC Switch 迁出向导
     var migrationSheetPresented = false
@@ -172,7 +171,7 @@ final class AppStore {
     var checkingInteractive = false
     /// 最近一次技能更新检查完成时间
     var lastSkillUpdateCheck: Date?
-    /// 体检页的上下文窗口档位（token），持久化
+    /// 上下文窗口档位（token），给检查引擎做预算模拟，持久化
     var contextWindowTokens: Int {
         didSet {
             UserDefaults.standard.set(contextWindowTokens, forKey: "atlasContextWindow")
@@ -187,37 +186,11 @@ final class AppStore {
     /// 技能表跨切页复用，避免 SwiftUI 卸掉时丢掉滚动位置。
     @ObservationIgnored var skillTable: SkillTableController?
 
-    /// 素材投递箱（二期 F5）：拖进来的文件与匹配结果
-    struct DroppedMaterial: Identifiable {
-        var url: URL
-        var matches: [DropMatch]
-        var id: String { url.path }
-    }
-    var droppedMaterial: DroppedMaterial?
-    var dropTargeted = false
-
-    func receiveDroppedFile(_ url: URL) {
-        let matches = DropRules.match(fileURL: url, skills: skills)
-        droppedMaterial = DroppedMaterial(url: url, matches: matches)
-    }
-
     /// 已装技能的安全复扫结果（key = 技能目录名；后台增量，逐文件缓存落盘）
     var securityFindings: [String: [SecurityFinding]] = [:]
-    /// 已装技能的外链清单（info 级 URL，喂给存活探测）
-    var externalLinks: [String: [String]] = [:]
-    /// 外链存活探测结果（并进安全展示）
-    var deadLinkFindings: [String: [SecurityFinding]] = [:]
-    var checkingLinks = false
-    var lastLinkCheck: Date?
 
-    /// 体检/详情用的安全合并视图：静态复扫 + 外链死链
-    var securityDisplay: [String: [SecurityFinding]] {
-        var merged = securityFindings
-        for (directory, findings) in deadLinkFindings {
-            merged[directory, default: []].append(contentsOf: findings)
-        }
-        return merged
-    }
+    /// 体检/详情用的安全展示（装前静态规则复扫）
+    var securityDisplay: [String: [SecurityFinding]] { securityFindings }
 
     // MARK: - 更新审阅（G1：diff 强制审阅 + 本地补丁保护 + 回滚）
     //
@@ -564,24 +537,8 @@ final class AppStore {
         }
     }
 
-    /// 停用被依赖技能前的警告（F6 链路数据接管理动作）
-    struct DisableWarning: Identifiable {
-        var skill: Skill
-        var dependents: [String]
-        var id: String { skill.name }
-    }
-    var disableWarning: DisableWarning?
-
-    /// 停用入口统一走这里：有活跃下游依赖先警告
     func requestDisable(_ skill: Skill) {
-        let dependents = ProductionChain.dependents(of: skill.directory).filter { directory in
-            skills.contains { $0.directory == directory && !$0.disabled }
-        }
-        if dependents.isEmpty {
-            setSkillDisabled(skill, disabled: true)
-        } else {
-            disableWarning = DisableWarning(skill: skill, dependents: dependents)
-        }
+        setSkillDisabled(skill, disabled: true)
     }
 
     /// 界面语言（设置页切换；视图树以它为 .id 整体重建，立即生效）
@@ -589,6 +546,20 @@ final class AppStore {
     func selectLanguage(_ language: AppLanguage) {
         AppLanguage.select(language)
         uiLanguage = language
+    }
+
+    func togglePreferred(_ platform: AgentPlatform) {
+        if preferredPlatforms.contains(platform.rawValue) {
+            guard preferredPlatforms.count > 1 else { return }
+            preferredPlatforms.remove(platform.rawValue)
+        } else {
+            preferredPlatforms.insert(platform.rawValue)
+        }
+    }
+
+    func beginInstall(url: String) {
+        pendingInstallURL = url
+        installSheetPresented = true
     }
 
     private static let favoritesKey = "skill-atlas-favorites"
@@ -604,10 +575,10 @@ final class AppStore {
         let page = LaunchArgs.value("atlasPage") ?? UserDefaults.standard.string(forKey: "atlasPage")
         if let page {
             switch page {
-            case "overview", "library", "updates": nav = .library
-            case "health", "doctor": nav = .doctor
-            case "guide", "howto": nav = .guide
-            case "settings": nav = .settings
+            case "overview", "library", "updates", "health", "doctor", "guide", "howto":
+                nav = .library
+            case "settings":
+                nav = .settings
             default:
                 if let target = NavPage(rawValue: page) { nav = target }
             }
@@ -702,6 +673,14 @@ final class AppStore {
                 readerSkill = skill
             }
             if let name = LaunchArgs.value("atlasSelect") ?? UserDefaults.standard.string(forKey: "atlasSelect"),
+               result.skills.contains(where: { $0.name == name }) {
+                select(name)
+            }
+            // 旧「检查 / 怎么用」页已撤；同名调试参数改为选中该技能并停在技能库。
+            if let name = LaunchArgs.value("atlasGuideSkill")
+                ?? LaunchArgs.value("atlasDoctorSkill")
+                ?? UserDefaults.standard.string(forKey: "atlasGuideSkill")
+                ?? UserDefaults.standard.string(forKey: "atlasDoctorSkill"),
                result.skills.contains(where: { $0.name == name }) {
                 select(name)
             }
@@ -1158,6 +1137,26 @@ final class AppStore {
         category != "全部" || platform != "全部" || stateFilter != "全部" || sourceFilter != "全部" || !search.isEmpty
     }
 
+    /// 搜索框自己会展示当前词；这里仅表示菜单里的四类筛选是否生效。
+    var hasFacetFilters: Bool {
+        category != "全部" || platform != "全部" || stateFilter != "全部" || sourceFilter != "全部"
+    }
+
+    var activeFacetCount: Int {
+        [category, platform, stateFilter, sourceFilter].filter { $0 != "全部" }.count
+    }
+
+    var facetSummary: String {
+        var parts: [String] = []
+        if platform != "全部" {
+            parts.append(visiblePlatforms.first(where: { $0.label == platform })?.displayName ?? platform)
+        }
+        if category != "全部" { parts.append(L(category)) }
+        if stateFilter != "全部" { parts.append(L(stateFilter)) }
+        if sourceFilter != "全部" { parts.append(L(sourceFilter)) }
+        return parts.joined(separator: L("、"))
+    }
+
     // MARK: - 动作
 
     func toggleFavorite(_ name: String) {
@@ -1169,9 +1168,50 @@ final class AppStore {
         UserDefaults.standard.set(Array(favorites).sorted(), forKey: Self.favoritesKey)
     }
 
+    /// 跳到技能库详情。筛掉当前会把目标藏起来的条件，否则表里看不见、详情也展不开。
     func select(_ name: String) {
+        if favoritesOnly && !favorites.contains(name) {
+            favoritesOnly = false
+        }
         selectedName = name
+        if !filteredSkills.contains(where: { $0.name == name }) {
+            clearFilters()
+        }
+        nav = .library
     }
+
+    /// 打开设置里的维护组。可带上当前 Skill，避免跳转后还要再找。
+    func openMaintenance(for skill: Skill? = nil) {
+        maintenanceFocusSkillName = skill?.name
+        revealMaintenance = true
+        nav = .settings
+    }
+
+    func hasCriticalSecurity(_ skill: Skill) -> Bool {
+        (securityDisplay[skill.directory] ?? []).contains { $0.severity == .critical }
+    }
+
+    func hasBlockingIssue(_ skill: Skill) -> Bool {
+        guard !skill.disabled else { return false }
+        return skill.health == .error || hasCriticalSecurity(skill)
+    }
+
+    func criticalFindings(for skill: Skill) -> [SecurityFinding] {
+        (securityDisplay[skill.directory] ?? []).filter { $0.severity == .critical }
+    }
+
+    func advisoryFindings(for skill: Skill) -> [SecurityFinding] {
+        (securityDisplay[skill.directory] ?? []).filter { $0.severity != .critical }
+    }
+
+    var blockingSkills: [Skill] {
+        skills.filter { hasBlockingIssue($0) }.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    /// 侧栏不再为维护项打点。设置「维护」折叠标题用同一口径。
+    var blockingIssueCount: Int { blockingSkills.count }
 
     func jumpToCategory(_ value: String) {
         clearFilters()
@@ -1187,7 +1227,7 @@ final class AppStore {
     }
 
     /// 侧栏角标 & 更新页：可更新的技能。
-    /// 按 dataRevision 记忆化——侧栏 5 个 RailItem 每次渲染都读它，不缓存等于每次发布重排 N 遍
+    /// 按 dataRevision 记忆化——侧栏每次渲染都读它，不缓存等于每次发布重排 N 遍
     @ObservationIgnored private var updatableSkillsCache: (revision: Int, result: [Skill])?
 
     var updatableSkills: [Skill] {
@@ -1198,30 +1238,15 @@ final class AppStore {
         return result
     }
 
-    /// 侧栏角标：异常数；超 listing 预算时再加 1，避免把上百个「有丢弃风险」全堆在角标
-    @ObservationIgnored private var doctorBadgeCache: (revision: Int, result: Int)?
-
-    var doctorBadgeCount: Int {
-        let reportReady = doctorReportCache?.revision == dataRevision
-        if let cache = doctorBadgeCache, cache.revision == dataRevision, reportReady {
-            return cache.result
-        }
-        let errors = skills.filter { $0.health == .error && !$0.disabled }.count
-        let result = errors + (reportReady && cachedDoctorReport.overBudget ? 1 : 0)
-        if reportReady { doctorBadgeCache = (dataRevision, result) }
-        return result
-    }
-
-    /// UI 展示的平台：Claude / Codex / Gemini / Grok / WorkBuddy。
+    /// UI 展示的平台：Claude / Codex / Grok / Cursor / Gemini / WorkBuddy。
     /// OpenClaw、OpenCode、Hermes 只保留数据兼容——扫描、挂载、安全扫描照常，
     /// 已建的软链不动，但不占界面位置（用不上的平台摆在那里只是噪音）。
     /// 日后要放出来，把它加回这个数组即可，其余代码不用动。
     var visiblePlatforms: [AgentPlatform] {
-        [.claude, .codex, .gemini, .grokbuild, .workbuddy]
+        [.claude, .codex, .grokbuild, .cursor, .gemini, .workbuddy]
     }
 
-    /// 体检报告（预算模拟 + 超长描述 + 可回收）。
-    /// 后台算好再发布：渲染路径只读缓存，避免侧栏角标在主线程重算 145 条描述。
+    /// 检查报告（预算模拟 + 超长描述 + 可回收）。后台算好再发布。
     var doctorReport: DoctorReport { cachedDoctorReport }
 
     func clearFilters() {
@@ -1232,27 +1257,39 @@ final class AppStore {
         search = ""
     }
 
+    func clearFacetFilters() {
+        category = "全部"
+        platform = "全部"
+        stateFilter = "全部"
+        sourceFilter = "全部"
+    }
+
     func openFolder(_ path: String) {
         let url = URL(fileURLWithPath: path)
         // 白名单：所有扫描根（CC Switch 源目录 + Claude/Codex 平台根目录）内的路径才允许打开
-        let roots = [
+        let roots = ([
             SkillScanner.sourceRoot,
             SkillScanner.claudeRoot,
             SkillScanner.codexRoot,
             AtlasPaths.root,
             AtlasPaths.libraryRoot,
             AtlasPaths.backupsRoot,
-            AgentPlatform.grokbuild.root(home: SkillScanner.home),
-            AgentPlatform.gemini.root(home: SkillScanner.home),
-            AgentPlatform.opencode.root(home: SkillScanner.home),
-            AgentPlatform.hermes.root(home: SkillScanner.home),
-            AgentPlatform.workbuddy.root(home: SkillScanner.home),
-            AgentPlatform.openclaw.root(home: SkillScanner.home),
-        ]
+        ] + AgentPlatform.allCases.map { $0.root(home: SkillScanner.home) })
             .map { $0.resolvingSymlinksInPath().standardizedFileURL.path }
         let resolved = url.resolvingSymlinksInPath().standardizedFileURL.path
         guard roots.contains(where: { resolved == $0 || resolved.hasPrefix($0 + "/") }) else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    /// 打开安全命中的原文文件（核对用；警告级多数不是要改的代码）
+    func openFinding(_ finding: SecurityFinding, in skill: Skill) {
+        let root = URL(fileURLWithPath: skill.sourcePath, isDirectory: true)
+        let file = finding.file.isEmpty ? root : root.appendingPathComponent(finding.file)
+        if FileManager.default.fileExists(atPath: file.path) {
+            openFolder(file.path)
+        } else {
+            openFolder(skill.sourcePath)
+        }
     }
 
     func copyToPasteboard(_ text: String) {
@@ -1261,7 +1298,7 @@ final class AppStore {
         pasteboard.setString(text, forType: .string)
     }
 
-    // MARK: - 调用语与指南素材
+    // MARK: - 调用语
 
     /// 一键复制的调用语：「请使用 <name>：<第一条示例的任务部分>」，取不出任务时用通用模板
     static func callPhrase(for skill: Skill) -> String {
@@ -1284,56 +1321,21 @@ final class AppStore {
         switch nav {
         case .library:
             if hasActiveFilters || favoritesOnly {
-                return LF("筛选出 %d / %d 项", filteredSkills.count, summary.total)
+                return LF("筛出 %d / %d", filteredSkills.count, summary.total)
             }
             let updates = updatableSkills.count
             return updates > 0
-                ? LF("%d 个技能 · %d 个有新版本", summary.total, updates)
-                : LF("%d 个技能 · J/K 选择 · / 搜索", summary.total)
-        case .doctor:
-            let report = doctorReport
-            if report.overBudget {
-                return LF("清单超预算，%d 个技能的描述有被丢弃风险", report.atRisk.count)
-            }
-            let issues = doctorBadgeCount
-            return issues > 0 ? LF("%d 项异常需要修复", issues) : L("预算余量充足")
-        case .guide:
-            return LF("%d 个技能，用过 %d 个", summary.total, usedSkillCount)
+                ? LF("%d 个技能 · %d 个可更新", summary.total, updates)
+                : LF("%d 个技能", summary.total)
         case .settings:
             if data.summary.migrated {
                 return LF("已迁入 %d 个技能", data.summary.atlasCount)
             }
             if data.summary.hasCCSwitch {
-                return L("发现可迁入的技能")
+                return L("可以把以前的技能收进来")
             }
-            return L("外观、本库、迁移、应用更新")
+            return L("外观和本库")
         }
-    }
-
-    /// 有使用记录的技能数（怎么用页教材）
-    var usedSkillCount: Int {
-        skills.filter { (usage[$0.directory]?.total ?? 0) > 0 }.count
-    }
-
-    /// 当前选中，否则使用最多，否则库里第一个（怎么用页卡片）
-    var featuredSkill: Skill? {
-        if let selected = selectedSkill { return selected }
-        return skills.max {
-            let a = usage[$0.directory]?.total ?? 0
-            let b = usage[$1.directory]?.total ?? 0
-            return a != b ? a < b : $0.name.lowercased() > $1.name.lowercased()
-        }
-    }
-
-    /// 直接描述任务的示例（不点名技能）
-    static func autoMatchPhrase(for skill: Skill) -> String {
-        if let first = skill.examplePrompts.first {
-            if first.hasPrefix("请使用"), let colon = first.range(of: "：") {
-                return String(first[colon.upperBound...])
-            }
-            return first
-        }
-        return skill.whenToUse
     }
 
     // MARK: - 目录自动刷新（FSEvents + 2 秒防抖）
@@ -1354,13 +1356,7 @@ final class AppStore {
             SkillScanner.sourceRoot.resolvingSymlinksInPath().path,
             SkillScanner.databaseURL.path,
             AtlasPaths.libraryRoot.path,
-            AgentPlatform.grokbuild.root(home: SkillScanner.home).path,
-            AgentPlatform.gemini.root(home: SkillScanner.home).path,
-            AgentPlatform.opencode.root(home: SkillScanner.home).path,
-            AgentPlatform.hermes.root(home: SkillScanner.home).path,
-            AgentPlatform.workbuddy.root(home: SkillScanner.home).path,
-            AgentPlatform.openclaw.root(home: SkillScanner.home).path,
-        ])
+        ] + AgentPlatform.allCases.map { $0.root(home: SkillScanner.home).path })
         watcher.start(paths: Array(paths)) { [weak self] in
             MainActor.assumeIsolated { self?.scheduleAutoRescan() }
         }
@@ -1713,80 +1709,17 @@ final class AppStore {
                 SecurityScanner.scanInstalled(targets: targets)
             }.value
             guard let self else { return }
-            // 可疑项（非 info）进体检展示；info 外链单独收集喂存活探测
+            // 可疑项（非 info）进体检展示；info 级外链清单不再单独收集
             var visible: [String: [SecurityFinding]] = [:]
-            var links: [String: [String]] = [:]
             for (directory, findings) in scanned {
                 let suspicious = findings.filter { $0.severity != .info }
                 if !suspicious.isEmpty { visible[directory] = suspicious }
-                let urls = findings.filter { $0.severity == .info }.map(\.excerpt)
-                if !urls.isEmpty { links[directory] = urls }
             }
             if self.securityFindings != visible { self.securityFindings = visible }
-            if self.externalLinks != links { self.externalLinks = links }
-            Task { await self.checkExternalLinks(force: LaunchArgs.flag("atlasCheckLinks")) }
         }
     }
 
-    // MARK: - 外链存活复查（每周自动 + 手动；只报确定死掉的）
-
-    private static let linkCheckKey = "atlasLastLinkCheck"
-
-    func checkExternalLinks(force: Bool) async {
-        guard !checkingLinks else { return }
-        let last = UserDefaults.standard.double(forKey: Self.linkCheckKey)
-        if last > 0 { lastLinkCheck = Date(timeIntervalSince1970: last) }
-        if !force, last > 0, Date().timeIntervalSince1970 - last < 7 * 86400 { return }
-        let linkMap = externalLinks
-        guard !linkMap.isEmpty else {
-            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.linkCheckKey)
-            return
-        }
-        checkingLinks = true
-        defer { checkingLinks = false }
-
-        var uniqueURLs: [String] = []
-        var seen = Set<String>()
-        for urls in linkMap.values {
-            for url in urls where seen.insert(url).inserted {
-                uniqueURLs.append(url)
-            }
-        }
-        uniqueURLs = Array(uniqueURLs.prefix(80))
-
-        let dead = await LinkProber.probe(urls: uniqueURLs)
-
-        var findings: [String: [SecurityFinding]] = [:]
-        for (directory, urls) in linkMap {
-            for url in urls {
-                guard let reason = dead[url] else { continue }
-                findings[directory, default: []].append(SecurityFinding(
-                    severity: .warning,
-                    rule: "外链已失效（引用的端点可能已下线或被替换）",
-                    file: "SKILL.md", line: 0,
-                    excerpt: "\(url) — \(reason)"
-                ))
-            }
-        }
-        deadLinkFindings = findings
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.linkCheckKey)
-        lastLinkCheck = Date()
-
-        // -atlasCheckLinks -atlasProbeOut：验收探针
-        if LaunchArgs.flag("atlasCheckLinks"), let out = LaunchArgs.value("atlasProbeOut") {
-            let payload: [String: Any] = [
-                "checked": uniqueURLs.count,
-                "dead": dead.map { ["url": $0.key, "reason": $0.value] },
-            ]
-            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
-               let text = String(data: data, encoding: .utf8) {
-                try? text.write(toFile: out, atomically: true, encoding: .utf8)
-            }
-            quitIfRequested()
-        }
-    }
-
-    // MARK: - 二期探针（F1 触发模拟 / F2 发起器 dry-run，验收用）
+    // MARK: - 二期探针（F1 触发模拟）
 
     @ObservationIgnored private var phase2ProbesDone = false
 
@@ -1810,40 +1743,7 @@ final class AppStore {
                 try? text.write(toFile: out, atomically: true, encoding: .utf8)
             }
         }
-        // -atlasLaunchProbe <技能名> -atlasLaunchTopic <主题> -atlasProbeOut /path.json
-        if let name = LaunchArgs.value("atlasLaunchProbe"),
-           let out = LaunchArgs.value("atlasProbeOut"),
-           let skill = skills.first(where: { $0.name == name || $0.directory == name }) {
-            let topic = LaunchArgs.value("atlasLaunchTopic") ?? ""
-            _ = try? SkillLauncher.launch(skill: skill, topic: topic, dryRunProbe: out)
-        }
-        // -atlasOutputsProbe <技能名> -atlasProbeOut /path.json（F4 产出回链）
-        if let name = LaunchArgs.value("atlasOutputsProbe"),
-           let out = LaunchArgs.value("atlasProbeOut"),
-           let skill = skills.first(where: { $0.name == name || $0.directory == name }) {
-            let records = await OutputLinker.recentOutputs(for: skill)
-            let payload: [[String: Any]] = records.map {
-                ["dir": $0.directory.path, "date": $0.dateText, "topic": $0.topic,
-                 "files": $0.fileCount, "deliverable": $0.latestDeliverable ?? ""]
-            }
-            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
-               let text = String(data: data, encoding: .utf8) {
-                try? text.write(toFile: out, atomically: true, encoding: .utf8)
-            }
-        }
-        // -atlasDropProbe <文件路径> -atlasProbeOut /path.json（F5 规则匹配）
-        if let file = LaunchArgs.value("atlasDropProbe"),
-           let out = LaunchArgs.value("atlasProbeOut") {
-            let matches = DropRules.match(fileURL: URL(fileURLWithPath: file), skills: skills)
-            let payload: [[String: String]] = matches.map {
-                ["skill": $0.skillDirectory, "reason": $0.reason]
-            }
-            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
-               let text = String(data: data, encoding: .utf8) {
-                try? text.write(toFile: out, atomically: true, encoding: .utf8)
-            }
-        }
-        let probeKeys = ["atlasTriggerProbe", "atlasLaunchProbe", "atlasOutputsProbe", "atlasDropProbe"]
+        let probeKeys = ["atlasTriggerProbe"]
         if probeKeys.contains(where: { LaunchArgs.value($0) != nil }) {
             quitIfRequested()
         }
@@ -1854,13 +1754,9 @@ final class AppStore {
     /// 无头验收 / 调试探针：跳过错峰，立刻跑完后续工作
     private var skipLaunchStagger: Bool {
         LaunchArgs.flag("atlasQuit")
-            || LaunchArgs.flag("atlasCheckLinks")
             || LaunchArgs.flag("atlasCheckSkillUpdates")
             || UserDefaults.standard.bool(forKey: "atlasCheckSkillUpdates")
             || LaunchArgs.value("atlasTriggerProbe") != nil
-            || LaunchArgs.value("atlasLaunchProbe") != nil
-            || LaunchArgs.value("atlasOutputsProbe") != nil
-            || LaunchArgs.value("atlasDropProbe") != nil
             || UserDefaults.standard.string(forKey: "atlasUpdateReviewProbe") != nil
             || UserDefaults.standard.string(forKey: "atlasAction") != nil
             || UserDefaults.standard.string(forKey: "atlasToggle") != nil
@@ -1989,13 +1885,8 @@ final class AppStore {
     /// 长期未用批量停用（首次治理主入口：一键把吃灰技能移出 listing）。
     /// CC Switch 来源只读跳过；全部处理完只重扫一次。
     func disableAllStale() {
-        // 被活跃下游依赖的跳过（guizang-social-card-skill 被 to-xhs 依赖这类）
         let targets = staleSkills.filter { skill in
-            guard skill.origin != .ccSwitch, !skill.disabled else { return false }
-            let dependents = ProductionChain.dependents(of: skill.directory)
-            return !dependents.contains { directory in
-                skills.contains { $0.directory == directory && !$0.disabled }
-            }
+            skill.origin != .ccSwitch && !skill.disabled
         }
         guard !targets.isEmpty else { return }
         pauseWatching()

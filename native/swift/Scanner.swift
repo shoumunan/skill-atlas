@@ -182,6 +182,7 @@ enum SkillScanner {
             ("enabled_gemini", "Gemini"), ("enabled_opencode", "OpenCode"),
             ("enabled_hermes", "Hermes"), ("enabled_grokbuild", "GrokBuild"),
             ("enabled_workbuddy", "WorkBuddy"), ("enabled_openclaw", "OpenClaw"),
+            ("enabled_cursor", "Cursor"),
         ]
         let platforms = platformFlags.compactMap { key, label in row.int(key) != 0 ? label : nil }
 

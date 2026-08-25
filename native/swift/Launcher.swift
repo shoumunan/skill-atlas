@@ -1,89 +1,9 @@
 import AppKit
 import Foundation
 
-// MARK: - 一键发起器（二期 F2）：从「复制调用语」到「送进正确的会话」
-//
-// 生产技能按 Filing 规则落盘：projects/<体裁>/<YYYYMMDD_主题>/。
-// 发起 = 选技能 → 填主题 → 自动建目录 → Terminal 在正确 cwd 起 claude 会话。
-// 边界：只开终端、不内嵌执行；无体裁映射的技能在工作根目录发起、不建目录。
+// MARK: - Terminal 通路（试跑探针复用，界面不露「发起会话」）
 
-@MainActor
 enum SkillLauncher {
-    /// 生产技能 → Filing 体裁目录（一任务一目录规则）
-    static let genreMap: [String: String] = [
-        "hotspot": "热点解读",
-        "fund-hotspot-page-writer": "热点页面",
-        "fund-presale-page": "产品页面",
-        "fund-ecommerce-content": "产品卖点",
-        "to-voiceover": "行情热点(口播)",
-        "jiaming": "短剧脚本",
-        "to-xhs": "新媒体运营",
-        "topic-daily": "新媒体运营",
-    ]
-
-    static var workRoot: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/Claude-Code")
-    }
-
-    static func genre(for skill: Skill) -> String? {
-        genreMap[skill.directory] ?? genreMap[skill.name]
-    }
-
-    /// 会话工作目录：体裁技能建 projects/<体裁>/<YYYYMMDD_主题>/，其余用工作根
-    static func sessionDirectory(for skill: Skill, topic: String) -> URL {
-        guard let genre = genre(for: skill) else { return workRoot }
-        let stamp = dayStamp()
-        let slug = sanitize(topic.isEmpty ? skill.directory : topic)
-        return workRoot
-            .appendingPathComponent("projects")
-            .appendingPathComponent(genre)
-            .appendingPathComponent("\(stamp)_\(slug)")
-    }
-
-    static func command(for skill: Skill, topic: String, materialPath: String? = nil) -> String {
-        let trimmed = topic.trimmingCharacters(in: .whitespaces)
-        var phrase = trimmed.isEmpty
-            ? AppStore.callPhrase(for: skill)
-            : LF("请使用 %@：%@", skill.name, trimmed)
-        if let materialPath, !materialPath.isEmpty {
-            phrase += LF("；素材文件：%@", materialPath)
-        }
-        return "claude \(shellQuote(phrase))"
-    }
-
-    /// 发起：建目录（体裁技能）→ Terminal cd + claude。
-    /// dryRunProbe 非空时只写探针 JSON 不真正开终端（验收用）。
-    @discardableResult
-    static func launch(skill: Skill, topic: String, materialPath: String? = nil, dryRunProbe: String? = nil) throws -> URL {
-        let directory = sessionDirectory(for: skill, topic: topic)
-        if genre(for: skill) != nil {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        }
-        let claudeCommand = command(for: skill, topic: topic, materialPath: materialPath)
-        let full = "cd \(shellQuote(directory.path)) && \(claudeCommand)"
-
-        if let dryRunProbe {
-            let payload: [String: Any] = [
-                "skill": skill.name,
-                "topic": topic,
-                "directory": directory.path,
-                "command": full,
-                "directoryExists": FileManager.default.fileExists(atPath: directory.path),
-            ]
-            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
-               let text = String(data: data, encoding: .utf8) {
-                try? text.write(toFile: dryRunProbe, atomically: true, encoding: .utf8)
-            }
-            return directory
-        }
-
-        try openTerminal(running: full)
-        rememberTopic(topic, for: skill)
-        return directory
-    }
-
-    /// 给单技能试跑（G3）复用同一条 Terminal 通路，不另造一套 AppleScript
     static func openTerminalForSandbox(command: String) throws {
         try openTerminal(running: command)
     }
@@ -107,50 +27,6 @@ enum SkillLauncher {
         if let errorInfo, let message = errorInfo[NSAppleScript.errorMessage] as? String {
             throw AtlasError(LF("打开 Terminal 失败：%@（首次使用需在弹窗里允许控制 Terminal）", message))
         }
-    }
-
-    // MARK: 最近主题（每技能最多 5 条）
-
-    private static let topicsKey = "atlasRecentTopics"
-
-    static func recentTopics(for skill: Skill) -> [String] {
-        let all = UserDefaults.standard.dictionary(forKey: topicsKey) as? [String: [String]] ?? [:]
-        return all[skill.directory] ?? []
-    }
-
-    static func rememberTopic(_ topic: String, for skill: Skill) {
-        let trimmed = topic.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        var all = UserDefaults.standard.dictionary(forKey: topicsKey) as? [String: [String]] ?? [:]
-        var list = all[skill.directory] ?? []
-        list.removeAll { $0 == trimmed }
-        list.insert(trimmed, at: 0)
-        all[skill.directory] = Array(list.prefix(5))
-        UserDefaults.standard.set(all, forKey: topicsKey)
-    }
-
-    // MARK: 小工具
-
-    private static func dayStamp() -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyyMMdd"
-        return formatter.string(from: Date())
-    }
-
-    /// 目录名清洗：去掉路径分隔与首尾点，长度 ≤ 40
-    static func sanitize(_ raw: String) -> String {
-        var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        cleaned = cleaned.replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-            .replacingOccurrences(of: "\0", with: "")
-        while cleaned.hasPrefix(".") { cleaned.removeFirst() }
-        if cleaned.isEmpty { cleaned = "未命名" }
-        return String(cleaned.prefix(40))
-    }
-
-    private static func shellQuote(_ text: String) -> String {
-        "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
 

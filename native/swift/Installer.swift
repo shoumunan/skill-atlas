@@ -66,7 +66,7 @@ final class InstallerModel: ObservableObject {
     @Published var statusText = ""
     @Published var errorText: String?
     @Published var candidates: [InstallCandidate] = []
-    @Published var selectedPlatforms: Set<String> = [AgentPlatform.claude.rawValue]
+    @Published var selectedPlatforms: Set<String> = PreferredPlatforms.current
     @Published var results: [InstallResult] = []
 
     private var cloneDir: URL?
@@ -80,7 +80,7 @@ final class InstallerModel: ObservableObject {
         let text = urlText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return nil }
         return Self.parse(text) == nil
-            ? L("支持 GitHub 链接，或本机已有 SKILL.md 的文件夹路径")
+            ? L("这不是 GitHub 链接，也不是本机文件夹。")
             : nil
     }
 
@@ -158,7 +158,7 @@ final class InstallerModel: ObservableObject {
         parsedRef = ref
         errorText = nil
         stage = .cloning
-        statusText = LF("正在克隆 %@…", ref.display)
+        statusText = L("正在找技能…")
 
         Task {
             do {
@@ -171,15 +171,15 @@ final class InstallerModel: ObservableObject {
                     ownsCloneDir = false
                     cloneDir = dir
                     stage = .detecting
-                    statusText = L("正在检测 SKILL.md…")
+                    statusText = L("正在找技能…")
                 } else {
                     stage = .cloning
-                    statusText = "正在克隆 \(ref.display)…"
+                    statusText = LF("正在下载 %@…", ref.display)
                     dir = try await clone(ref)
                     ownsCloneDir = true
                     cloneDir = dir
                     stage = .detecting
-                    statusText = "正在检测 SKILL.md…"
+                    statusText = L("正在找技能…")
                 }
                 var found = try detect(in: dir, ref: ref)
                 // 装前安全扫描：逐候选静态扫（毫秒级，离线）
@@ -286,8 +286,8 @@ final class InstallerModel: ObservableObject {
                     linked.append(platform.label)
                 }
                 let note = linked.isEmpty
-                    ? L("已装入 Skill Atlas 库")
-                    : LF("已装入 Skill Atlas 库 + %@ 软链", linked.joined(separator: " / "))
+                    ? L("已装进本库")
+                    : LF("已装好，%@ 里能用了", linked.joined(separator: "、"))
                 outcome.append(.init(directory: candidate.directory, installed: true, note: note))
             } catch {
                 outcome.append(.init(directory: candidate.directory, installed: false,
@@ -304,7 +304,13 @@ final class InstallerModel: ObservableObject {
         stage = .done
         statusText = ""
         cleanupClone()
-        Task { await store.rescan(keepSelection: true) }
+        Task {
+            await store.rescan(keepSelection: true)
+            if let dir = outcome.first(where: \.installed)?.directory,
+               let skill = store.skills.first(where: { $0.directory == dir }) {
+                store.select(skill.name)
+            }
+        }
     }
 
     /// 审阅页「仍要安装」：放行一次

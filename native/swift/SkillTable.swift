@@ -539,7 +539,6 @@ private final class SkillRowCell: NSTableCellView {
         subtitleField.lineBreakMode = .byTruncatingTail
         statusField.font = .systemFont(ofSize: 10, weight: .medium)
         statusField.textColor = .tertiaryLabelColor
-
         configureIconButton(copyButton, symbol: "doc.on.doc", action: #selector(copyPhrase))
         copyButton.toolTip = L("复制调用语")
         configureIconButton(starButton, symbol: "star", action: #selector(toggleFavorite))
@@ -707,13 +706,13 @@ private final class SkillRowCell: NSTableCellView {
     private func platformHelp(_ platform: AgentPlatform, lit: Bool, togglable: Bool, origin: SkillOrigin) -> String {
         if togglable {
             return lit
-                ? LF("停用 %@ 挂载（删软链）", platform.displayName)
-                : LF("启用 %@ 挂载（建软链）", platform.displayName)
+                ? LF("停止同步到 %@", platform.displayName)
+                : LF("同步到 %@", platform.displayName)
         }
         switch origin {
-        case .ccSwitch: return LF("%@：%@（CC Switch 只读，先迁移）", platform.displayName, lit ? L("已启用") : L("未启用"))
-        case .local: return LF("%@：%@（详情页「管理」收进本库后可开关）", platform.displayName, lit ? L("本地直装") : L("未挂载"))
-        case .atlas: return LF("%@：已停用技能不参与挂载", platform.displayName)
+        case .ccSwitch: return LF("%@：%@（由 CC Switch 管理）", platform.displayName, lit ? L("已同步") : L("未同步"))
+        case .local: return LF("%@：收进本库后可以开关同步", platform.displayName)
+        case .atlas: return LF("%@：已停用，恢复后可以开关同步", platform.displayName)
         }
     }
 
@@ -815,9 +814,10 @@ private final class SkillRowCell: NSTableCellView {
             coordinator?.store.setPlatform(skill, platform: platform, enabled: !lit)
         }
     }
+
 }
 
-// MARK: - 平台芯片图（缩到 18pt，避免 SVG 原尺寸在按钮里画崩）
+// MARK: - 平台同步图标（18pt 列表密度）
 
 private enum PlatformChipImage {
     private static var cache: [String: NSImage] = [:]
@@ -829,7 +829,7 @@ private enum PlatformChipImage {
         let spec = PlatformBrand.spec(for: platform)
         let size: CGFloat = 18
         let glyph = size * (spec?.glyphScale ?? 0.62)
-        let rendered = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+        let rendered = NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
             let inset = (size - glyph) / 2
             source.draw(
                 in: NSRect(x: inset, y: inset, width: glyph, height: glyph),
@@ -854,14 +854,14 @@ private enum SkillRowMenu {
     static func build(skill: Skill, store: AppStore) -> NSMenu {
         let menu = NSMenu()
         add(menu, L("复制调用语")) { store.copyToPasteboard(AppStore.callPhrase(for: skill)) }
-        add(menu, L("查看完整说明")) {
+        add(menu, L("查看说明")) {
             store.select(skill.name)
             store.readerSkill = skill
         }
         menu.addItem(.separator())
         if skill.origin == .atlas && !skill.disabled {
             let platformMenu = NSMenu()
-            for platform in AgentPlatform.allCases {
+            for platform in store.visiblePlatforms {
                 let enabled = skill.platforms.contains(platform.label)
                 let item = NSMenuItem(title: platform.label, action: #selector(MenuTrampoline.run(_:)), keyEquivalent: "")
                 item.state = enabled ? .on : .off
@@ -876,10 +876,10 @@ private enum SkillRowMenu {
             menu.addItem(parent)
         }
         if skill.origin == .local && !skill.disabled {
-            add(menu, L("收进 Skill Atlas 库")) { store.adoptLocalSkill(skill) }
+            add(menu, L("收进本库")) { store.adoptLocalSkill(skill) }
         }
         if skill.origin == .atlas && skill.updateAvailable {
-            add(menu, L("审阅并更新…")) { store.requestUpdate(skill) }
+            add(menu, L("有新版本…")) { store.requestUpdate(skill) }
         }
         add(menu, store.favorites.contains(skill.name) ? L("取消收藏") : L("收藏")) {
             store.toggleFavorite(skill.name)

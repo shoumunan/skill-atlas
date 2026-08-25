@@ -6,7 +6,10 @@ BIN="$APP_BUNDLE/Contents/MacOS/SkillAtlas"
 
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 if [[ -d "$APP_DIR/native/SkillAtlas.iconset" ]]; then
-  iconutil -c icns "$APP_DIR/native/SkillAtlas.iconset" -o "$APP_DIR/native/SkillAtlas.icns"
+  # 新版 macOS 会拒绝部分由 Pillow 生成但实际可读的 iconset。
+  # 仓库里已有验证过的 ICNS，重建时不应因图标重生成失败而中断。
+  iconutil -c icns "$APP_DIR/native/SkillAtlas.iconset" -o "$APP_DIR/native/SkillAtlas.icns" || \
+    echo "图标集重生成未通过，继续使用仓库内的 SkillAtlas.icns"
 fi
 cp "$APP_DIR/native/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp "$APP_DIR/native/SkillAtlas.icns" "$APP_BUNDLE/Contents/Resources/SkillAtlas.icns"
