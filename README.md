@@ -23,4 +23,4 @@
 ./构建原生应用.command
 ```
 
-产出 `Skill Atlas.app`（纯 Swift + SwiftUI）。参与开发见 [CONTRIBUTING.md](CONTRIBUTING.md)，视觉设计规范见 [DESIGN.md](DESIGN.md)。
+产出 `Skill Atlas.app`（纯 Swift + SwiftUI），CLI 在 `Contents/MacOS/atlas`。参与开发见 [CONTRIBUTING.md](CONTRIBUTING.md)，视觉设计规范见 [DESIGN.md](DESIGN.md)，2.0 施工以 [PLAN.md](PLAN.md) 为准。

@@ -681,3 +681,17 @@
 "复制改写指令" = "Copy rewrite prompt";
 "已复制改写指令" = "Rewrite prompt copied";
 "贴进任意 AI，把重写后的介绍再写回文件" = "Paste into any AI, then write the rewritten intro back to the file";
+"无法打开 Terminal：沙箱命令是 %@" = "Cannot open Terminal; sandbox command is %@";
+"未知命令。当前骨架只提供 --version / --help。" = "Unknown command. This stub only provides --version / --help.";
+"atlas %@ — Skill Atlas 命令行" = "atlas %@ — Skill Atlas CLI";
+"用法：atlas --version / atlas --help" = "Usage: atlas --version / atlas --help";
+"完整子命令随 2.0 CLI 提供。" = "Full subcommands ship with the 2.0 CLI.";
+"技能库正在被另一个 Skill Atlas 进程写入，请稍后再试。" = "The library is being written by another Skill Atlas process. Try again shortly.";
+"搜索词至少两个字符。" = "Search queries need at least two characters.";
+"用法：atlas info <name>" = "Usage: atlas info <name>";
+"用法：atlas simulate <一句话任务>" = "Usage: atlas simulate <one-line task>";
+"没有可操作的平台。用 --platform 指定。" = "No platforms to change. Pass --platform.";
+"已启用" = "Enabled";
+"已停用" = "Disabled";
+"预算丢弃" = "Dropped by budget";
+"失败" = "Failed";

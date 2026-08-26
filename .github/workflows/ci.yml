@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main, v2-dev]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Select Xcode 16.2
+        # 与 release.yml 同一理由：macos-14 默认 Xcode 15.4 的 actor 隔离推断会把
+        # View 里同步调 @MainActor store 方法误判成跨隔离域访问。
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app
+
+      - name: Core isolation (no UI frameworks + typecheck)
+        working-directory: native
+        run: |
+          if grep -R -n -E '^import (SwiftUI|AppKit)' swift/core; then
+            echo "core 禁止 import SwiftUI / AppKit" >&2
+            exit 1
+          fi
+          # 隔离编译：不链 library，只确认 core 自身能过类型检查。
+          xcrun swiftc -typecheck -parse-as-library -swift-version 5 \
+            -target arm64-apple-macos14.0 -package-name SkillAtlas \
+            swift/core/*.swift
+
+      - name: SwiftPM release (atlas + SkillAtlas)
+        working-directory: native
+        run: |
+          swift build -c release --product atlas
+          swift build -c release --product SkillAtlas
+
+      - name: Acceptance
+        run: |
+          chmod +x tests/acceptance.sh
+          ./tests/acceptance.sh
