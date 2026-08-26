@@ -15,7 +15,7 @@
 
 ## 下载
 
-从 [下载页](https://shoumunan.github.io/skill-atlas/) 获取最新 DMG。要求 macOS 14+、Apple 芯片；未做 Apple 公证，首次打开需右键 →「打开」绕过 Gatekeeper。
+从 [下载页](https://cdn.jsdelivr.net/gh/shoumunan/skill-atlas@main/docs/index.html) 获取最新 DMG。要求 macOS 14+、Apple 芯片；未做 Apple 公证，首次打开需右键 →「打开」绕过 Gatekeeper。仓库设置里把 Pages 源设为 `main` / `docs` 后，也可以用 `https://shoumunan.github.io/skill-atlas/`。
 
 ## 从源码构建
 
