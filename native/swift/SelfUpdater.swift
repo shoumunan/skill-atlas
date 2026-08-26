@@ -70,7 +70,7 @@ final class SelfUpdater: NSObject, ObservableObject {
             setStatus(L("正在校验安装包…"), progress: 0.80)
             let digest = try Self.sha256(of: dmgFile)
             guard digest.caseInsensitiveCompare(feed.sha256) == .orderedSame else {
-                throw AtlasError(L("安装包校验失败（sha256 不一致），已中止。"))
+                throw AtlasError(LF("安装包校验失败（sha256 不一致），已中止。下载 %@，公告 %@", digest, feed.sha256))
             }
         }
 
