@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skill Atlas · 下载</title>
+    <meta name="description" content="把 Claude、Cursor、Codex、Gemini、Grok、WorkBuddy 的 Skill 收到一个库。复制调用语，打开软件就能用。" />
+    <link rel="icon" href="./app-icon.png" />
+    <link rel="stylesheet" href="./landing.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="nav">
+        <img src="./app-icon.png" alt="" width="30" height="30" />
+        <strong>Skill Atlas</strong>
+        <span>装好就能用</span>
+      </header>
+
+      <section class="hero">
+        <h1>我的技能，同步到正在用的 AI</h1>
+        <p>本地 macOS 应用。扫描、安装、跨软件挂载。检查不再单独占一页：挡住使用的问题写在技能详情，整理建议在设置里。</p>
+        <div class="cta">
+          <a class="btn" id="download" href="https://github.com/shoumunan/skill-atlas/releases/latest">下载 Skill Atlas</a>
+          <p class="note" id="meta">macOS 14+ · Apple 芯片 · 未公证，首次请右键打开</p>
+        </div>
+      </section>
+
+      <figure class="shot">
+        <img src="./screenshot-library.png" alt="Skill Atlas 技能库" />
+      </figure>
+
+      <section class="points">
+        <article>
+          <h2>我的技能</h2>
+          <p>点开一个技能，开关同步到哪些软件，复制调用语，打开 Claude 或 Cursor。</p>
+        </article>
+        <article>
+          <h2>挡住使用的才出声</h2>
+          <p>挂载失败或高风险写法出现在详情顶部。介绍过长、闲置、叫错收在设置 → 维护。</p>
+        </article>
+        <article>
+          <h2>应用内更新</h2>
+          <p>检查更新后自动下载、校验、换装。这份页面和校验用的是同一条发布说明。</p>
+        </article>
+      </section>
+
+      <p class="foot">源码与发行说明在 <a href="https://github.com/shoumunan/skill-atlas">GitHub</a>。数据在本机 <code>~/.skill-atlas/</code>，不改 CC Switch 的文件。</p>
+    </div>
+    <script>
+      fetch("https://raw.githubusercontent.com/shoumunan/skill-atlas/main/appcast.json")
+        .then((r) => r.json())
+        .then((feed) => {
+          const btn = document.getElementById("download");
+          const meta = document.getElementById("meta");
+          if (feed.dmg) btn.href = feed.dmg;
+          btn.textContent = "下载 " + feed.version;
+          meta.textContent =
+            "v" + feed.version + " · macOS 14+ · Apple 芯片 · 未公证，首次请右键打开";
+        })
+        .catch(() => {});
+    </script>
+  </body>
+</html>
