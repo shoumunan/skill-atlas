@@ -709,6 +709,9 @@
 "用法：atlas %@ <name> [--platform p]" = "使い方：atlas %@ <name> [--platform p]";
 "用法：atlas list|search|info|enable|disable|simulate|doctor|bill|paths|version [--json]" = "使い方：atlas list|search|info|enable|disable|simulate|doctor|bill|paths|version [--json]";
 "用法：atlas list|search|info|enable|disable|simulate|doctor|bill|install|review|profile|new|sandbox|paths|version [--json]" = "使い方：atlas list|search|info|enable|disable|simulate|doctor|bill|install|review|profile|new|sandbox|paths|version [--json]";
+"用法：atlas list|search|info|enable|disable|simulate|doctor|bill|install|review|profile|new|sandbox|slim|paths|version [--json]" = "使い方：atlas list|search|info|enable|disable|simulate|doctor|bill|install|review|profile|new|sandbox|slim|paths|version [--json]";
+"草案：完整 %d · 仅用户可调 %d · 不挂载 %d。当前约 %d tok。加 --apply 才会写入。" = "ドラフト：完全 %d · 手動のみ %d · オフ %d。現在約 %d tok。--apply で書き込みます。";
+"已应用瘦身草案：%d tok → %d tok。只对 Claude Code 生效。" = "スリム化ドラフトを適用：%d tok → %d tok。Claude Code のみ。";
 "触发模拟「%@」" = "トリガーシミュレーション「%@」";
 "诊断路径" = "診断パス";
 "远程搜索不可用（已关闭或连不上）" = "リモート検索は利用できません（無効またはネットワーク不可）";

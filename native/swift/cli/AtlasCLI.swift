@@ -57,6 +57,7 @@ enum AtlasCLI {
         case "profile": exitCode = ProfileCommand.run(parsed)
         case "new": exitCode = NewCommand.run(parsed)
         case "sandbox": exitCode = SandboxCommand.run(parsed)
+        case "slim": exitCode = SlimCommand.run(parsed)
         default:
             if wantsJSON {
                 JSONOut.emit(
@@ -73,7 +74,7 @@ enum AtlasCLI {
     }
 
     private static func helpLine() -> String {
-        L("用法：atlas list|search|info|enable|disable|simulate|doctor|bill|install|review|profile|new|sandbox|paths|version [--json]")
+        L("用法：atlas list|search|info|enable|disable|simulate|doctor|bill|install|review|profile|new|sandbox|slim|paths|version [--json]")
     }
 
     private static func printHelp() {

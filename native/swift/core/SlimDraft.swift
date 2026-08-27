@@ -39,7 +39,7 @@ package enum SlimPlanner {
     ) -> [SlimRow] {
         let cutoff = Date().addingTimeInterval(TimeInterval(-SlimRules.staleDays * 24 * 3600))
         return skills
-            .filter { !$0.disabled && $0.directory != MetaSkill.directory && $0.origin == .atlas }
+            .filter { !$0.disabled && $0.directory != MetaSkill.directory }
             .map { skill -> SlimRow in
                 let record = usage[skill.directory]
                 let sessions = record?.total ?? 0

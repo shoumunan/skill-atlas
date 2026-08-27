@@ -709,6 +709,9 @@
 "用法：atlas %@ <name> [--platform p]" = "Usage: atlas %@ <name> [--platform p]";
 "用法：atlas list|search|info|enable|disable|simulate|doctor|bill|paths|version [--json]" = "Usage: atlas list|search|info|enable|disable|simulate|doctor|bill|paths|version [--json]";
 "用法：atlas list|search|info|enable|disable|simulate|doctor|bill|install|review|profile|new|sandbox|paths|version [--json]" = "Usage: atlas list|search|info|enable|disable|simulate|doctor|bill|install|review|profile|new|sandbox|paths|version [--json]";
+"用法：atlas list|search|info|enable|disable|simulate|doctor|bill|install|review|profile|new|sandbox|slim|paths|version [--json]" = "Usage: atlas list|search|info|enable|disable|simulate|doctor|bill|install|review|profile|new|sandbox|slim|paths|version [--json]";
+"草案：完整 %d · 仅用户可调 %d · 不挂载 %d。当前约 %d tok。加 --apply 才会写入。" = "Draft: %d full · %d user-invocable · %d off. About %d tok now. Pass --apply to write.";
+"已应用瘦身草案：%d tok → %d tok。只对 Claude Code 生效。" = "Slimming draft applied: %d tok → %d tok. Claude Code only.";
 "触发模拟「%@」" = "Trigger simulation: “%@”";
 "诊断路径" = "Diagnostic paths";
 "远程搜索不可用（已关闭或连不上）" = "Remote search unavailable (disabled or unreachable)";

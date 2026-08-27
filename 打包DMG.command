@@ -41,6 +41,9 @@ Skill Atlas 安装说明
    点开技能即可同步到软件、复制调用语。挡住使用的问题写在详情顶部；整理建议在设置 → 维护。
    ⌥⌘K 呼出菜单栏，回车复制调用语。
    设置页可切换界面语言（简中/English/日本語/한국어）与深浅色。
+
+8. 命令行：应用包内 Contents/MacOS/atlas。Agent 用它搜、装、启停、诊断。
+   关键级安全命中会给出 skillatlas:// 链接，在窗口里批准后再重跑同一条 install。
 EOF
 
 hdiutil create -volname "Skill Atlas $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null

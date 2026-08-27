@@ -709,6 +709,9 @@
 "用法：atlas %@ <name> [--platform p]" = "사용법: atlas %@ <name> [--platform p]";
 "用法：atlas list|search|info|enable|disable|simulate|doctor|bill|paths|version [--json]" = "사용법: atlas list|search|info|enable|disable|simulate|doctor|bill|paths|version [--json]";
 "用法：atlas list|search|info|enable|disable|simulate|doctor|bill|install|review|profile|new|sandbox|paths|version [--json]" = "사용법: atlas list|search|info|enable|disable|simulate|doctor|bill|install|review|profile|new|sandbox|paths|version [--json]";
+"用法：atlas list|search|info|enable|disable|simulate|doctor|bill|install|review|profile|new|sandbox|slim|paths|version [--json]" = "사용법: atlas list|search|info|enable|disable|simulate|doctor|bill|install|review|profile|new|sandbox|slim|paths|version [--json]";
+"草案：完整 %d · 仅用户可调 %d · 不挂载 %d。当前约 %d tok。加 --apply 才会写入。" = "초안: 전체 %d · 사용자 호출만 %d · 꺼짐 %d. 현재 약 %d tok. --apply 로 씁니다.";
+"已应用瘦身草案：%d tok → %d tok。只对 Claude Code 生效。" = "슬림 초안을 적용했습니다: %d tok → %d tok. Claude Code만 해당.";
 "触发模拟「%@」" = "트리거 시뮬레이션 “%@”";
 "诊断路径" = "진단 경로";
 "远程搜索不可用（已关闭或连不上）" = "원격 검색을 사용할 수 없습니다(비활성화 또는 연결 불가)";

@@ -48,6 +48,7 @@ compile_cli_swiftc() {
   CLANG_MODULE_CACHE_PATH="/tmp/skill-atlas-clang-cache" xcrun swiftc "${SWIFTC_COMMON[@]}" \
     "$APP_DIR"/native/swift/core/*.swift \
     "$APP_DIR"/native/swift/cli/*.swift \
+    "$APP_DIR"/native/swift/cli/Commands/*.swift \
     -o "$CLI"
 }
 

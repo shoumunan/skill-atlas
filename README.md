@@ -1,16 +1,17 @@
 # Skill Atlas · 技能图谱
 
-本地 macOS 应用，把 Claude / Cursor / Codex / Gemini / Grok / WorkBuddy 的 skills 收到一个库：扫描、安装、更新、跨平台挂载。
+本地 macOS 应用，把 Claude / Cursor / Codex / Gemini / Grok / WorkBuddy 的 skills 收到一个库：扫描、安装、更新、跨平台挂载。2.0 起 agent 也能直接用 CLI，不必打开窗口。
 
 数据在 `~/.skill-atlas/`。CC Switch 只读迁入，不改它的文件。
 
 ## 功能
 
 - **技能库**：搜索、平台开关、复制调用语、打开软件
+- **atlas CLI**：搜、装、启停、诊断、账单、场景、沉淀；关键级安全命中要人在窗口里批准
 - **装前安全扫描**：`curl | sh`、隐藏 Unicode、硬编码密钥
 - **更新先看 diff**：不静默覆盖，能回滚
 - **收编**：把散落在 `~/.claude/skills` 等目录里的技能收进本库
-- **维护**（设置里，默认折叠）：挂载失败、安全命中、闲置、触发词重叠
+- **维护**（设置里，默认折叠）：挂载失败、安全命中、闲置、触发词重叠、本周 miss
 - **应用内更新**
 
 ## 下载
