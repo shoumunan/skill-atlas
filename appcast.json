@@ -1,7 +1,7 @@
 {
-  "version": "1.7.0",
-  "notes": "v1.7.0：侧栏收成「我的技能 / 设置」。检查和怎么用不再单独占一页；挡住使用的问题写在技能详情，整理建议收进设置里的维护。",
-  "download": "https://cdn.jsdelivr.net/gh/shoumunan/skill-atlas@main/docs/index.html",
-  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v1.7.0/Skill.Atlas-1.7.0.dmg",
-  "sha256": "8b12515498ecf5d25325b5831afeffee442038508bc94818ef6c06bdbd02032e"
+  "version": "2.0.0",
+  "notes": "v2.0.0：agent 用 atlas CLI 搜、装、启停、诊断；关键级安装要人批准；技能清单可按使用次数瘦身。",
+  "download": "https://shoumunan.github.io/skill-atlas/",
+  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.0.0/Skill.Atlas-2.0.0.dmg",
+  "sha256": "cb6ef2ba0d3d12b4d0ff6cc357aad5b70d460e3eb4006f1d35068d535f4f02f0"
 }
