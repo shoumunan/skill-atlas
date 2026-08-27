@@ -33,7 +33,7 @@ p = Path("$APP_DIR/appcast.json")
 p.write_text(json.dumps({
     "version": "$VERSION",
     "notes": "v$VERSION：agent 用 atlas CLI 搜、装、启停、诊断；关键级安装要人批准；技能清单可按使用次数瘦身。",
-    "download": "https://shoumunan.github.io/skill-atlas/",
+    "download": "https://github.com/shoumunan/skill-atlas/releases/latest",
     "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/$TAG/$ASSET",
     "sha256": "$1",
 }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

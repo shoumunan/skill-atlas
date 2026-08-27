@@ -35,7 +35,7 @@ p = Path("$APP_DIR/appcast.json")
 p.write_text(json.dumps({
     "version": "$VERSION",
     "notes": "v$VERSION：侧栏收成「我的技能 / 设置」。检查和怎么用不再单独占一页；挡住使用的问题写在技能详情，整理建议收进设置里的维护。",
-    "download": "https://shoumunan.github.io/skill-atlas/",
+    "download": "https://github.com/shoumunan/skill-atlas/releases/latest",
     "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/$TAG/$ASSET",
     "sha256": "$1",
 }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
