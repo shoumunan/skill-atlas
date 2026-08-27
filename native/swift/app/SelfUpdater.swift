@@ -122,24 +122,15 @@ final class SelfUpdater: NSObject, ObservableObject {
 
     private func download(from url: URL, to file: URL) async throws {
         setStatus(L("正在下载安装包…"), progress: 0.05)
-        let (bytes, response) = try await URLSession.shared.bytes(from: url)
+        let (temp, response) = try await URLSession.shared.download(from: url)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             throw AtlasError(LF("下载失败：HTTP %d", http.statusCode))
         }
-        let expected = response.expectedContentLength
-        var data = Data()
-        if expected > 0 { data.reserveCapacity(Int(expected)) }
-        var lastTick = Date.distantPast
-        for try await byte in bytes {
-            data.append(byte)
-            if expected > 0, Date().timeIntervalSince(lastTick) > 0.1 {
-                lastTick = Date()
-                let fraction = Double(data.count) / Double(expected)
-                setStatus(LF("正在下载… %d%%", Int(fraction * 100)), progress: 0.05 + fraction * 0.70)
-            }
+        if FileManager.default.fileExists(atPath: file.path) {
+            try FileManager.default.removeItem(at: file)
         }
-        guard !data.isEmpty else { throw AtlasError(L("下载失败：安装包为空。")) }
-        try data.write(to: file)
+        try FileManager.default.moveItem(at: temp, to: file)
+        setStatus(L("正在下载安装包…"), progress: 0.75)
     }
 
     static func sha256(of file: URL) throws -> String {

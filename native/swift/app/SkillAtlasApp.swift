@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppLanguage.applyStored()
         AppearanceMode.applyStored()
         SandboxTerminal.opener = { try SkillLauncher.openTerminalForSandbox(command: $0) }
+        MetaSkill.ensure()
         // ⌥⌘K 全局呼出菜单栏搜索浮层（注册失败静默降级，图标仍可点击）
         GlobalHotKey.register { GlobalHotKey.toggleMenuBarPanel() }
         // 调试钩子：-atlasMenubar 1 启动后自动呼出浮层（与热键同一路径，截图用）
@@ -76,6 +77,24 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
     }
 }
 
+@MainActor
+func handleDeepLink(_ url: URL, store: AppStore) {
+    guard url.scheme == "skillatlas" else { return }
+    let parts = url.pathComponents.filter { $0 != "/" }
+    let host = url.host ?? parts.first
+    let rest = url.host == nil ? Array(parts.dropFirst()) : parts
+    if host == "review", let token = rest.first ?? url.path.split(separator: "/").map(String.init).last {
+        store.openPendingReview(token: token)
+    } else if host == "skill", let name = rest.first {
+        store.select(name)
+    } else if host == "profile", let name = rest.first {
+        store.loadProfiles()
+        if let profile = store.profiles.profiles.first(where: { $0.name == name || $0.id == name }) {
+            store.requestProfileApply(profile, directory: nil)
+        }
+    }
+}
+
 @main
 struct SkillAtlasApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -103,6 +122,9 @@ struct SkillAtlasApp: App {
                 .frame(minWidth: 1000, minHeight: 660)
                 .background(WindowConfigurator())
                 .preferredColorScheme(forcedScheme)
+                .onOpenURL { url in
+                    handleDeepLink(url, store: store)
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1380, height: 860)

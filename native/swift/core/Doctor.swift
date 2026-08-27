@@ -87,6 +87,20 @@ package enum ContextDoctor {
         return String(trimmed.prefix(80)) + "…"
     }
 
+    /// skillOverrides 为 off / user-invocable-only 的不进 Claude 自动清单，不计税。
+    /// meta-skill 永远可见。
+    package static func listingVisible(_ skills: [Skill]) -> [Skill] {
+        let settings = (try? ProfileWriter.readSettings(at: ProfileWriter.userSettingsURL)) ?? [:]
+        let raw = settings["skillOverrides"] as? [String: Any] ?? [:]
+        return skills.filter { skill in
+            if skill.disabled { return false }
+            if skill.directory == MetaSkill.directory { return true }
+            guard let text = raw[skill.name] as? String else { return true }
+            return text != ProfileExclusion.off.rawValue
+                && text != ProfileExclusion.userInvocableOnly.rawValue
+        }
+    }
+
     package static func report(
         skills: [Skill],
         usage: [String: SkillUsage],
@@ -96,7 +110,7 @@ package enum ContextDoctor {
         var report = DoctorReport()
         report.budgetTokens = contextWindowTokens / 100  // 1%
 
-        for skill in skills where !skill.disabled {
+        for skill in listingVisible(skills) {
             let raw = skill.description
             let capped = String(raw.prefix(perEntryCap))
             let entry = ListingEntry(

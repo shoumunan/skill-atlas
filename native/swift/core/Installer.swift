@@ -88,6 +88,15 @@ package final class InstallerModel {
     private var ownsCloneDir = false
     /// 审阅页已确认「仍要安装」
     private var reviewConfirmed = false
+    package var sourceCommit = "local"
+
+    package var parsedRepoDisplay: String {
+        parsedRef?.display ?? "local"
+    }
+
+    package func markReviewConfirmed() {
+        reviewConfirmed = true
+    }
 
     package init() {}
 
@@ -142,8 +151,15 @@ package final class InstallerModel {
     /// file:// 裸仓库（离线验收 git clone 全流程用，界面文案不宣传）
     private static func localFileRef(_ input: String) -> RepoRef? {
         guard input.hasPrefix("file://"), input.hasSuffix(".git") else { return nil }
-        let name = URL(string: input)?.deletingPathExtension().lastPathComponent ?? ""
-        guard !name.isEmpty else { return nil }
+        guard let url = URL(string: input) else { return nil }
+        // `.../foo/.git`：deletingPathExtension 会把最后一段变成空或 "."（.git 被当成扩展名）。
+        // 目录名用上级文件夹；`.../foo.git` 裸库则去掉 .git 后缀。
+        var name = url.deletingPathExtension().lastPathComponent
+        if name.isEmpty || name == "." || name.hasPrefix(".") {
+            name = url.deletingLastPathComponent().lastPathComponent
+            if name.hasSuffix(".git") { name = String(name.dropLast(4)) }
+        }
+        guard !name.isEmpty, !name.hasPrefix("."), !name.contains("/") else { return nil }
         return RepoRef(owner: "local", repo: name, cloneOverride: input)
     }
 
@@ -167,6 +183,40 @@ package final class InstallerModel {
     }
 
     // MARK: 主流程
+
+    /// CLI 无 UI 准备：解析 → clone/本地 → 检测 → 安全扫描。抛错而不是写 errorText。
+    package func prepare(from input: String) async throws {
+        guard let ref = Self.parse(input) else {
+            throw InstallError(L("这不是 GitHub 链接，也不是本机文件夹。"))
+        }
+        parsedRef = ref
+        let dir: URL
+        if let local = ref.localDirectory {
+            if let redirect = Self.adoptionRedirect(for: local) {
+                throw InstallError(redirect)
+            }
+            dir = URL(fileURLWithPath: local)
+            ownsCloneDir = false
+            cloneDir = dir
+        } else {
+            dir = try await clone(ref)
+            ownsCloneDir = true
+            cloneDir = dir
+        }
+        sourceCommit = GitRev.head(in: dir)
+        var found = try detect(in: dir, ref: ref)
+        for index in found.indices {
+            let source = found[index].relativePath == "."
+                ? dir
+                : Self.resolve(dir, relative: found[index].relativePath)
+            found[index].findings = SecurityScanner.scan(directory: source)
+        }
+        candidates = found
+        if found.isEmpty {
+            throw InstallError(L("仓库里没有找到 SKILL.md（检查了根目录、一层子目录，以及 skills/<name> 两层布局）。"))
+        }
+        stage = .selecting
+    }
 
     package func start() {
         let text = urlText.trimmingCharacters(in: .whitespaces)
@@ -383,9 +433,12 @@ package final class InstallerModel {
 
     // MARK: git
 
-    package struct InstallError: Error { let message: String; init(_ m: String) { message = m } }
+    package struct InstallError: Error {
+        package let message: String
+        package init(_ m: String) { message = m }
+    }
 
-    private func clone(_ ref: RepoRef) async throws -> URL {
+    package func clone(_ ref: RepoRef) async throws -> URL {
         // /usr/bin/git 在未装 CLT 的机器上是弹窗替身，先探测再跑
         let probe = Process()
         probe.executableURL = URL(fileURLWithPath: "/usr/bin/xcode-select")
@@ -435,14 +488,14 @@ package final class InstallerModel {
     // MARK: 检测
 
     /// 相对路径按 `/` 拆开再拼接，避免 `appendingPathComponent("a/b")` 把斜杠当文件名。
-    private static func resolve(_ root: URL, relative: String) -> URL {
+    package static func resolve(_ root: URL, relative: String) -> URL {
         if relative == "." { return root }
         return relative.split(separator: "/").reduce(root) {
             $0.appendingPathComponent(String($1))
         }
     }
 
-    private func detect(in dir: URL, ref: RepoRef) throws -> [InstallCandidate] {
+    package func detect(in dir: URL, ref: RepoRef) throws -> [InstallCandidate] {
         let fileManager = FileManager.default
         let atlasRoot = AtlasPaths.libraryRoot
 

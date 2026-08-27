@@ -38,5 +38,16 @@
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>本地技能管理器 · 不修改 CC Switch 原数据</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>local.skill-atlas.dashboard</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>skillatlas</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

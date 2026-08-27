@@ -1,0 +1,165 @@
+import SwiftUI
+#if SWIFT_PACKAGE
+import AtlasCore
+#endif
+
+/// 库页工具栏：场景切换 + 上下文账单。不新增一级页面。
+
+struct ProfileSwitcher: View {
+    @Environment(AppStore.self) private var store
+
+    var body: some View {
+        let current = store.activeProfile?.name ?? L("全部技能")
+        Menu {
+            Button(L("全部技能")) {
+                store.revertDefaultProfile()
+            }
+            if !store.profiles.profiles.isEmpty { Divider() }
+            ForEach(store.profiles.profiles) { profile in
+                Button(profile.name) {
+                    store.requestProfileApply(profile, directory: nil)
+                }
+            }
+            Divider()
+            Button(L("管理场景…")) {
+                store.loadProfiles()
+                store.profileSheetPresented = true
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(current)
+                    .font(Theme.Fonts.caption)
+                    .lineLimit(1)
+            }
+            .foregroundStyle(Theme.textSecondary)
+            .padding(.horizontal, Theme.Space.s8)
+            .frame(height: 22)
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+        }
+        .menuStyle(.borderlessButton)
+        .help(L("当前场景。只对 Claude Code 生效。"))
+        .onAppear { store.loadProfiles() }
+    }
+}
+
+struct ContextBillChip: View {
+    @Environment(AppStore.self) private var store
+    @State private var slimPresented = false
+
+    var body: some View {
+        let tokens = store.doctorReport.totalTokens
+        let computing = !store.skills.isEmpty && store.doctorReport.entries.isEmpty
+        let over = tokens > 10_000
+        Button {
+            slimPresented = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "number")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(computing ? L("计算中") : LF("%d tok", tokens))
+                    .font(Theme.Fonts.caption)
+                    .monospacedDigit()
+            }
+            .foregroundStyle(over ? Theme.warning : Theme.textSecondary)
+            .padding(.horizontal, Theme.Space.s8)
+            .frame(height: 22)
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(L("当前每个 Claude 会话开场读技能清单的估算 token。点开看瘦身草案。"))
+        .sheet(isPresented: $slimPresented) {
+            SlimDraftSheet()
+        }
+    }
+}
+
+struct PendingReviewChip: View {
+    @Environment(AppStore.self) private var store
+    @State private var tokens: [String] = []
+
+    var body: some View {
+        Group {
+            if let token = tokens.first {
+                Button {
+                    store.openPendingReview(token: token)
+                } label: {
+                    Text(LF("待审 %d", tokens.count))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.warning)
+                        .padding(.horizontal, Theme.Space.s8)
+                        .frame(height: 22)
+                        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help(L("来自会话的安装审阅"))
+            }
+        }
+        .onAppear { tokens = PendingReviews.list().map(\.token) }
+    }
+}
+
+struct SlimDraftSheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var rows: [SlimRow] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s12) {
+            Text(L("瘦身草案"))
+                .font(Theme.Fonts.calloutEmphasis)
+            Text(L("按使用次数分档。完整挂载进自动清单；仅用户可调仍能 /名字 调用；不挂载会从清单拿掉。只对 Claude Code 生效。meta-skill 不会被排除。"))
+                .font(Theme.Fonts.secondary)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.s8) {
+                    ForEach($rows) { $row in
+                        HStack(spacing: Theme.Space.s8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.name)
+                                    .font(Theme.Fonts.rowTitle)
+                                Text(LF("%d 次会话", row.sessions))
+                                    .font(Theme.Fonts.caption)
+                                    .foregroundStyle(Theme.textTertiary)
+                            }
+                            Spacer(minLength: 0)
+                            Picker("", selection: $row.tier) {
+                                ForEach(SlimTier.allCases, id: \.self) { tier in
+                                    Text(tier.title).tag(tier)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 120)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .frame(maxHeight: 360)
+            HStack {
+                Button(L("取消")) { dismiss() }
+                    .buttonStyle(PressableButtonStyle())
+                    .quietControl()
+                Spacer()
+                Button(L("应用草案")) {
+                    store.applySlimDraft(rows)
+                    dismiss()
+                }
+                .buttonStyle(PressableButtonStyle())
+                .accentGlass(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(Theme.Space.s16)
+        .frame(width: 520, height: 520)
+        .onAppear {
+            rows = SlimPlanner.draft(
+                skills: store.skills,
+                usage: store.usage,
+                favorites: store.favorites
+            )
+        }
+    }
+}

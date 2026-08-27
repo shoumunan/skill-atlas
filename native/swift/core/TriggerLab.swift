@@ -134,6 +134,58 @@ package enum TriggerLab {
     }
 }
 
+// MARK: - 触发词撞车检测（CLI `doctor` 用；算法与 app/Store.swift 的
+// AppStore.computeTriggerOverlaps 同源，独立成两份是因为 cli target 不链 app target——
+// 见 native/Package.swift 的三 target 划分，core 是两边唯一的共同依赖）
+
+package struct TriggerOverlapPair: Identifiable {
+    package var first: Skill
+    package var second: Skill
+    package var shared: [String]
+    package var id: String { "\(first.name)|\(second.name)" }
+}
+
+extension TriggerLab {
+    /// 抽取触发短语：描述中「」引号内的短语 + 技能名分词（不含任务别名扩展——
+    /// 别名会让几乎所有技能都「重叠」，这里只看作者显式声明的触发词）
+    package static func triggerPhrases(of skill: Skill) -> Set<String> {
+        var phrases = Set<String>()
+        let text = skill.description
+        let range = NSRange(text.startIndex..., in: text)
+        for match in quotedPhrase.matches(in: text, range: range) {
+            if let swiftRange = Range(match.range(at: 1), in: text) {
+                phrases.insert(String(text[swiftRange]))
+            }
+        }
+        let stopWords: Set<String> = ["skill", "skills", "the", "and", "for", "with", "expert", "writer", "use", "new"]
+        for token in skill.name.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+        where token.count >= 3 && !stopWords.contains(token) {
+            phrases.insert(token)
+        }
+        return phrases
+    }
+
+    /// 两技能共享 ≥2 条短语（或 1 条 ≥4 字的完整短语）判为重叠；按共享数排序取前 10
+    package static func overlapPairs(_ allSkills: [Skill]) -> [TriggerOverlapPair] {
+        let skills = allSkills.filter { !$0.disabled }
+        let phraseSets = skills.map { triggerPhrases(of: $0) }
+        var overlaps: [TriggerOverlapPair] = []
+        for i in skills.indices {
+            for j in skills.indices where j > i {
+                let shared = phraseSets[i].intersection(phraseSets[j])
+                let qualifies = shared.count >= 2 || shared.contains { $0.count >= 4 }
+                guard qualifies, !shared.isEmpty else { continue }
+                overlaps.append(TriggerOverlapPair(
+                    first: skills[i],
+                    second: skills[j],
+                    shared: shared.sorted { $0.count > $1.count }
+                ))
+            }
+        }
+        return Array(overlaps.sorted { $0.shared.count > $1.shared.count }.prefix(10))
+    }
+}
+
 // MARK: - 体检扩展：触发词埋深检查（250 字符口径）
 
 package struct BuriedTriggerEntry: Identifiable {

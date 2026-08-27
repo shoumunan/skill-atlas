@@ -212,4 +212,30 @@ package enum HookTelemetry {
         guard let text = try? String(contentsOf: eventsURL, encoding: .utf8) else { return 0 }
         return text.split(separator: "\n").count
     }
+
+    /// 按自然周聚合某技能的 hook 事件数，最近 `weeks` 周（含本周）。缺周补 0。
+    package static func weeklyCounts(directory: String, skillName: String, weeks: Int = 8) -> [Int] {
+        guard weeks > 0, let text = try? String(contentsOf: eventsURL, encoding: .utf8) else {
+            return Array(repeating: 0, count: max(weeks, 0))
+        }
+        var calendar = Calendar(identifier: .iso8601)
+        calendar.timeZone = TimeZone.current
+        let now = Date()
+        let thisWeek = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? now
+        var buckets = Array(repeating: 0, count: weeks)
+        for line in text.split(separator: "\n") {
+            guard let data = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let name = object["skill"] as? String else { continue }
+            let match = name == skillName || name == directory
+            guard match, let ts = object["ts"] as? Double else { continue }
+            let date = Date(timeIntervalSince1970: ts)
+            let week = calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? date
+            let delta = calendar.dateComponents([.weekOfYear], from: week, to: thisWeek).weekOfYear ?? 0
+            if delta >= 0, delta < weeks {
+                buckets[weeks - 1 - delta] += 1
+            }
+        }
+        return buckets
+    }
 }

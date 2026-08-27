@@ -129,6 +129,18 @@ final class AppStore: InstallHost {
 
     /// 安装技能 sheet（⌘N / 筛选行「+ 安装」/ 空状态主按钮）
     var installSheetPresented = false
+    /// CLI 深链 skillatlas://review/<token> 打开的待审请求
+    var pendingReview: PendingReviewRequest?
+
+    struct PendingReviewRequest: Identifiable {
+        var token: String
+        var id: String { token }
+    }
+
+    func openPendingReview(token: String) {
+        guard PendingReviews.load(token) != nil else { return }
+        pendingReview = PendingReviewRequest(token: token)
+    }
     /// 打开安装窗时预填并开装（空库示例技能）
     var pendingInstallURL: String?
     /// 新装默认点亮的平台。空库勾一次，之后都跟着走。
@@ -307,7 +319,7 @@ final class AppStore: InstallHost {
         sandboxTarget = nil
         pauseWatching()
         do {
-            let plan = try SkillSandbox.run(skill: skill)
+            _ = try SkillSandbox.run(skill: skill)
             sandboxCount = SkillSandbox.existing().count
             profileNotice = LF("已开一个只装「%@」的会话。用完在设置页可一键清理试跑目录（当前 %d 个）。",
                                skill.name, sandboxCount)
@@ -421,6 +433,20 @@ final class AppStore: InstallHost {
                                    request.profile.name, applied.count)
             }
             persistProfiles()
+            Oplog.append(op: "profile-apply", target: request.profile.name, ok: true,
+                         detail: "excluded \(applied.count)")
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    func applySlimDraft(_ rows: [SlimRow]) {
+        do {
+            try SlimPlanner.apply(rows, target: ProfileWriter.userSettingsURL)
+            let core = rows.filter { $0.tier == .core }.count
+            let trimmed = rows.filter { $0.tier != .core }.count
+            profileNotice = LF("已应用瘦身草案：%d 个完整挂载，%d 个不再进自动清单。只对 Claude Code 生效。", core, trimmed)
+            Oplog.append(op: "profile-apply", target: "slim-draft", ok: true, detail: "\(trimmed) excluded")
         } catch {
             actionError = error.localizedDescription
         }
@@ -464,6 +490,7 @@ final class AppStore: InstallHost {
         prescription = nil
         do {
             try DescriptionRx.writeBack(skill: rx.skill, newDescription: rx.rewritten)
+            Oplog.append(op: "rx-writeback", target: rx.skill.directory, ok: true, detail: rx.skill.name)
             updateNotice = LF("「%@」的描述已改写并写回 SKILL.md。git 管理的技能这算一次本地改动，更新时会走补丁保护，不会被上游覆盖。", rx.skill.name)
         } catch {
             actionError = error.localizedDescription
@@ -647,6 +674,10 @@ final class AppStore: InstallHost {
                 triggerOverlaps = overlaps
             }
             if fatalError != nil { fatalError = nil }
+            refreshMisses()
+            if !UserDefaults.standard.bool(forKey: "atlasHookConsentAsked"), !HookTelemetry.installed() {
+                hookConsentPresented = true
+            }
             startWatchingIfNeeded()
             await runPhase2ProbesIfRequested(skills: result.skills)
             // 调试钩子：-atlasReader <技能名> 启动即打开阅读器；-atlasSelect <技能名> 启动即选中（截图用）
@@ -1222,12 +1253,39 @@ final class AppStore: InstallHost {
         return result
     }
 
-    /// UI 展示的平台：Claude / Codex / Grok / Cursor / Gemini / WorkBuddy。
-    /// OpenClaw、OpenCode、Hermes 只保留数据兼容——扫描、挂载、安全扫描照常，
-    /// 已建的软链不动，但不占界面位置（用不上的平台摆在那里只是噪音）。
-    /// 日后要放出来，把它加回这个数组即可，其余代码不用动。
+    /// UI 展示的平台。默认 Claude / Codex / Grok / Cursor / Gemini / WorkBuddy。
+    /// OpenClaw、OpenCode、Hermes 只保留数据兼容，设置里可打开。
+    var visiblePlatformsRaw = UserDefaults.standard.string(forKey: "atlasVisiblePlatforms") ?? ""
+
     var visiblePlatforms: [AgentPlatform] {
-        [.claude, .codex, .grokbuild, .cursor, .gemini, .workbuddy]
+        let parsed = visiblePlatformsRaw.split(separator: ",").compactMap { AgentPlatform(rawValue: String($0)) }
+        if parsed.isEmpty {
+            return [.claude, .codex, .grokbuild, .cursor, .gemini, .workbuddy]
+        }
+        return parsed
+    }
+
+    func setVisible(_ platform: AgentPlatform, on: Bool) {
+        var current = Set(visiblePlatforms.map(\.rawValue))
+        if on { current.insert(platform.rawValue) } else { current.remove(platform.rawValue) }
+        if current.isEmpty { current.insert(AgentPlatform.claude.rawValue) }
+        let ordered = AgentPlatform.allCases.map(\.rawValue).filter { current.contains($0) }
+        visiblePlatformsRaw = ordered.joined(separator: ",")
+        UserDefaults.standard.set(visiblePlatformsRaw, forKey: "atlasVisiblePlatforms")
+    }
+
+    var hookConsentPresented = false
+    var missHits: [MissHit] = []
+    var ignoredMisses: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "atlasIgnoredMisses") ?? [])
+
+    func refreshMisses() {
+        missHits = MissDetect.report(skills: skills).filter { !ignoredMisses.contains($0.directory) }
+    }
+
+    func ignoreMiss(_ hit: MissHit) {
+        ignoredMisses.insert(hit.directory)
+        UserDefaults.standard.set(Array(ignoredMisses), forKey: "atlasIgnoredMisses")
+        missHits.removeAll { $0.directory == hit.directory }
     }
 
     /// 检查报告（预算模拟 + 超长描述 + 可回收）。后台算好再发布。
@@ -1409,10 +1467,12 @@ final class AppStore: InstallHost {
     }
 
     func setPlatform(_ skill: Skill, platform: AgentPlatform, enabled: Bool) {
-        guard skill.origin == .atlas else { return }
+        guard skill.origin == .atlas, !skill.managed else { return }
         pauseWatching()
         do {
             try SkillActions.setPlatform(directory: skill.directory, platform: platform, enabled: enabled)
+            Oplog.append(op: enabled ? "enable" : "disable", target: skill.directory, ok: true,
+                         detail: platform.rawValue)
         } catch {
             actionError = error.localizedDescription
         }
@@ -1700,6 +1760,10 @@ final class AppStore: InstallHost {
                 if !suspicious.isEmpty { visible[directory] = suspicious }
             }
             if self.securityFindings != visible { self.securityFindings = visible }
+            let criticalDirs = visible.filter { _, findings in findings.contains { $0.severity == .critical } }
+            if !criticalDirs.isEmpty {
+                AtlasNotify.securityHit(count: criticalDirs.count)
+            }
         }
     }
 
@@ -1845,8 +1909,7 @@ final class AppStore: InstallHost {
     /// hook 事件口径（目录 → 精确计量），与 grep 口径并存展示
     var hookStats: [String: HookTelemetry.HookStats] = [:]
 
-    /// 把 hook 事件并进 usage：grep 漏计的补会话数，最近使用取两口径较新者。
-    /// 长期未用/丢弃模拟因此不再冤枉「grep 认不出但确实在用」的技能。
+    /// 把 hook 事件并进 usage：hook 是 Claude 主源，grep 回填（hook 没有的才用 grep）。
     func mergeHookStats() {
         let nameToDirectory = Dictionary(uniqueKeysWithValues: skills.map { ($0.name, $0.directory) })
         Task { [weak self] in
@@ -1858,7 +1921,7 @@ final class AppStore: InstallHost {
             var next = self.usage
             for (directory, record) in stats {
                 var merged = next[directory] ?? SkillUsage()
-                if merged.total == 0 { merged.claudeSessions = record.sessions }
+                merged.claudeSessions = max(record.sessions, merged.claudeSessions)
                 if let last = record.last, last > (merged.lastUsed ?? .distantPast) { merged.lastUsed = last }
                 next[directory] = merged
             }
@@ -1996,7 +2059,11 @@ final class AppStore: InstallHost {
             sourceNote = "\(summary.total)（本地安装）"
         }
         lines.append("- 技能总数：\(sourceNote)")
-        lines.append("- 平台可用：Codex \(summary.codexCount) · Claude \(summary.claudeCount)")
+        let platformBits = AgentPlatform.allCases.compactMap { platform -> String? in
+            let count = summary.enabled[platform.label] ?? 0
+            return count > 0 ? "\(platform.displayName) \(count)" : nil
+        }
+        lines.append("- 平台可用：" + (platformBits.isEmpty ? L("无") : platformBits.joined(separator: " · ")))
         let health = summary.health
         lines.append("- 健康状态：健康 \(health[.healthy] ?? 0) · 警告 \(health[.warning] ?? 0) · 异常 \(health[.error] ?? 0)")
         lines.append("")

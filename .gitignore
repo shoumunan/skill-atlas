@@ -1,4 +1,7 @@
 .DS_Store
+usage-index.json
+usage-events.jsonl
+.omo/
 .swiftpm/
 native/.build/
 native/resources/_part*.json

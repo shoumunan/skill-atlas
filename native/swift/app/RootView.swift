@@ -29,6 +29,12 @@ struct RootView: View {
         .sheet(isPresented: $store.installSheetPresented) {
             InstallSheet()
         }
+        .sheet(item: $store.pendingReview) { request in
+            PendingReviewSheet(token: request.token)
+        }
+        .sheet(isPresented: $store.hookConsentPresented) {
+            HookConsentSheet()
+        }
         .sheet(item: $updates.session) { _ in
             AppUpdateSheet()
         }
@@ -122,6 +128,21 @@ struct RootView: View {
             Button(L("取消"), role: .cancel) { store.uninstallTarget = nil }
         } message: {
             Text(L("软件里会看不到它。文件可以留着，也可以扔进废纸篓。"))
+        }
+        .confirmationDialog(
+            LF("试跑「%@」？", store.sandboxTarget?.name ?? ""),
+            isPresented: Binding(
+                get: { store.sandboxTarget != nil },
+                set: { if !$0 { store.sandboxTarget = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(L("开始试跑")) { store.confirmSandbox() }
+            Button(L("取消"), role: .cancel) { store.sandboxTarget = nil }
+        } message: {
+            if let skill = store.sandboxTarget {
+                Text(SkillSandbox.plan(for: skill).caveats.joined(separator: "\n"))
+            }
         }
         .task {
             applyLaunchPage()

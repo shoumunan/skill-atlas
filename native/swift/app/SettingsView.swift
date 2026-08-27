@@ -1,3 +1,4 @@
+import ServiceManagement
 import SwiftUI
 #if SWIFT_PACKAGE
 import AtlasCore
@@ -19,6 +20,8 @@ struct SettingsPage: View {
         ScrollView {
             VStack(spacing: Theme.Space.s20) {
                 AppearanceGroup()
+                NotifyGroup()
+                VisiblePlatformsGroup()
                 LibraryGroup()
                 MaintenanceGroup()
                 AdoptGroup()
@@ -371,6 +374,60 @@ private struct SettingsRow<Trailing: View>: View {
 
 // MARK: - 外观
 
+private struct NotifyGroup: View {
+    @AppStorage(AtlasNotify.securityKey) private var security = true
+    @AppStorage(AtlasNotify.missKey) private var miss = false
+    @AppStorage(AtlasNotify.updatesKey) private var updates = false
+
+    var body: some View {
+        SettingsGroup(title: "通知") {
+            SettingsRow(title: "安全命中", subtitle: "复扫发现关键级时提醒。默认开。") {
+                Toggle("", isOn: $security)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+            }
+            SettingsRow(title: "本周 miss", subtitle: "有技能该触发却没触发时汇总提醒。默认关。") {
+                Toggle("", isOn: $miss)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+            }
+            SettingsRow(title: "可更新", subtitle: "每天最多一次。默认关。", divider: false) {
+                Toggle("", isOn: $updates)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+            }
+        }
+        .onChange(of: security) { _, _ in AtlasNotify.requestAuthorization() }
+    }
+}
+
+private struct VisiblePlatformsGroup: View {
+    @Environment(AppStore.self) private var store
+
+    var body: some View {
+        SettingsGroup(title: "可见平台") {
+            ForEach(Array(AgentPlatform.allCases.enumerated()), id: \.element.id) { index, platform in
+                SettingsRow(
+                    title: platform.displayName,
+                    subtitle: L("关掉就不占界面位置，已有软链不动。"),
+                    divider: index < AgentPlatform.allCases.count - 1
+                ) {
+                    Toggle("", isOn: Binding(
+                        get: { store.visiblePlatforms.contains(platform) },
+                        set: { store.setVisible(platform, on: $0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+                }
+            }
+        }
+    }
+}
+
 private struct AppearanceGroup: View {
     @Environment(AppStore.self) private var store
     @AppStorage("atlasMenuBarEnabled") private var menuBarEnabled = true
@@ -392,12 +449,35 @@ private struct AppearanceGroup: View {
             }
             SettingsRow(
                 title: "语言",
-                subtitle: "切换立即生效，技能本身的名称和描述保持原文。",
-                divider: false
+                subtitle: "切换立即生效，技能本身的名称和描述保持原文。"
             ) {
                 languagePicker
             }
+            SettingsRow(
+                title: "登录时打开",
+                subtitle: "关窗后仍留在菜单栏。默认关。",
+                divider: false
+            ) {
+                Toggle("", isOn: loginBinding)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+            }
         }
+    }
+
+    private var loginBinding: Binding<Bool> {
+        Binding(
+            get: { SMAppService.mainApp.status == .enabled },
+            set: { on in
+                do {
+                    if on { try SMAppService.mainApp.register() }
+                    else { try SMAppService.mainApp.unregister() }
+                } catch {
+                    store.actionError = error.localizedDescription
+                }
+            }
+        )
     }
 
     /// 语言菜单：语言名用它自己的语言写，当前项打勾

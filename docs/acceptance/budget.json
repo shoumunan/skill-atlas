@@ -2,7 +2,6 @@
   "atRisk" : 127,
   "budgetTokens" : 2000,
   "entries" : 145,
-  "listingSoftCap" : 40,
   "overBudget" : true,
   "overlong" : 0,
   "reclaimableTokens" : 0,

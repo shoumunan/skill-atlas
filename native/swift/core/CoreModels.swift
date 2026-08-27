@@ -83,26 +83,38 @@ package struct Skill: Identifiable, Equatable {
     package var updatedAt: Int
     package var health: Health
     package var problems: [String]
-    package var mountCodex: Mount
-    package var mountClaude: Mount
+    /// 各平台挂载态。缺省平台视为未启用。
+    package var mounts: [AgentPlatform: Mount]
     package var origin: SkillOrigin
     /// 已停用（本地技能被移入 .disabled/）：灰显、不计入健康统计与可用数
     package var disabled: Bool = false
     /// 关联 git 仓库有可拉取的新提交（后台检查后写入）
     package var updateAvailable: Bool = false
+    /// catalog.managed；meta-skill 为 true。默认 false 让旧初始化点不用改这个参数。
+    package var managed: Bool = false
     package var searchText: String
+
+    package func mount(_ platform: AgentPlatform) -> Mount {
+        mounts[platform] ?? Mount(enabled: false, status: .disabled, path: "", isLink: false, target: "")
+    }
+
+    package var mountClaude: Mount { mount(.claude) }
+    package var mountCodex: Mount { mount(.codex) }
 }
 
 package struct Summary {
     package var total: Int
-    /// 平台可用数（跨来源：CC Switch 启用 + 本地安装均计入）
-    package var codexCount: Int
-    package var claudeCount: Int
-    package var enabledCodex: Int
-    package var enabledClaude: Int
-    package var enabledGrokBuild: Int
-    package var verifiedCodex: Int
-    package var verifiedClaude: Int
+    /// 平台 label → 启用数（跨来源）
+    package var enabled: [String: Int]
+    /// 平台 label → 挂载验证通过数
+    package var verified: [String: Int]
+    package var enabledCodex: Int { enabled["Codex"] ?? 0 }
+    package var enabledClaude: Int { enabled["Claude"] ?? 0 }
+    package var enabledGrokBuild: Int { enabled["GrokBuild"] ?? 0 }
+    package var verifiedCodex: Int { verified["Codex"] ?? 0 }
+    package var verifiedClaude: Int { verified["Claude"] ?? 0 }
+    package var codexCount: Int { enabledCodex }
+    package var claudeCount: Int { enabledClaude }
     package var ccSwitchCount: Int
     package var localCount: Int
     package var atlasCount: Int
@@ -187,7 +199,7 @@ package enum Rules {
         "思考与协作": "请使用 %@ 分析这个问题，指出关键判断和下一步",
     ]
 
-    /// 推荐引擎的中文别名扩展（移植自历史 app.js recommend()）
+    /// 推荐引擎的中文别名扩展（移植自历史 web 端 recommend()）
     package static let recommendAliases: [String: [String]] = [
         "基金": ["fund", "基金", "投教", "投研"],
         "视频": ["video", "视频", "抖音", "bilibili"],

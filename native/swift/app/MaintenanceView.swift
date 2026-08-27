@@ -79,8 +79,10 @@ struct MaintenanceGroup: View {
         let stale = store.staleSkills
         let overlaps = store.triggerOverlaps
         let discover = discoverability
+        let misses = store.missHits
+        let followups = RxFollowup.due()
 
-        if blocking.isEmpty && warnings.isEmpty && stale.isEmpty && overlaps.isEmpty && discover.isEmpty {
+        if blocking.isEmpty && warnings.isEmpty && stale.isEmpty && overlaps.isEmpty && discover.isEmpty && misses.isEmpty && followups.isEmpty {
             focusedEmptyState
             emptyState
         } else {
@@ -132,6 +134,66 @@ struct MaintenanceGroup: View {
                     }
                 }
             }
+            if !misses.isEmpty {
+                section(L("本周 miss"), count: misses.count) {
+                    ForEach(misses) { hit in
+                        missRow(hit)
+                    }
+                }
+            }
+            if !followups.isEmpty {
+                section(L("改写疗效"), count: followups.count) {
+                    ForEach(followups) { card in
+                        followupRow(card)
+                    }
+                }
+            }
+        }
+    }
+
+    private func missRow(_ hit: MissHit) -> some View {
+        actionRow(
+            title: hit.name,
+            detail: hit.userInvocableOnly
+                ? LF("可以用 /%@ 调用", hit.name)
+                : LF("%d 次该触发却没触发", hit.occurrences),
+            symbol: "bell.badge",
+            tint: Theme.warning
+        ) {
+            HStack(spacing: Theme.Space.s8) {
+                if !hit.userInvocableOnly {
+                    Button(L("开处方")) {
+                        if let skill = store.skills.first(where: { $0.directory == hit.directory }) {
+                            store.requestPrescription(skill)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(Theme.Fonts.secondaryEmphasis)
+                    .foregroundStyle(Theme.accent)
+                }
+                Button(L("忽略")) { store.ignoreMiss(hit) }
+                    .buttonStyle(.plain)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+            }
+        }
+    }
+
+    private func followupRow(_ card: RxFollowup.Card) -> some View {
+        let skill = store.skills.first { $0.directory == card.directory }
+        let sessions = store.usage[card.directory]?.total ?? 0
+        return actionRow(
+            title: skill?.name ?? card.directory,
+            detail: LF("写回已 %d 天，现在 %d 次会话", card.ageDays, sessions),
+            symbol: "chart.bar",
+            tint: Theme.accent
+        ) {
+            Button(L("打开技能详情")) {
+                if let skill { store.select(skill.name) }
+            }
+            .buttonStyle(.plain)
+            .font(Theme.Fonts.secondaryEmphasis)
+            .foregroundStyle(Theme.accent)
         }
     }
 

@@ -1,3 +1,9 @@
+# 历史存档，版本口径已重置
+
+本文是 3.0.0 时期的验收记录，不是 2.0 的现行口径。现行验收以 `PLAN.md` 各 WP DoD 与 `tests/acceptance.sh` 为准。
+
+---
+
 # Skill Atlas 3.0.0 验收报告
 
 日期：2026-08-14。应用目录：`/Users/shoumunan/Documents/Codex/2026-08-13/wo/outputs/skill-atlas/`。未做 git commit。

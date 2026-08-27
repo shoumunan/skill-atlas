@@ -630,3 +630,7 @@ CC Switch 只做开关。本页负责让不懂 Skill / Agent / MCP 的人**分�
 - 背景板多层光照：顶部天蓝→底部深蓝主渐变（#0A84FF 家族）+ 顶部中央柔和径向高光（模拟光源）+ 底缘 vignette 轻微加深 + 顶部内侧极细 specular 亮边（描边路径剪裁渐隐）。
 - glyph 为三片玻璃卡片 Wallet 式堆叠（选型 A「后片收窄递进」，对比图 `docs/icon-variants.png`）：前片不透明白在下（宽 54% 板宽），后两片从上方探出、逐层缩小（0.92/0.84）且透明度递减（60%/30%），片间 black 11% 小 blur 投影制造景深；前片叠极淡白→冷白渐变避免死白，顶边细高光；整体光学居中上移 2.5%。所有形状 CoreGraphics 精确路径。
 - Dock 有图标缓存：更新后 `touch "Skill Atlas.app" && killall Dock` 刷新。
+
+## v14 · 2.0 运营原语（增量）
+
+不新增一级页。工具栏收纳 `ProfileSwitcher` 与 `ContextBillChip`；`SlimDraftSheet` 逐条确认三档供给；`PendingReviewSheet` 承接 `skillatlas://review/<token>`；维护区新增本周 miss 与改写疗效卡；详情「更多设置」增加触发趋势、触发模拟、沙箱试跑。字号颜色只用 Theme 令牌。通知默认只开安全类。

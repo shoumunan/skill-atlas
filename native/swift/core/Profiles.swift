@@ -154,6 +154,10 @@ package enum ProfileWriter {
         var kept: [String] = []
         var conflicts: [String] = []
         for skill in skills where !skill.disabled {
+            if skill.directory == MetaSkill.directory {
+                kept.append(skill.name)
+                continue
+            }
             if memberDirs.contains(skill.directory) {
                 kept.append(skill.name)
             } else if memberNames.contains(skill.name) {

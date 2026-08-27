@@ -41,17 +41,21 @@ package enum SkillScanner {
 
         var skills: [Skill] = []
         var healthCounts: [Health: Int] = [.healthy: 0, .warning: 0, .error: 0]
-        var verifiedCodex = 0
-        var verifiedClaude = 0
+        var verified: [String: Int] = [:]
         var seenPaths = Set<String>()
         var seenNames = Set<String>()
+
+        func tallyVerified(_ skill: Skill) {
+            for platform in AgentPlatform.allCases where skill.mount(platform).status == .ok {
+                verified[platform.label, default: 0] += 1
+            }
+        }
 
         // 主源：本库
         let atlasSkills = scanAtlasLibrary(catalog: catalog)
         for skill in atlasSkills {
             if !skill.disabled { healthCounts[skill.health, default: 0] += 1 }
-            if skill.mountCodex.status == .ok { verifiedCodex += 1 }
-            if skill.mountClaude.status == .ok { verifiedClaude += 1 }
+            tallyVerified(skill)
             skills.append(skill)
             seenPaths.insert(URL(fileURLWithPath: skill.sourcePath).resolvingSymlinksInPath().standardizedFileURL.path)
             seenNames.insert(skill.name)
@@ -68,8 +72,7 @@ package enum SkillScanner {
                 if seenPaths.contains(realPath) || seenNames.contains(name) { continue }
                 let skill = skillFromCCSwitch(row: row)
                 if !skill.disabled { healthCounts[skill.health, default: 0] += 1 }
-                if skill.mountCodex.status == .ok { verifiedCodex += 1 }
-                if skill.mountClaude.status == .ok { verifiedClaude += 1 }
+                tallyVerified(skill)
                 skills.append(skill)
                 seenPaths.insert(realPath)
                 seenNames.insert(name)
@@ -94,15 +97,14 @@ package enum SkillScanner {
 
         let atlasCount = skills.filter { $0.origin == .atlas }.count
         let ccSwitchCount = skills.filter { $0.origin == .ccSwitch }.count
+        var enabled: [String: Int] = [:]
+        for platform in AgentPlatform.allCases {
+            enabled[platform.label] = skills.filter { $0.platforms.contains(platform.label) && !$0.disabled }.count
+        }
         let summary = Summary(
             total: skills.count,
-            codexCount: skills.filter { $0.platforms.contains("Codex") && !$0.disabled }.count,
-            claudeCount: skills.filter { $0.platforms.contains("Claude") && !$0.disabled }.count,
-            enabledCodex: skills.filter { $0.platforms.contains("Codex") && !$0.disabled }.count,
-            enabledClaude: skills.filter { $0.platforms.contains("Claude") && !$0.disabled }.count,
-            enabledGrokBuild: skills.filter { $0.platforms.contains("GrokBuild") && !$0.disabled }.count,
-            verifiedCodex: verifiedCodex,
-            verifiedClaude: verifiedClaude,
+            enabled: enabled,
+            verified: verified,
             ccSwitchCount: ccSwitchCount,
             localCount: skills.filter { $0.origin == .local }.count,
             atlasCount: atlasCount,
@@ -150,8 +152,9 @@ package enum SkillScanner {
         let category = inferCategory(name: name, description: description)
         let enabledCodex = row.int("enabled_codex") != 0
         let enabledClaude = row.int("enabled_claude") != 0
-        let mountCodex = mountState(root: codexRoot, directory: directory, enabled: enabledCodex, source: source)
-        let mountClaude = mountState(root: claudeRoot, directory: directory, enabled: enabledClaude, source: source)
+        var mounts: [AgentPlatform: Mount] = [:]
+        mounts[.codex] = mountState(root: codexRoot, directory: directory, enabled: enabledCodex, source: source)
+        mounts[.claude] = mountState(root: claudeRoot, directory: directory, enabled: enabledClaude, source: source)
 
         var problems: [String] = []
         var severity = Health.healthy
@@ -166,14 +169,15 @@ package enum SkillScanner {
             problems.append("SKILL.md 缺失")
             severity = .error
         }
-        for (label, mount) in [("Codex", mountCodex), ("Claude", mountClaude)] {
+        for platform in [AgentPlatform.codex, .claude] {
+            let mount = mounts[platform] ?? Mount(enabled: false, status: .disabled, path: "", isLink: false, target: "")
             switch mount.status {
             case .missing, .broken, .wrong:
                 let word = [MountStatus.missing: "缺失", .broken: "断链", .wrong: "目标错误"][mount.status]!
-                problems.append("\(label) 挂载\(word)")
+                problems.append("\(platform.label) 挂载\(word)")
                 severity = .error
             case .directory, .unexpected:
-                problems.append("\(label) \(mount.status == .directory ? "是普通目录" : "存在未启用挂载")")
+                problems.append("\(platform.label) \(mount.status == .directory ? "是普通目录" : "存在未启用挂载")")
                 if severity != .error { severity = .warning }
             case .ok, .disabled:
                 break
@@ -226,8 +230,7 @@ package enum SkillScanner {
             updatedAt: updatedAt != 0 ? updatedAt : modifiedAt,
             health: severity,
             problems: problems,
-            mountCodex: mountCodex,
-            mountClaude: mountClaude,
+            mounts: mounts,
             origin: .ccSwitch,
             searchText: "\(name) \(description) \(category) cc switch".lowercased()
         )
@@ -285,8 +288,7 @@ package enum SkillScanner {
             }
 
             var platforms: [String] = []
-            var mountClaude = Mount(enabled: false, status: .disabled, path: "", isLink: false, target: "")
-            var mountCodex = Mount(enabled: false, status: .disabled, path: "", isLink: false, target: "")
+            var mounts: [AgentPlatform: Mount] = [:]
             for platform in AgentPlatform.allCases {
                 let enabled = (record?.isEnabled(platform) ?? false) && !hit.disabled
                 let mount = mountState(
@@ -295,8 +297,7 @@ package enum SkillScanner {
                     enabled: enabled,
                     source: source
                 )
-                if platform == .claude { mountClaude = mount }
-                if platform == .codex { mountCodex = mount }
+                mounts[platform] = mount
                 if enabled { platforms.append(platform.label) }
                 guard !hit.disabled else { continue }
                 switch mount.status {
@@ -340,10 +341,10 @@ package enum SkillScanner {
                 updatedAt: updatedAt,
                 health: severity,
                 problems: problems,
-                mountCodex: mountCodex,
-                mountClaude: mountClaude,
+                mounts: mounts,
                 origin: .atlas,
                 disabled: hit.disabled,
+                managed: record?.managed == true,
                 searchText: "\(name) \(description) \(category) skill atlas 本地\(hit.disabled ? " 已停用" : "")".lowercased()
             ))
         }
@@ -416,7 +417,6 @@ package enum SkillScanner {
                 .flatMap { $0[.modificationDate] as? Date }
                 .map { Int($0.timeIntervalSince1970) } ?? installedAt
 
-            let noMount = Mount(enabled: false, status: .disabled, path: "", isLink: false, target: "")
             result.append(Skill(
                 dbId: 0,
                 name: name,
@@ -433,8 +433,7 @@ package enum SkillScanner {
                 updatedAt: modifiedAt,
                 health: severity,
                 problems: problems,
-                mountCodex: noMount,
-                mountClaude: noMount,
+                mounts: [:],
                 origin: .local,
                 disabled: hit.disabled,
                 searchText: "\(name) \(description) \(category) 本地安装 local\(hit.disabled ? " 已停用" : "")".lowercased()

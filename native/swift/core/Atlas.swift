@@ -19,7 +19,7 @@ package struct AtlasError: LocalizedError {
     package init(_ message: String) { self.message = message }
 }
 
-package enum AgentPlatform: String, CaseIterable, Identifiable, Codable {
+package enum AgentPlatform: String, CaseIterable, Identifiable, Codable, Hashable {
     case claude, codex, gemini, opencode, hermes, grokbuild, cursor, workbuddy, openclaw
 
     package var id: String { rawValue }
@@ -149,6 +149,29 @@ package struct AtlasSkillRecord: Codable, Equatable {
     package var repoBranch: String
     package var installedAt: Int
     package var updatedAt: Int
+    /// meta-skill 等由 App 管理的条目（WP2）。Optional：老 catalog 没有这个键。
+    package var managed: Bool?
+
+    /// 合成的 memberwise init 是 internal，CLI target 看不见。package 显式写出。
+    package init(
+        directory: String,
+        enabled: [String: Bool],
+        repoOwner: String,
+        repoName: String,
+        repoBranch: String,
+        installedAt: Int,
+        updatedAt: Int,
+        managed: Bool? = nil
+    ) {
+        self.directory = directory
+        self.enabled = enabled
+        self.repoOwner = repoOwner
+        self.repoName = repoName
+        self.repoBranch = repoBranch
+        self.installedAt = installedAt
+        self.updatedAt = updatedAt
+        self.managed = managed
+    }
 
     package func isEnabled(_ platform: AgentPlatform) -> Bool {
         enabled[platform.rawValue] ?? false

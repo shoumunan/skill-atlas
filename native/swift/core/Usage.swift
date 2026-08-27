@@ -41,12 +41,24 @@ package enum UsageIndexer {
         var skills: [String: Double]
         /// 已消化到的字节偏移（对齐到完整行末）。jsonl 追加时只读尾巴。
         var bytesRead: Int = 0
+        /// 首轮用户消息前 500 字符（v4）。Optional：老缓存没有。
+        var firstPrompt: String?
     }
 
     package struct Cache: Codable {
-        var version: Int = 3
+        var version: Int = 4
         /// 平台 → (会话文件路径 → 解析结果)
         var files: [String: [String: FileEntry]] = [:]
+    }
+
+    package static let currentVersion = 4
+
+    package struct SessionSnapshot {
+        package var key: String
+        package var platform: String
+        package var lastTs: Double
+        package var firstPrompt: String
+        package var used: Set<String>
     }
 
     package static var cacheURL: URL { AtlasPaths.usageIndexURL }
@@ -54,7 +66,7 @@ package enum UsageIndexer {
     /// 只读已落盘的索引，不扫会话目录。CLI 每次冷启动不能去啃 1 GB jsonl。
     package static func loadCached() -> [String: SkillUsage] {
         guard let cache = try? JSONDecoder().decode(Cache.self, from: Data(contentsOf: cacheURL)),
-              cache.version == 3 else { return [:] }
+              cache.version == currentVersion else { return [:] }
         let roots: [(platform: String, url: URL)] = [
             ("claude", SkillScanner.home.appendingPathComponent(".claude/projects")),
             ("codex", SkillScanner.home.appendingPathComponent(".codex/sessions")),
@@ -96,7 +108,7 @@ package enum UsageIndexer {
         let started = Date()
         let fileManager = FileManager.default
         var cache = (try? JSONDecoder().decode(Cache.self, from: Data(contentsOf: cacheURL))) ?? Cache()
-        if cache.version != 3 { cache = Cache() }
+        if cache.version != currentVersion { cache = Cache() }
 
         let roots: [(platform: String, url: URL)] = [
             ("claude", SkillScanner.home.appendingPathComponent(".claude/projects")),
@@ -146,7 +158,8 @@ package enum UsageIndexer {
                     mtime: job.mtime,
                     size: job.size,
                     skills: merged,
-                    bytesRead: added.bytesRead
+                    bytesRead: added.bytesRead,
+                    firstPrompt: hit.firstPrompt ?? added.firstPrompt
                 )
                 reparsed += 1
             } else {
@@ -157,7 +170,8 @@ package enum UsageIndexer {
                     fallbackTime: job.mtime
                 )
                 newCache.files[job.platform, default: [:]][job.path] = FileEntry(
-                    mtime: job.mtime, size: job.size, skills: parsed.skills, bytesRead: parsed.bytesRead
+                    mtime: job.mtime, size: job.size, skills: parsed.skills,
+                    bytesRead: parsed.bytesRead, firstPrompt: parsed.firstPrompt
                 )
                 reparsed += 1
             }
@@ -207,6 +221,35 @@ package enum UsageIndexer {
         )
     }
 
+    /// miss 检测用：按会话聚合 firstPrompt + 已用技能。只读缓存，不扫盘。
+    package static func sessionSnapshots(windowDays: Int = 7) -> [SessionSnapshot] {
+        guard let cache = try? JSONDecoder().decode(Cache.self, from: Data(contentsOf: cacheURL)),
+              cache.version == currentVersion else { return [] }
+        let cutoff = Date().addingTimeInterval(TimeInterval(-windowDays * 24 * 3600)).timeIntervalSince1970
+        let roots: [(platform: String, url: URL)] = [
+            ("claude", SkillScanner.home.appendingPathComponent(".claude/projects")),
+            ("codex", SkillScanner.home.appendingPathComponent(".codex/sessions")),
+        ]
+        var grouped: [String: SessionSnapshot] = [:]
+        for (platform, entries) in cache.files {
+            let root = roots.first { $0.platform == platform }?.url.path ?? ""
+            for (path, entry) in entries {
+                let key = "\(platform)|\(sessionKey(for: path, platform: platform, root: root))"
+                var snap = grouped[key] ?? SessionSnapshot(
+                    key: key, platform: platform, lastTs: 0, firstPrompt: "", used: []
+                )
+                snap.used.formUnion(entry.skills.keys)
+                if let prompt = entry.firstPrompt, snap.firstPrompt.isEmpty, !prompt.isEmpty {
+                    snap.firstPrompt = prompt
+                }
+                let newest = entry.skills.values.max() ?? 0
+                if newest > snap.lastTs { snap.lastTs = newest }
+                grouped[key] = snap
+            }
+        }
+        return grouped.values.filter { $0.lastTs >= cutoff || $0.lastTs == 0 }
+    }
+
     /// 会话键：Claude 取「项目/会话UUID」（主转录与其 subagents 目录同键）；Codex 每文件一会话
     private static func sessionKey(for path: String, platform: String, root: String) -> String {
         guard platform == "claude", path.hasPrefix(root) else { return path }
@@ -242,28 +285,29 @@ package enum UsageIndexer {
         knownDirs: Set<String>,
         fallbackTime: Double,
         startOffset: Int = 0
-    ) -> (skills: [String: Double], bytesRead: Int) {
+    ) -> (skills: [String: Double], bytesRead: Int, firstPrompt: String?) {
         let url = URL(fileURLWithPath: path)
         let data: Data
         let baseOffset: Int
         if startOffset > 0 {
-            guard let handle = try? FileHandle(forReadingFrom: url) else { return ([:], startOffset) }
+            guard let handle = try? FileHandle(forReadingFrom: url) else { return ([:], startOffset, nil) }
             defer { try? handle.close() }
             do {
                 try handle.seek(toOffset: UInt64(startOffset))
                 let tail = try handle.readToEnd() ?? Data()
-                guard !tail.isEmpty else { return ([:], startOffset) }
+                guard !tail.isEmpty else { return ([:], startOffset, nil) }
                 data = tail
                 baseOffset = startOffset
             } catch {
-                return ([:], startOffset)
+                return ([:], startOffset, nil)
             }
         } else {
             guard let mapped = try? Data(contentsOf: url, options: .mappedIfSafe),
-                  !mapped.isEmpty else { return ([:], 0) }
+                  !mapped.isEmpty else { return ([:], 0, nil) }
             data = mapped
             baseOffset = 0
         }
+        let firstPrompt = startOffset == 0 ? extractFirstPrompt(from: data) : nil
 
         var result: [String: Double] = [:]
         var searchStart = data.startIndex
@@ -310,7 +354,50 @@ package enum UsageIndexer {
             let time = lineTime > 0 ? lineTime : fallbackTime
             result[name] = max(result[name] ?? 0, time)
         }
-        return (result, baseOffset + completeBytes(in: data))
+        return (result, baseOffset + completeBytes(in: data), firstPrompt)
+    }
+
+    /// 只看文件头部约 50 行，取第一条 user 消息，截 500 字符。不做全文 JSON 解码。
+    private static func extractFirstPrompt(from data: Data) -> String? {
+        var cursor = data.startIndex
+        var lines = 0
+        while lines < 50, cursor < data.endIndex {
+            let end = data[cursor...].firstIndex(of: newline) ?? data.endIndex
+            let line = data[cursor..<end]
+            if let text = decodeUserLine(line) {
+                return String(text.prefix(500))
+            }
+            if end == data.endIndex { break }
+            cursor = data.index(after: end)
+            lines += 1
+        }
+        return nil
+    }
+
+    private static func decodeUserLine(_ line: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return nil }
+        let type = (object["type"] as? String)?.lowercased() ?? ""
+        let role = ((object["message"] as? [String: Any])?["role"] as? String)?.lowercased()
+            ?? (object["role"] as? String)?.lowercased()
+            ?? ""
+        let isUser = type == "user" || type == "human" || role == "user" || role == "human"
+        guard isUser else { return nil }
+        if let message = object["message"] as? [String: Any] {
+            if let text = flattenContent(message["content"]) { return text }
+        }
+        if let text = flattenContent(object["content"]) { return text }
+        if let text = object["text"] as? String { return text }
+        return nil
+    }
+
+    private static func flattenContent(_ raw: Any?) -> String? {
+        if let text = raw as? String, !text.isEmpty { return text }
+        if let parts = raw as? [[String: Any]] {
+            let texts = parts.compactMap { $0["text"] as? String }
+            let joined = texts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+            return joined.isEmpty ? nil : joined
+        }
+        return nil
     }
 
     /// 已对齐到完整行末的字节数。文件末尾没有换行时停在上一行，下次续读会再带上半截。

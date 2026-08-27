@@ -1,4 +1,5 @@
 import AppKit
+import Charts
 import SwiftUI
 #if SWIFT_PACKAGE
 import AtlasCore
@@ -251,6 +252,9 @@ private struct LibraryFilterBar: View {
             HStack(spacing: Theme.Space.s12) {
                 FavoritesTabs()
                 Spacer()
+                ProfileSwitcher()
+                ContextBillChip()
+                PendingReviewChip()
                 HStack(spacing: Theme.Space.s4) {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 9, weight: .semibold))
@@ -1052,6 +1056,8 @@ struct InspectorPanel: View {
                                 ManageSection(skill: skill)
                                 AdvisorySecuritySection(skill: skill)
                                 UsageSection(skill: skill)
+                                TrendMiniSection(skill: skill)
+                                TriggerTrySection(skill: skill)
                                 ContextCostSection(skill: skill)
                                 DetailSection(title: "安装位置") {
                                     Text(skill.sourcePath)
@@ -1061,12 +1067,18 @@ struct InspectorPanel: View {
                                         .truncationMode(.middle)
                                         .help(skill.sourcePath)
                                 }
-                                if skill.origin != .local,
-                                   skill.mountCodex.status != .ok || skill.mountClaude.status != .ok {
-                                    DetailSection(title: "连接状态") {
-                                        HStack(alignment: .top, spacing: Theme.Space.s24) {
-                                            MountLine(label: "Codex", mount: skill.mountCodex)
-                                            MountLine(label: AgentPlatform.claude.displayName, mount: skill.mountClaude)
+                                if skill.origin != .local {
+                                    let broken = AgentPlatform.allCases.filter {
+                                        let status = skill.mount($0).status
+                                        return status != .ok && status != .disabled
+                                    }
+                                    if !broken.isEmpty {
+                                        DetailSection(title: "连接状态") {
+                                            HStack(alignment: .top, spacing: Theme.Space.s24) {
+                                                ForEach(broken, id: \.rawValue) { platform in
+                                                    MountLine(label: platform.displayName, mount: skill.mount(platform))
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1117,11 +1129,18 @@ private struct InspectorHead: View {
             HStack(spacing: Theme.Space.s12) {
                 CategoryIcon(category: skill.category, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(skill.name)
-                        .font(Theme.Fonts.pageTitle)
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
-                        .textSelection(.enabled)
+                    HStack(spacing: 6) {
+                        Text(skill.name)
+                            .font(Theme.Fonts.pageTitle)
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                            .textSelection(.enabled)
+                        if skill.managed {
+                            Text(L("固定"))
+                                .font(Theme.Fonts.caption)
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                    }
                     Text(L(skill.category))
                         .font(Theme.Fonts.secondary)
                         .foregroundStyle(Theme.textTertiary)
@@ -1164,7 +1183,13 @@ private struct InspectorHead: View {
                         .foregroundStyle(Theme.textTertiary)
                     Spacer(minLength: 0)
                 }
-                PlatformToggleRow(skill: skill)
+                if skill.managed {
+                    Text(L("由本应用生成并挂到所有平台，不能单独停用。"))
+                        .font(Theme.Fonts.secondary)
+                        .foregroundStyle(Theme.textTertiary)
+                } else {
+                    PlatformToggleRow(skill: skill)
+                }
             }
             HStack(spacing: Theme.Space.s8) {
                 Spacer()
@@ -1247,6 +1272,76 @@ private struct UsageSection: View {
             Text(L(label))
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(Theme.textTertiary)
+        }
+    }
+}
+
+private struct TrendMiniSection: View {
+    var skill: Skill
+
+    var body: some View {
+        let installed = HookTelemetry.installed()
+        let counts = HookTelemetry.weeklyCounts(directory: skill.directory, skillName: skill.name)
+        DetailSection(title: "触发趋势", hint: L("按周")) {
+            if !installed {
+                Text(L("接入使用记录后，这里会显示每周调用次数。"))
+                    .font(Theme.Fonts.secondary)
+                    .foregroundStyle(Theme.textSecondary)
+            } else if counts.filter({ $0 > 0 }).count < 2 {
+                Text(L("数据不足，至少两周有调用才会画图。"))
+                    .font(Theme.Fonts.secondary)
+                    .foregroundStyle(Theme.textSecondary)
+            } else {
+                Chart(Array(counts.enumerated()), id: \.offset) { item in
+                    BarMark(
+                        x: .value(L("周"), item.offset),
+                        y: .value(L("次"), item.element)
+                    )
+                    .foregroundStyle(Theme.accent)
+                }
+                .chartXAxis(.hidden)
+                .frame(height: 56)
+            }
+        }
+    }
+}
+
+private struct TriggerTrySection: View {
+    @Environment(AppStore.self) private var store
+    var skill: Skill
+    @State private var phrase = ""
+    @State private var result = ""
+
+    var body: some View {
+        DetailSection(title: "触发模拟") {
+            HStack(spacing: Theme.Space.s8) {
+                TextField(L("试一句会不会唤起它"), text: $phrase)
+                    .textFieldStyle(.plain)
+                    .font(Theme.Fonts.secondary)
+                    .padding(.horizontal, Theme.Space.s8)
+                    .frame(height: 28)
+                    .quietControl(cornerRadius: Theme.Radius.control)
+                Button(L("模拟")) {
+                    let atRisk = Set(store.doctorReport.atRisk.map(\.skill.name))
+                    let ranked = TriggerLab.simulate(
+                        phrase: phrase, skills: store.skills, usage: store.usage, atRiskNames: atRisk
+                    )
+                    if let index = ranked.firstIndex(where: { $0.skill.directory == skill.directory }) {
+                        result = LF("第 %d 名，分 %d", index + 1, ranked[index].score)
+                    } else if ranked.isEmpty {
+                        result = L("没有候选")
+                    } else {
+                        result = LF("前 8 名里没有。第一是 %@", ranked[0].skill.name)
+                    }
+                }
+                .buttonStyle(PressableButtonStyle())
+                .quietControl()
+            }
+            if !result.isEmpty {
+                Text(result)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textSecondary)
+            }
         }
     }
 }
@@ -1367,7 +1462,13 @@ private struct ManageSection: View {
                 Text(L("在哪些软件里使用"))
                     .font(Theme.Fonts.secondaryEmphasis)
                     .foregroundStyle(Theme.textSecondary)
-                PlatformToggleRow(skill: skill)
+                if skill.managed {
+                    Text(L("由本应用生成并挂到所有平台，不能单独停用。"))
+                        .font(Theme.Fonts.secondary)
+                        .foregroundStyle(Theme.textTertiary)
+                } else {
+                    PlatformToggleRow(skill: skill)
+                }
             }
             if skill.updateAvailable {
                 Button {
@@ -1388,6 +1489,18 @@ private struct ManageSection: View {
                 localDisableControls
                 uninstallButton
             }
+            Button {
+                store.requestSandbox(skill)
+            } label: {
+                Text(L("沙箱试跑"))
+                    .font(Theme.Fonts.calloutEmphasis)
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(.horizontal, Theme.Space.s12)
+                    .frame(height: 28)
+            }
+            .buttonStyle(PressableButtonStyle())
+            .quietControl()
+            .help(L("开一个只装这一个技能的会话。不是安全沙箱。"))
             fileButtons
             if SkillBackup.latest(directory: skill.directory) != nil {
                 Button {
