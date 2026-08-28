@@ -1,7 +1,7 @@
 {
-  "version": "2.1.3",
-  "notes": "v2.1.3：安全通知只在新出现问题时提醒一次并点名技能，不再反复弹；设置里两组平台开关合并成一组，带品牌图标与真实目录。",
+  "version": "2.2.0",
+  "notes": "v2.2.0：运营三页塌缩成一页「检查」，四个页面按你的处境命名——技能库、添加技能、检查、设置。检查页只留四类真待办（等你点头、有危险写法、装了用不了、叫不动），平时是空的。档位改叫自动 / 点名才用 / 关掉。三语翻译补齐并加闸。",
   "download": "https://github.com/shoumunan/skill-atlas/releases/latest",
-  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.1.3/Skill.Atlas-2.1.3.dmg",
-  "sha256": "e228aa75d3ec820fff0dba55cd7b2ff8231d68474938e5b4be8127fd7585bd12"
+  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.2.0/Skill.Atlas-2.2.0.dmg",
+  "sha256": "f1601a70686a6d870d94cf2e580ac4bdbd8e095c992624d7617791873092460a"
 }
