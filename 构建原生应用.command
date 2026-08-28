@@ -19,6 +19,8 @@ mkdir -p "$APP_BUNDLE/Contents/Resources/logos"
 cp "$APP_DIR"/native/Resources/logos/*.svg "$APP_BUNDLE/Contents/Resources/logos/"
 # 栅格版品牌标（WorkBuddy 等 CoreSVG 渲染不了的 SVG 用 PNG 替身）
 cp "$APP_DIR"/native/Resources/logos/*.png "$APP_BUNDLE/Contents/Resources/logos/" 2>/dev/null || true
+# 使用手册（应用内帮助与仓库同一份，WP-H 同构纪律）
+cp "$APP_DIR/docs/handbook.md" "$APP_BUNDLE/Contents/Resources/handbook.md"
 # 多语言资源（en/ja/ko；中文是开发语言无需 lproj）
 rm -rf "$APP_BUNDLE/Contents/Resources/"{en,ja,ko}.lproj
 for lang in en ja ko; do

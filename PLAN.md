@@ -1,8 +1,8 @@
-# Skill Atlas 2.0 · 完整实施方案（设计 + 技术路线 + 工作包）
+# Skill Atlas 2.1 · 完整实施方案（五名词工作台）
 
-版本 2026-08-26。本文档是**派发给实施 agent 的唯一开工依据**：每个工作包（WP）自带范围、改动文件、实现要点、验收命令和开工提示词。战略论证见 `ROADMAP.md`（不必读也能施工）；视觉与交互规范以 `DESIGN.md` 为法律，本文只做增量。
+版本 2026-08-27。本文档是**派发给实施 agent 的唯一开工依据**。战略论证见 `ROADMAP.md`（2.1 版），视觉与交互规范以 `DESIGN.md` 为法律（v15 章优先）。2.0 的实施方案已归档 `docs/history/plan-2.0.md`——其中 **§4 数据契约（CLI 信封、退出码、文件格式、URL scheme）在 2.1 继续冻结有效**，本文只写增量，不重抄。发版号 **2.1.0**：引擎、CLI 命令面、数据文件格式全部向后兼容，只有 GUI 结构重排，semver 上就是 minor。
 
-**给实施 agent 的三句话**：① 先读 §7 全局护栏，那是禁令，违反即返工；② 你的 WP 只做自己范围内的事，接口按 §4 数据契约走，不要顺手重构别人的区域；③ 完成定义（DoD）在 §6 每个 WP 末尾，探针跑绿才算完。
+**给实施 agent 的三句话**：① 先读 §7 全局护栏，违反即返工；② 你的 WP 只做自己范围内的事，接口按 §4 契约走，不要顺手重构别人的区域；③ 每个 WP 的 DoD 在 §6 末尾，探针跑绿才算完。
 
 ---
 
@@ -10,307 +10,250 @@
 
 ### 1.1 一段话诊断
 
-本机实测（2026-08-26）：134 个技能、108 个挂 Claude，每个会话开场注入约 2.8 万字符（≈1.5–2 万 token）技能清单；32 个技能从未被用过；真正解决这笔税的 Profiles、实时遥测 Hook、单技能沙箱**全部已建成但没有入口或没人用**。产品把「人打开窗口」当前提，而技能的真实操作者是 agent、真实场景在终端会话里。2.0 的主题：**换插座**——把已有引擎接到 agent 一侧和事件一侧；GUI 保留并继续按 DESIGN.md 的质量标准演进（同类竞品的设计不满足本项目要求，功能重叠不是问题）。
+2.0 的引擎与 agent 通道全部达标（CLI 15 命令在线、瘦身后账单 7,723 tok ≤ 8,000、hook 已装、miss 检测在跑），但面板仍然没有存在理由：能力被塞进两页导航的缝隙里——供给藏在工具栏菜单、运维（本机实测 10 个挂载问题 + miss + 触发重叠）藏在设置折叠组、创作线藏在详情页深处；同时 LibraryView 里躺着约 380 行死代码、11 组重复入口、`skillOverrides` 有两个语义不一致的写者。2.1 的主题：**发地址**——五个名词（技能库 / 发现 / 供给 / 收件箱 / 创作）+ 设置，每页对应手册里的一条工作流，高频动作距启动 ≤2 次点击（DESIGN v15 入口层级表）；引擎不新造，只归位。
 
-### 1.2 定位与三个 surface
+### 1.2 定位
 
-**技能供给与运维层（skill ops）**，三个 surface 取代「页面」作为组织单位：
+技能供给与运维层（skill ops）。三 surface 模型继续有效：Agent surface（CLI + meta-skill + 深链）与 Ambient surface（hook + 通知 + 菜单栏）形态不变；Workbench 从「两页 + 堆填」重排为「五名词 + 设置」（六项侧栏、分两组）。
 
-| Surface | 载体 | 职责 |
-|---|---|---|
-| Agent surface（新增） | `atlas` CLI + meta-skill + URL scheme | agent 在会话内搜/装/停/诊断/沉淀；人只做审批 |
-| Ambient surface（升级） | Hook 遥测 + 系统通知 + 菜单栏 ⌥⌘K | 有事主动找人：miss、安全命中、可更新 |
-| Workbench surface（收缩） | 主窗口（保持 v13 两页导航，永不加页） | 审批台 + 调优台 + 盘点台 |
+### 1.3 北极星指标
 
-### 1.3 北极星指标与测量口径
+沿用 2.0 三个（每会话技能上下文成本 / miss 修复闭环时长 / agent 经由 atlas 的操作数），新增：
 
-1. **每会话技能上下文成本**（token）：`ContextDoctor` 估算口径（CJK×0.7 + 其他/4 + 每技能 15 开销），目标：主力场景 ↓60%（2 万 → 8 千内）。
-2. **miss 修复闭环**：检出「有对口技能未触发」→ 处方 → 再命中的周期；数据源 usage-index + oplog。
-3. **agent 经由 atlas 完成的操作数**：oplog 中 `actor:"cli"` 的条数。
+4. **收件箱周清零率**：新检出事项 7 天内被裁决（批准 / 修复 / 忽略均算，必须留 oplog 回执）的比例。
 
-### 1.4 人物验收（沿用 DESIGN.md 风格，新增一条）
+### 1.4 人物验收（DESIGN v15 章为准）
 
-- 既有人物（第一次使用的人 / 遇到问题的人 / 技能很多的人 / 无障碍用户）全部保留。
-- **新增「不打开窗口的人」**：一整周不开主窗口，技能照常被搜、被装（关键级安全命中除外）、被修、被沉淀。
+每周开一次面板的人 / 不打开窗口的人 / 半年后的自己 / 无障碍用户。
 
 ---
 
-## 2. 总体架构
+## 2. 结构变化
 
-### 2.1 目标结构（native/）
-
-```
-native/
-  Package.swift            # 3 个 target（见 ADR-1）
-  swift/
-    core/                  # AtlasCore：纯 Foundation，禁 import SwiftUI/AppKit
-      Atlas.swift Scanner.swift SecurityScan.swift TriggerLab.swift
-      Doctor.swift DescriptionRx.swift Usage.swift HookTelemetry.swift
-      Profiles.swift Registry.swift Sandbox.swift Installer.swift
-      CoreModels.swift     # 从 Models.swift 拆出的数据结构（无 Color）
-      L10nCore.swift       # L()/LF() + bundle 逻辑（Foundation 版）
-      Oplog.swift AtlasLock.swift PendingReview.swift MissDetect.swift  # 新增
-    cli/                   # atlas 可执行
-      main.swift Commands/*.swift JSONOut.swift
-    app/                   # SkillAtlas.app（现有其余文件全部搬入）
-      Store.swift RootView.swift LibraryView.swift … Theme.swift
-      ModelsUI.swift       # Categories 颜色映射等 UI 元数据
-```
-
-### 2.2 数据流（新增部分加粗）
+### 2.1 导航与文件
 
 ```
-终端会话(agent) ──调用──▶ atlas CLI ──flock──▶ ~/.skill-atlas/*（库、catalog、软链）
-      ▲                      │写 oplog.jsonl
-      │meta-skill 教路       │关键级安全命中 → pending-reviews/<token>.json
-      │                      └─deep link: skillatlas://review/<token> ─▶ App 审阅 sheet
-Claude/Codex 转录 ──UsageIndexer 回扫──▶ usage-index(v4, 含首轮 prompt)
-PostToolUse hook ──追加──▶ usage-events.jsonl（实时主源，回扫降为回填）
-usage + TriggerLab ──▶ MissDetect ──▶ 系统通知/维护区 ──▶ DescriptionRx 处方
-App(FSEvents) 观察一切外部改动 ──▶ rescan 自愈
+NavPage（Store.swift:8 起）：.library .discover .supply .inbox .studio .settings（⌘1–⌘6；侧栏分组：库=技能库/发现，运营=供给/收件箱/创作，底部=设置）
+新增文件：
+  app/SupplyView.swift   app/SupplyStore.swift
+  app/InboxView.swift    app/InboxStore.swift
+  app/StudioView.swift   app/StudioStore.swift
+  app/DiscoverView.swift app/DiscoverStore.swift   # InstallView 升格（六阶段安装机保留为页内流程）
+  core/Supply.swift      # 唯一的 skillOverrides 写入口（合并 ProfileWriter.apply 与 SlimPlanner.apply 的写路径）
+  core/Inbox.swift       # 聚合器 + inbox-state.json 读写
+  docs/handbook.md       # 手册（§5-H）
+迁走/删除：
+  MaintenanceView.swift 内容解散进 InboxView（文件最终删除）
+  ProfileView.swift 的管理/应用 sheet 移入 SupplyView 语境
+  SupplyChrome.swift 的 ProfileSwitcher/ContextBillChip 移居供给页
+  LibraryView.swift 死视图 9 个（§6 WP0 点名）删除
+  BeginnerLoop.swift 删除（StarterSkill/OpenHostButtons 若 Onboarding 仍引用则内联搬入 RootView）
 ```
 
-### 2.3 CLI 的分发方式
+### 2.2 数据流增量
 
-`atlas` 二进制随 .app 打包在 `Contents/MacOS/atlas`。**meta-skill 由 App 生成时把绝对路径写死进 SKILL.md**（如 `/Applications/Skill Atlas.app/Contents/MacOS/atlas`），agent 零配置可用，不依赖 PATH。App 启动时检测自身路径变化则重新生成 meta-skill。人类用户可在设置里一键装 `~/.local/bin/atlas` 软链（可选）。自更新换装整个 .app，CLI 随之更新，软链路径不变。
+```
+doctor/security/usage/miss/updates/pending-reviews ──▶ core/Inbox.aggregate() ──▶ InboxItem[]
+                                                          │ 裁决/忽略 ──▶ inbox-state.json + oplog
+系统通知 / 菜单栏「有事」──▶ skillatlas://inbox/<id> ──▶ InboxView 定位条目
+SlimDraftSheet / TierSegment / ProfileApply ──▶ core/Supply.write() ──▶ skillOverrides（唯一写者）
+```
 
 ---
 
-## 3. 技术路线决策记录（ADR）
+## 3. 技术路线决策记录（ADR，编号接 2.0）
 
-### ADR-1 三 target 拆分，swiftc 兜底路径同步改造
+### ADR-9 六项封顶，页面准入 = 手册工作流
 
-**决定**：`Package.swift` 改为 `AtlasCore`（library）+ `atlas`（executable）+ `SkillAtlas`（executable，依赖 FluidGradient）。`构建原生应用.command` 的 swiftc 兜底改为两次编译：app = `swift/app/*.swift swift/core/*.swift vendor/FluidGradient/...`；cli = `swift/cli/*.swift swift/core/*.swift`（均 `-swift-version 5 -target arm64-apple-macos14.0`）。
-**理由**：12 个引擎文件今天就是纯 Foundation（已实测 grep），拆分阻力极小；CLI 与 App 共享同一套引擎代码，逻辑永不漂移。
-**被否**：CLI 用 Go/Rust/Node 另写（逻辑双份必然漂移）；只做 App 内 XPC/AppleScript 接口（agent 侧不通用）。
-**坑**：`Models.swift` 现在 import SwiftUI（分类颜色），必须拆成 `core/CoreModels.swift`（数据）+ `app/ModelsUI.swift`（颜色/图标映射）；`L10n.swift` 同理拆 `L10nCore.swift`；`Launcher.swift` 里的 `GitSync` 暂留 app 侧（CLI v1 不需要）。CI 加 grep 门禁：core/ 下出现 `import SwiftUI|AppKit` 即 fail。
+**决定**：侧栏固定六项、分两组（库：技能库 / 发现；运营：供给 / 收件箱 / 创作；底部：设置）。任何新能力先回答「属于 docs/handbook.md 哪条工作流的哪一步」，答不出就不做界面，最多做 CLI 子命令。配套铁律：**高频动作距启动 ≤2 次点击；折叠组只许藏解释，不许藏动作**（DESIGN v15 入口层级表逐项验收）。
+**理由**：v13「永不加页」防的是页面蔓延，但把真实能力逼进了缝隙；准入标准从「页面数量」换成「工作流可写性」，同时防蔓延与堆填。「发现」独立成页学自 skills-manager 的界面分布——安装/发现是它的一级入口（InstallSkills 独立 view），不是库页的一个按钮。
+**被否**：回到两页（能力无地址，本轮病根）；按引擎开页（引擎是实现单位不是用户名词）；发现塞进技能库做 tab（「我有的」与「我没有的」杂糅，正是本轮主诉）。
 
-### ADR-2 CLI 零第三方依赖，手写参数路由
+### ADR-10 收件箱 = 渲染时聚合，不建新采集面
 
-**决定**：不引 swift-argument-parser，手写 ~150 行命令路由。
-**理由**：swiftc 兜底路径是 `*.swift` 通配直编，无法解析 SPM 依赖；vendor 一份 argument-parser 体积和维护都不划算。CLI 命令面窄（十几个子命令），手写足够。
-**被否**：swift-argument-parser（破坏兜底构建）；忽略兜底路径（release.yml 依赖它过 CI 的历史在案）。
+**决定**：`core/Inbox.aggregate()` 在扫描后把九类事项（待审批 / 安全关键 / 安全警告 / 挂载失效 / miss / 可更新 / 触发重叠 / 介绍超长 / Rx 回访）映射为统一 `InboxItem`；唯一新增持久化是 `inbox-state.json`（裁决与忽略记录）。不建数据库、不建后台队列。
+**理由**：九类数据源全部已存在（Doctor / SecurityScan / PendingReviews / MissDetect / UpdateChecker / RxFollowup），缺的是统一出口；聚合是纯函数，可探针。
+**坑**：条目 id 必须内容寻址（kind + target + 内容摘要），否则重扫后忽略记录失配；已裁决条目消失要有回执，不能默默蒸发。
 
-### ADR-3 meta-skill 优先，MCP server 后置
+### ADR-11 skillOverrides 单写者
 
-**决定**：agent 集成第一步是一个由 App 自动生成并挂载到所有平台的技能 `skill-atlas`（教 agent 用 CLI），不先做 MCP server。
-**理由**：meta-skill 半天工作量，发布即覆盖所有支持 Agent Skills 的平台；MCP server 要求用户逐平台配置，收益重叠度 90%。
-**触发再评估**：当出现「无 shell 权限的宿主」成为主要场景时再做 MCP（stdio 包 CLI 即可）。
-**规格**：description ≤120 字符（自己不交税）；frontmatter 带 `metadata: {managed-by: skill-atlas, version: <app版本>}`；catalog 记录加 Optional 字段 `managed: true`；Profiles 排除逻辑永远跳过它；UI 显示「固定」徽标不可停用（可卸载 App 时清理）。
+**决定**：新建 `core/Supply.swift` 作为唯一写入口；`ProfileWriter.apply` 与 `SlimPlanner.apply` 的写 settings 路径全部改为调用它（读与算不动）。备份、坏 JSON 拒写、只动自己的键、meta-skill 永不排除四条纪律在此集中执行。
+**理由**：两个写者语义已经分叉（profile 只能给全体非成员一个排除档，slim 是逐技能三档），继续分叉必出脏写；供给页要做逐技能改档，必须先有单写者。
+**被否**：在 UI 层协调两个写者（治标）；把 profile 机制废掉只留 slim（场景包对「新项目配供给」工作流仍是正确抽象）。
 
-### ADR-4 审批闭环 = pending-review 文件 + URL scheme + 内容寻址批准
+### ADR-12 CLI 冻结面不动
 
-**决定**：CLI 安装遇关键级安全命中：写 `pending-reviews/<token>.json` → 退出码 3 + stdout 输出深链 `skillatlas://review/<token>` 与人话指引 → 人在 App 审阅（复用既有强制审阅 UI）→ 批准写入 `approvals.json`（键 = sha256(repo@commit/技能子目录)，内容寻址）→ agent 重跑同一条 `atlas install` 命中批准放行。
-**理由**：内容寻址使「上游偷偷改代码」自动失效批准；文件握手无需 IPC/守护进程；agent 的重试语义天然幂等。
-**被否**：CLI 内交互式 y/N（agent 会代答，破坏「人批准」）；App 轮询队列自动装（人不在场）。
-**依赖**：App 需注册 `CFBundleURLTypes`（scheme `skillatlas`，现在没有任何 URL scheme）。路由：`review/<token>`、`skill/<name>`、`profile/<name>`。
+**决定**：2.1 不改任何既有命令的名字、参数、信封、退出码；meta-skill 文案仅作勘误（「WP5 之后」已删，本次已改 `MetaSkill.swift:78`）。供给页 / 收件箱的 GUI 语义映射到既有 `profile / slim / enable / disable / doctor / review` 之上。允许的增量只有一个可选项：`atlas doctor --inbox-json`（输出 InboxItem 数组，给探针与未来菜单栏用），放 WP-I 末尾，做不完可砍。
+**理由**：agent 是一等用户，CLI 是它的 ABI；面板重排是 GUI 的事，不许波及会话侧。
 
-### ADR-5 状态一致性 = flock 互斥 + oplog + FSEvents 自愈
+### ADR-13 供给页的项目范围 P0 只做绑定，不做扫描
 
-**决定**：所有写库操作（CLI 与 App 共用）包在 `~/.skill-atlas/.lock` 文件锁里（O_EXCL + pid，>120s 且 pid 已死视为陈锁可抢，CLI 等待 5s 后退出码 6）；每次变更追加 `oplog.jsonl`；App 靠既有 FSEvents → rescan 感知外部改动，不做推送通道。
-**理由**：两个写者（App、CLI）一个真源（文件系统），锁 + 重扫已充分；守护进程/socket 是过度设计。
-**被否**：SQLite（134 个技能量级 JSON 足够，且 atlas.json 向后兼容纪律已建立）；XPC。
+**决定**：项目范围的数据源 = `profiles.json` 的 bindings + 手动添加的项目目录（新 Optional 字段 `projects:[{path, addedAt}]`）；页面展示绑定的场景包、最近一次应用回执、打开 `settings.local.json` 所在目录。**不扫描**项目内 `.claude/skills`。
+**理由**：项目目录扫描牵动 Scanner 与数据模型（audit 确认现在完全不存在），是 P2 的事；P0 先把「给新项目配供给」工作流走通，靠 `atlas profile apply --project` 的既有机制。
+**诚实边界**：档位只影响 Claude；Codex 项目机制维持 2.0 未决。
 
-### ADR-6 miss 检测走转录回扫，不新增数据采集面
+### ADR-14 AppStore 只准瘦不准胖
 
-**决定**：UsageIndexer 升 v4：每个 Claude/Codex 会话额外提取**首轮用户消息前 500 字符**存入 usage-index；MissDetect 对近 7 天会话跑 `TriggerLab.simulate(firstPrompt)`，第一名得分 ≥θ、已挂载、可被模型触发、且不在该会话已用技能集合 → 计一次 miss；同一技能 ≥2 次才进周报（噪音地板）。
-**理由**：转录本来就在本机、UsageIndexer 基建现成；不需要新 hook、不扩大采集面（500 字符上限、纯本地、gitignore 已覆盖）。
-**诚实边界**：「模型考虑过但没选」不可观测；miss 定义收窄为「应触发而未触发」。user-invocable-only 的技能 miss 文案改为「可以用 /名字 调用」。
-**参数**：`MissRules { minScore, minOccurrences = 2, windowDays = 7, digestCap = 3 }` 集中一处，夹具调参。
+**决定**：三个新页各建自己的 `@Observable` store（SupplyStore / InboxStore / StudioStore），依赖 AppStore 提供的扫描结果与动作入口；`Store.swift` 不再新增成员，迁出维护区相关状态后行数必须下降。
+**理由**：2,115 行 90 成员的上帝对象是每次重构的阻力来源；这次趁页面重排把边界立起来，但不做大爆炸拆分（风险不成比例）。
 
-### ADR-7 供给三档：机制验证优先，物理软链兜底
+### ADR-15 市场只是发现层，信任只来自本地扫描
 
-**决定**：三档 = 完整挂载 / 仅用户可调（描述不进清单）/ 不挂载。「仅用户可调」的实现按顺序验证：
-1. **首选** `skillOverrides`（Profiles.swift 已在写，键值 `"user-invocable-only"`/`"off"`）——WP3 第 0 项任务是用沙箱基建写探针实证当前 Claude Code 真的认这个键（隔离 `CLAUDE_CONFIG_DIR` + 两个假技能 + `claude --print` 问技能清单，断言被 off 的不在）。
-2. **兜底** 若失效：向 SKILL.md frontmatter 写 `disable-model-invocation: true`（Agent Skills 标准字段，DescriptionRx.writeBack 的 YAML 写回基建现成），写前走 SkillBackup 快照。
-项目级供给 = `<project>/.claude/skills/` 物理软链集合（原生机制，必然有效）+ 项目 `settings.local.json` 覆盖（既有 ProfileWriter 能力）。
-**理由**：全局瘦身必须能「移除全局层的描述税」，纯加法的项目目录做不到，所以两条腿。
-**诚实边界**：skillOverrides 只影响 Claude；Codex 供给靠软链集合差异，二期调研其项目级机制。
+**决定**：多源市场接入统一走 `SourceAdapter` 协议（`core/Sources.swift`）：每个源提供 `search(query)` 与 `featured()`，结果携带 `installRef`（github-repo / zip-slug / webpage 三型）。安装一律汇入既有管线（clone 或 zip 解包 → SecurityScan → 关键级审批 → 入库）；市场侧的「已审核 / 评分 / 企业认证」只作展示元数据，**不减免任何一道本地门**。默认源集：skills.sh（现有）、SkillHub（腾讯，新）、用户自加的 Claude 原生 marketplace.json 仓库、anthropics/skills 官方精选。SEO 型目录站不接。
+**理由**：实测 SkillHub 上腾讯官方的 tencent-docs 包内就有 20KB `setup.sh`——恰是本地扫描的目标类；市场审核口径不可审计，评分可刷。发现与信任解耦后，加一个源的成本 = 一个适配器文件。
+**被否**：只接单一聚合器（单点依赖，且 skills.sh 覆盖不了国服企业技能）；信任市场审核跳过扫描（见上）；自建技能目录（运营成本，非本产品差异化）。
 
-### ADR-8 明确不做（本期）
+### ADR-16 zip 安装通道与归档寻址审批
 
-守护进程 / 常驻 HTTP 服务（App 已常驻 + 文件真源足够）；SQLite；MCP server（见 ADR-3）；技能内容的 LLM 生成（`atlas new` 只做 scaffold + 交给宿主 agent 写内容——LLM 就在旁边，不要在 App 里再塞一个）；跨机实时同步（GitSync 手动路线维持）。
+**决定**：`Installer` 增加 zip 分支：下载（跟随 302 至对象存储）→ 临时目录落盘 → 计算 sha256 → 解包（**防 zip-slip：拒绝 `../`、绝对路径、符号链接条目**）→ detect → SecurityScan → 关键级写 pending-review，**审批键 = sha256(archive)**（与 repo@commit 同一内容寻址语义：换版本即失效）→ clonefile 入库。catalog 记录增 Optional 字段 `sourceKind` 与 `sourceVersion`。更新检查 = 轮询源 API 的 version 字段，新版本下载后本地 diff，复用 UpdateReviewSheet。
+**坑**：SkillHub 下载 302 到 `*.myqcloud.com`（腾讯 COS），网络白名单要写两条域且都挂在来源开关下；zip 无 commit 历史，回滚全靠既有 SkillBackup 快照；`requires_api_key` 标签必须装前展示，不许装完才发现要注册账号。
 
 ---
 
-## 4. 数据契约（跨 WP 接口，先于实现冻结）
+## 4. 数据契约（先冻结再施工）
 
-### 4.1 CLI 通用约定
+### 4.1 InboxItem（core/Inbox.swift）
 
-- 全局参数：`--json`（机器模式：stdout 恰好一个 JSON 对象，人话与进度全走 stderr）；`ATLAS_HOME` 环境变量覆盖 `~/.skill-atlas`（探针/测试用，等价 App 的 `-atlasHome`）。
-- **退出码总表**：0 成功；1 一般错误；2 参数/用法错误；3 需要人工审批（安全）；4 网络/git 失败；5 冲突（同名/占位）；6 库被锁；7 目标不存在。
-- `--json` 信封：`{"ok":bool,"code":int,"op":"<子命令>","data":{…},"error":{"message":"…","hint":"…"}|null}`。
-- 子命令与 data 载荷（v1 冻结面）：
-
-| 命令 | data 要点 |
-|---|---|
-| `atlas list [--platform p] [--json]` | `skills:[{name,dir,desc≤120,platforms:{claude:bool,…},origin,disabled,updateAvailable,usage:{sessions,last}}]` |
-| `atlas search <q> [--remote]` | 本地库匹配 + `--remote` 追加 skills.sh（沿用 Registry.search 与其超时/置灰规则） |
-| `atlas info <name>` | 全量单技能：描述、触发词、`bill` 字符/token、安全 findings 摘要、路径 |
-| `atlas install <github-url\|owner/repo\|本地路径> [--platforms a,b]` | 成功：装了什么、挂到哪；code 3：`{reviewToken,reviewURL,findings:[…]}` |
-| `atlas enable\|disable <name> [--platform p]` | 改后的 platforms 映射；缺 `--platform` = 按 PreferredPlatforms |
-| `atlas simulate "<句子>"` | TriggerLab 前 8 名 `[{name,score,hits,risks}]` |
-| `atlas doctor` | DoctorReport + 挂载失败 + 安全汇总 + 触发重叠 top |
-| `atlas bill [--platform claude]` | `{total:{chars,tokens},perSkill:[{name,chars,tokens,tier}]}` |
-| `atlas profile list\|show\|apply <name> [--project DIR]` | apply 返回写了哪个文件、排除了几个 |
-| `atlas new <name> [--from-clipboard]` | scaffold 路径 + 下一步提示（含沙箱命令） |
-| `atlas sandbox <name>` | materialize 后输出可复制的启动命令（不 AppleScript 开终端——agent 自己就在终端里） |
-| `atlas review list` | pending-reviews 摘要（批准只能在 GUI） |
-| `atlas paths` / `atlas version` | 诊断用 |
-
-v1 **不提供** `uninstall` 与批量停用（破坏性，走 GUI）。
-
-### 4.2 新增文件格式（都在 `~/.skill-atlas/`）
-
-- `oplog.jsonl`：每行 `{"ts":unix,"actor":"cli"|"app","op":"install|enable|disable|profile-apply|rx-writeback|new|update|rollback","target":"<dir>","ok":bool,"detail":"…"}`。CLI 每次变更必写；App 在 Store 的动作入口写。轮转：>2 MB 时截半。
-- `pending-reviews/<token>.json`：`{token, createdAt, source:{url,branch,commit}, candidates:[{dir,name,desc}], findings:[{severity,rule,file,line,excerpt}], requestedBy:"cli"}`；token = sha256(url+commit+dirs) 前 12 位十六进制。
-- `approvals.json`：`{"version":1,"entries":{"<sha256(repo@commit/dir)>":{"approvedAt":ts}}}`。
-- `usage-index.json` 版本 3→4：Claude/Codex 每会话新增 `"firstPrompt":"≤500字符"`。版本升级 = 全量重建（实测 3.7s，可接受）。
-- `atlas.json`：新增字段一律 Optional（`managed:Bool?` 等）。**这是红线**，见 Atlas.swift:124-127 的数据毁灭警告。
-- meta-skill：库内目录 `skill-atlas/SKILL.md`，App 每次启动校验（路径变化/版本变化→重生成）。
-
-### 4.3 通知与 URL scheme
-
-- scheme `skillatlas`，路由 `review/<token>`、`skill/<name>`、`profile/<name>`；Info.plist 加 `CFBundleURLTypes`；SwiftUI `onOpenURL` 进 Store 路由（复用 `-atlasSelect` 既有选中逻辑）。
-- 通知走 `UNUserNotificationCenter`，类别：miss 周报（每周一次，≤digestCap 条）、安全复扫命中（即时）、可更新聚合（每日至多一次）。全部有设置开关，默认只开安全。
-
----
-
-## 5. 功能规格摘要（细节见各 WP）
-
-**A. Agent 通道**：§4.1 的 CLI 冻结面 + meta-skill（正文含：什么时候用哪个子命令、`--json` 契约、安全规则「凡 code 3 必须把 reviewURL 转告用户并停下等待，不得改用其他安装途径绕过」、两个完整示例对话）。
-**B. 供给层**：Profile 从设置→进阶提为库页一等公民（工具栏 profile 切换菜单 + 当前生效名）；「瘦身草案」= 按 usage 自动分档（≥K 次会话或收藏 → 完整；用过但稀少 → 仅用户可调；90 天未用 → 建议停用），人工逐条确认后应用；上下文账单 chip 常驻工具栏（点击开草案 sheet）。
-**C. 遥测与 miss**：Hook 首跑主动询问（一次性 sheet，列明只采 `{skill,ts,session}` 本地三元组）；hook 数据转正为主源（`mergeHookStats` 优先级翻转）；MissDetect 按 ADR-6；维护区新增「本周 miss」组，行动作 = 打开 PrescriptionSheet。
-**D. 创作线**：`atlas new` scaffold（frontmatter 模板 + 触发三元组注释引导）→ 提示沙箱试跑命令 → 首次触发验证 `atlas simulate`；GUI 侧把孤儿沙箱接线（详情→更多设置→管理区加「沙箱试跑」按钮，复用 `requestSandbox` 既有流程）；DescriptionRx 写回后 oplog 记录，两周后维护区展示前后触发次数对比。
-**E. GUI 运营页（详情重组）**：v13 阅读顺序不动（名称→同步开关→复制调用语/打开软件→警示→用途→何时→示例），「更多设置」内新增运营区块：触发趋势迷你图（hook 按周聚合，Swift Charts）、上下文成本（既有）、触发模拟入口、安全区（既有）。注意：**「最近产出」不做**——OutputLinker 已在历史重构中删除，不复活（P2 再议）。
-**F. 卫生**：删 `server.py`/`app.js`/`styles.css`/`index.html`；`docs/acceptance.md` 标注为历史存档并挪 `docs/history/`；`docs/acceptance/budget.json` 删 `listingSoftCap`；`Skill` 的 mount 统一为 `[Platform: Mount]` 字典（清掉 claude/codex 特权字段与 Summary 冗余）；SelfUpdater 下载改落盘流式；`visiblePlatforms` 改设置项。
-
-### 5.7 设计增量（实施后并入 DESIGN.md 作 v14 章）
-
-| 原语 | 职责 | 必备状态 |
-|---|---|---|
-| `ApprovalSheet` | 承接 agent 发起的安装审阅（复用安全审阅骨架 + 来源徽标「来自会话」） | 待审、已批准、已拒绝、来源失效(commit 变更) |
-| `ContextBillChip` | 工具栏常驻账单数字 | 正常、超标(>1万tok 变琥珀)、计算中 |
-| `ProfileSwitcher` | 工具栏 profile 菜单 | 无 profile、生效中、应用中、应用失败 |
-| `SlimDraftSheet` | 瘦身草案逐条确认 | 草案、逐条覆写、应用中、完成回执 |
-| `MissCard` | 维护区 miss 条目 | 新检出、已开处方、已修复(命中回升)、已忽略 |
-| `TrendMini` | 详情页触发趋势 | 有数据、数据不足(<2周)、hook 未开启(引导) |
-| 通知文案 | 一句话事实 + 一个动作，禁警报腔 | — |
-
-全部沿用 Theme.swift 令牌：不新增字号/颜色/间距；一屏一个强调色主按钮的既有铁律不变；agent 来源操作在确认框与 oplog 视图带「会话」徽标。
-
----
-
-## 6. 工作包（派发单元）
-
-依赖图与泳道：
-
-```
-泳道A(基建):  WP0 ──▶ WP1 ──▶ WP2
-泳道B(供给):  WP7a(Mount统一) ──▶ WP3 ──▶ WP6
-泳道C(数据):  WP4 ──▶ WP5（WP5 的 CLI 子命令等 WP1 合入）
-WP7b(其余卫生) 随时可做
+```json
+{
+  "id": "security:fund-tools:9f3a…",      // kind:target:sha256(摘要)[0..8]，重扫稳定
+  "kind": "approval|security_critical|security_warning|mount|miss|update|overlap|overlong|rx",
+  "severity": 0,                            // 0 挡住使用 / 1 建议处理 / 2 整理
+  "skill": "fund-tools",                  // 可空（approval 用 token）
+  "title": "一句话事实",
+  "detail": "四要素：发生了什么/影响什么/建议怎么做/按钮去哪",
+  "actions": ["approve|open_diff|prescribe|slim|toggle|reveal|ignore"],
+  "deepLink": "skillatlas://inbox/security:fund-tools:9f3a…"
+}
 ```
 
-三条泳道可并行；估算合计 19–26 agent 天，三泳道并行约 2 周。
+排序：severity 升序 → kind 固定序（approval 最先）→ 检出时间。`digestCap` 等阈值沿用 MissRules，不另立一套。
+
+### 4.2 inbox-state.json（~/.skill-atlas/）
+
+```json
+{ "version": 1,
+  "decisions": { "<id>": { "action": "approved|fixed|ignored", "at": 1724740000 } } }
+```
+
+新字段一律 Optional（护栏 §7-1 同款血泪史）。忽略的条目在同 id 复现时不再进队列，但 kind=security_critical 永不因忽略而消失（安全不许静音）。
+
+### 4.3 URL scheme 增量
+
+既有 `review/<token>`、`skill/<name>`、`profile/<name>` 不动；新增 `inbox`（打开页）、`inbox/<id>`（定位条目）、`supply`、`supply/<scope>`（scope = 平台名或项目路径 base64）、`discover`。`-atlasPage` 启动参数同步支持 `discover|supply|inbox|studio`。
+
+### 4.4 core/Supply 写接口（语义约定）
+
+单入口接受「逐技能三档 map + 来源（slim 草案 / 场景包应用 / 单技能改档）+ 目标 scope（用户级 / 项目级）」，内部完成：备份 → 合并写 → 回执（前后 token 数）→ oplog。任何调用方不得自行拼 settings JSON。
 
 ---
 
-### WP0 · 核心层拆分与构建改造（2–3 天）【阻塞一切，最先做】
+## 5. 功能规格摘要
 
-**目标**：三 target 结构落地，两条构建路径全绿，CI 门禁上线。
-**改动**：`native/Package.swift`（3 target）；`swift/` 按 §2.1 分目录搬文件；拆 `Models.swift` → `core/CoreModels.swift` + `app/ModelsUI.swift`；拆 `L10n.swift` → `core/L10nCore.swift`（L/LF/查表）+ `app/L10n.swift`（AppLanguage/界面）；`构建原生应用.command` swiftc 兜底改两次编译并把 `atlas` 拷入 `Contents/MacOS/`；`打包DMG.command` 无需改（打包整个 .app）；新增 `.github/workflows/ci.yml`（push/PR：xcode-select 16.2 → `swift build` 两 target → core 目录 `grep -L` UI 框架门禁 → 跑 `tests/acceptance.sh` 骨架）。
-**要点**：搬文件用 `git mv` 保历史；`@Observable`（Observation 框架）允许留在 core（Foundation 同级）；`Launcher.swift` 拆开——AppleScript 部分留 app，`GitSync` 留 app；编译两路都要在**本机与 CI** 各过一次（release.yml 的 Xcode 16.2 / actor 隔离差异有历史教训，见构建脚本注释）。
-**验收**：`swift build -c release` 产出两个二进制；`./构建原生应用.command` 在删掉 `.build` 后仍成功且 `Contents/MacOS/atlas --version` 有输出（临时硬码版本即可）；CI 绿。
-**开工提示词**：`读 PLAN.md §2.1、§3 ADR-1/2、§6 WP0、§7。执行 WP0：三 target 拆分。不改任何业务逻辑，纯搬移+拆分+构建脚本。完成后跑验收命令并贴输出。`
+**S. 供给页**：左 `ScopeRail`（visiblePlatforms 内的平台 + 项目列表 + 添加项目）；右侧按 scope 展示：账单头（ContextBillChip 迁居于此，含估算标注）、场景包 `PresetChip` 行（✓/部分计数/一键应用与撤下，走 Supply 单写者）、三档分组列表（core / 仅用户可调 / off，行内 `TierSegment` 逐技能改档）、「瘦身草案」入口（SlimDraftSheet 原样复用，应用后 `ReceiptLine` 报前后数字）。非 Claude 平台的 scope 只有挂载二态与批量开关，档位控件显示「不适用」。
+**I. 收件箱**：ADR-10 聚合；v12 行动中心骨架（主任务卡四要素 + 纵向「接下来」+ 完成绿反馈 + 清零态）；侧栏徽标 = 未裁决数；九类条目的动作分别接既有机制（ApprovalSheet、UpdateReviewSheet、PrescriptionSheet、TierSegment、Finder reveal）；设置 → 通知的三个开关语义不变，通知点击深链进条目。技能库的 `UpdatesBanner` 与 `PendingReviewChip` 移除，可更新与待审只在收件箱与侧栏徽标出现。
+**L. 技能库**：死代码清除后，行角标升级为 `TierDots`（点按切换挂载，Claude 列半亮表达中间档）；详情页按 DESIGN v15 重排 CTA（档位与挂载控件上移，复制调用语降次级）；`UsageSection` 与 `TrendMiniSection` 合并为一个「使用」区（hook 为主源、转录回扫补历史，2.0 的合并优先级翻转在此落地）；多选（NSTableView allowsMultipleSelection）+ 批量启停/收藏/停用。
+**D. 创作页**：纵向步进四步——① scaffold（`atlas new` 的 GUI 面，含 --from-clipboard）→ ② 沙箱试跑（复活 requestSandbox 流程，展示 Sandbox.swift 四条注意事项）→ ③ 触发验证（TriggerTrySection 复用，目标「说哪句话能唤到它」排第一）→ ④ 两周回访（RxFollowup 对比卡）。PrescriptionSheet 从这里与收件箱两处可达。
+**M. 发现页（导入与多源发现）**：InstallView 升格为一级「发现」页。上部**导入区**三合一（安装 URL / 本地目录收编 / CC Switch 迁移入口），下部**发现区**：聚合搜索框 + 来源筛选 chips + 两张榜单（SkillHub score 榜、skills.sh installs 榜）+ `SourceBadge` / `RequiresKeyChip` + 去重（GitHub 仓库地址归一后同仓库只展示一条，徽标合并）；选中候选后进入既有六阶段安装流程（含装前扫描与审阅）。⌘N 落到本页。CLI：`atlas search --remote [--source skillssh|skillhub|all]`；meta-skill 增补「用户要从市场找技能 → `atlas search <词> --remote`」。设置增来源开关组（`atlasRegistryEnabled` 保持总闸）。SkillHub 端点（2026-08-27 实测，无鉴权；适配器必须容错，接口变更时降级为「打开网页」）：列表/搜索 `GET https://api.skillhub.cn/api/skills?page&pageSize&sortBy=score&order=desc&search=<q>`（响应 `{code,data:{skills:[…]}}`，字段含 name / description_zh / namespace.canonicalName / publisher{verified,certifiedName} / source(enterprise|community) / score / downloads / version / labels.requires_api_key / upstream_url）；分类 `GET /api/v1/categories`；下载 `GET /api/v1/download?slug=<urlencoded @handle/slug>` → 302 至版本固化 COS zip；详情网页 `https://skillhub.cn/skills/<handle>/<slug>`（含评测报告 tab，深链打开不复刻）。
+**H. 手册**：`docs/handbook.md` 三段式（你是谁 / 三条工作流 / 边界），规格见 ROADMAP §5；应用内「帮助」sheet 与手册同构（读打包进 Resources 的同一份 markdown，ReaderSheet 渲染）；README 重写为「一句话 + 四名词 + 手册链接 + 下载」；关于页与 onboarding 链到手册。
+**Z. 卫生**：`dist/Skill Atlas-3.0.0.dmg` 幽灵工件进废纸篓（2026-08-14 旧版本号纪元遗留，版本口径已重置，纯卫生清理）；`.lody/` 进 .gitignore；docs 里 1.3.0 时代截图重拍四路新样张；`发布1.7.0.command` 删除；`docs/index.html` 落地页文案对齐四名词。
 
-### WP1 · atlas CLI v1（3–4 天）【依赖 WP0】
+---
 
-**目标**：§4.1 冻结面里除 `install/new/sandbox/profile` 外的全部只读与轻写命令 + 基建三件套（锁、oplog、JSON 信封）。
-**改动**：`swift/cli/`（main + 命令路由 + JSONOut）；`core/AtlasLock.swift`、`core/Oplog.swift` 新建；`Store.swift` 的动作入口补 oplog 写入（App 侧）。
-**要点**：手写参数路由（ADR-2）；所有输出人话默认中文（复用 L10nCore）；`enable/disable` 走既有 `SkillActions.setPlatform`（含占位目录报错语义，映射退出码 5）；扫描直接调 `SkillScanner.scan()`（无缓存态，CLI 每次冷扫，134 技能实测应 <1s，超了再谈缓存）；`simulate/doctor/bill` 是纯函数改包装。锁语义按 ADR-5。
-**验收**：`tests/acceptance.sh` 新增 CLI 段：`ATLAS_HOME=$(mktemp -d)` 布置夹具库（3 个假技能 + 假平台根）→ `atlas list --json | jq` 断言结构 → `atlas enable x --platform claude` 后软链存在且 `atlas.json` enabled 位正确 → 并发两个 `atlas enable` 一个退出码 6 → oplog 行数 +2。
-**开工提示词**：`读 PLAN.md §4.1、§3 ADR-2/5、§6 WP1、§7。实现 CLI v1 冻结面（不含 install/new/sandbox/profile）。--json 信封与退出码严格按 §4.1，写完先补 tests/acceptance.sh 再自测。`
+## 6. 工作包
 
-### WP2 · 安装通道 + 审批闭环 + meta-skill（3 天）【依赖 WP1】
+依赖图：
 
-**目标**：`atlas install` 全流程（含 code 3 审批握手）、URL scheme、meta-skill 生成挂载。
-**改动**：`core/PendingReview.swift`（token/读写/内容寻址批准）；`cli/Commands/Install.swift`（复用 `InstallerModel` 的 parse→clone→detect→scan→clonefile→链管线，剥离 sheet 状态）；`app/`：Info.plist 加 `CFBundleURLTypes`、`onOpenURL` 路由、审阅 sheet 接 pending-review 数据源、批准写 `approvals.json`；`core/MetaSkill.swift`（模板 + 生成 + 校验）；App 启动钩子挂载 meta-skill。
-**要点**：install 的来源解析**只走** `InstallerModel.parse`（github.com 硬限制不放宽，Registry 只填仓库地址的纪律照旧）；批准键 = sha256(repo@commit/子目录)，clone 后先取 commit 再查批准；meta-skill 描述 ≤120 字符、正文按 §5A 四要素写、绝对路径生成时注入；catalog 加 Optional `managed` 字段（红线 §7-1）。
-**验收**：夹具 A（干净技能）`atlas install file://…​.git` 直接装成功；夹具 B（复用既有恶意夹具，含 curl|sh）退出码 3 + pending-review 文件落盘 + `atlas review list` 可见；GUI 打开 `skillatlas://review/<token>` 弹审阅，批准后重跑同命令放行；改夹具 B 内容重新 commit 后批准失效（重新 code 3）；meta-skill 出现在所有平台根且 `atlas list` 里带 managed 标。
-**开工提示词**：`读 PLAN.md §3 ADR-3/4、§4.2、§6 WP2、§7。实现安装通道与审批闭环。恶意夹具复用 DESIGN.md 第16条记载的验收夹具思路。URL scheme 与审阅 sheet 改动最小化，复用既有强制审阅 UI。`
+```
+WP0(手术准备) ──▶ WP-S(供给) ──▶ WP-L(技能库)
+     │      └──▶ WP-I(收件箱)      │
+     ├─────────▶ WP-D(创作) ───────┘
+     └─────────▶ WP-M(导入与多源发现)
+WP-H(手册) 依赖 S/I/D/M 定稿；WP-Z(卫生) 随时，截图部分最后
+```
 
-### WP3 · 供给层转正（3–4 天）【依赖 WP7a；CLI 子命令部分依赖 WP1】
+估算合计 19–24 agent 天，三四条泳道并行约 2 周。
 
-**目标**：两万 token 税砍到目标线的全部机制与 UI。
-**第 0 项（先做，半天）**：skillOverrides 有效性探针——用 Sandbox 基建起隔离 `CLAUDE_CONFIG_DIR`，两个假技能 + `skillOverrides:{b:"off"}`，`claude --print` 问技能清单断言 b 不可见；把结论（成立/不成立+版本号）写进 `docs/acceptance/wp3-overrides.md`。不成立则启用 ADR-7 兜底路线（frontmatter 写 `disable-model-invocation`，走 SkillBackup 快照 + 可撤销）。
-**改动**：`app/`：ProfileSwitcher 进工具栏、ContextBillChip、SlimDraftSheet（分档算法：常量集中 `SlimRules { coreMinSessions, staleDays = 90 }`）；Profiles UI 从设置→进阶移到库页入口（设置里留管理入口）；`cli/Commands/Profile.swift`、`Bill.swift`。
-**要点**：瘦身应用走既有 ProfileWriter（备份/坏 JSON 拒写纪律照旧）；meta-skill 永不进排除集；账单口径 = ContextDoctor 现算法，UI 标「估算」。
-**验收**：探针文档落盘;夹具库跑 `atlas bill --json` 总数正确;SlimDraft 应用后 `atlas bill` 总 token 下降且被排除技能 `/名字` 仍可调（沙箱实测一条）;真机（作者库）应用草案后账单 ≤8000 tok（**这是 2.0 的硬验收**）。
-**开工提示词**：`读 PLAN.md §3 ADR-7、§5B、§6 WP3、§7。先做第0项探针并把结论写入 docs/acceptance/wp3-overrides.md，再按结论选主路线或兜底路线实现供给三档。UI 严格走 Theme 令牌，一屏一个强调主按钮。`
+### WP0 · 手术准备（0.5–1 天）【最先，阻塞一切】
 
-### WP4 · 遥测转正 + miss 检测 + 通知（3–4 天）【依赖 WP0】
+**改动**：删除 LibraryView 九个死视图（AdoptBanner / FilterRow / FilterMenu / ViewMenu / SkillRowView / SkillContextMenu / CategoryChip / PlatformFilterStrip(PlatformIcon.swift) / HealthFlag(Theme.swift)，删前 grep 确认零引用）；NavPage 扩六项 + SidebarRail 两组六行 + ⌘1–6 + PageContainer 路由到四个空骨架页（EmptyStateBlock 占位；发现页骨架先挂既有 InstallSheet 入口）；URL scheme 与 `-atlasPage` 增量路由（§4.3）；侧栏徽标机制从「可更新数」改为「收件箱未裁决数」（暂读 doctor 汇总，WP-I 接真源）。
+**验收**：全量编译零新警告；`git diff --stat` 显示 LibraryView 净减 ≥350 行；`-atlasPage discover|supply|inbox|studio` 各落对页；既有 `-atlasSelect` 探针不回归。
+**开工提示词**：`读 PLAN.md §2.1、§6 WP0、§7 与 DESIGN.md v15 章。执行 WP0：死代码清除 + 六项两组导航壳。不实现任何页面内容，空态用 EmptyStateBlock。删除前逐个 grep 证明不可达，证据贴 PR 描述。`
 
-**目标**：hook 成为主数据源；miss 闭环第一版；通知管道。
-**改动**：`app/` 首跑询问 sheet（一次性，文案列明三元组）；`Store.mergeHookStats` 优先级翻转（hook 主、grep 回填——注意现状是反的）；`core/Usage.swift` 升 v4（首轮 prompt 提取：mmap 后只对文件头部 ~50 行做最小 JSON 解码取第一条 user 消息，截 500 字符）；`core/MissDetect.swift`（ADR-6 规则）；`app/` 维护区「本周 miss」组 + MissCard + UNUserNotificationCenter 接入 + 设置开关组。
-**要点**：usage-index 版本升级即全量重建，进度沿用既有后台索引 UI；miss 判定排除 user-invocable-only（换文案）与 disabled；通知默认只开安全类；App 常驻已有（关窗不退），登录项（SMAppService）做成设置项默认关。
-**验收**：夹具转录（构造 3 个 jsonl：一个真 miss、一个已触发、一个低分）跑 `MissDetect` 探针输出恰好 1 条；hook 装上后真机新会话事件落 `usage-events.jsonl` 且详情页计数实时 +1；通知在系统设置可见且可关。
-**开工提示词**：`读 PLAN.md §3 ADR-6、§5C、§6 WP4、§7。注意 mergeHookStats 现状是 grep 优先，要翻转。miss 夹具先行，阈值常量集中可调。首轮 prompt 只存 500 字符且必须确认 .gitignore 覆盖 usage-index。`
+### WP-S · 供给页（4–5 天）【依赖 WP0】
 
-### WP5 · 创作线：atlas new + 沙箱接线 + Rx A/B（2–3 天）【依赖 WP1、WP4】
+**改动**：`core/Supply.swift`（ADR-11 单写者，ProfileWriter/SlimPlanner 写路径改道）；`app/SupplyView.swift` + `SupplyStore.swift`（§5-S 布局）；`profiles.json` 加 Optional `projects` 字段（ADR-13）；SupplyChrome 元素迁居；技能库工具栏留只读账单数字点击跳转。
+**要点**：档位写操作全部产出 `ReceiptLine`；场景包应用沿用 ProfileApplySheet 的确认语义；`atlas profile/slim` 的 CLI 行为不变（ADR-12），但底层同样改走 Supply 单写者；写前备份与坏 JSON 拒写纪律照旧。
+**验收**：夹具库（ATLAS_HOME）跑「逐技能改档 → settings.json 只有本技能键变化 → 回执数字正确」；场景包应用/撤下幂等；两个旧写者的直写路径 `git grep` 为零；真机应用瘦身草案后 `atlas bill` 与页面数字一致。
+**开工提示词**：`读 PLAN.md §3 ADR-11/13、§4.4、§5-S、§6 WP-S、§7 与 DESIGN.md v15。先做 core/Supply.swift 单写者并迁移两个旧写路径（读逻辑不动），再搭页面。TierSegment/PresetChip/ScopeRail 状态表按 DESIGN v15，令牌不越轨。`
 
-**目标**：想法 → 可触发技能 ≤5 分钟；孤儿沙箱复活。
-**改动**：`cli/Commands/New.swift` + `Sandbox.swift` 包装（materialize + 打印命令，不开终端）；`core/` scaffold 模板（frontmatter 引导注释：触发三元组写法、描述 ≤200 字提醒）；`app/` 详情管理区补「沙箱试跑」按钮接 `requestSandbox` 既有流程（含 Sandbox.swift:51-56 四条注意事项原文展示）；Rx 写回事件进 oplog，维护区两周后展示前后触发对比卡。
-**验收**：`atlas new demo-skill && atlas simulate "demo 场景句"` 排名第一；GUI 沙箱按钮出现且走完 materialize→终端命令流程；oplog 出现 rx-writeback 后维护区出现对比卡（夹具时间前移模拟两周）。
-**开工提示词**：`读 PLAN.md §5D、§6 WP5、§7。沙箱是复活既有孤儿代码（Store.swift requestSandbox 一带），不要重写。atlas new 只 scaffold 不生成内容——内容交给宿主 agent。`
+### WP-I · 收件箱（3–4 天）【依赖 WP0】
 
-### WP6 · 详情运营页 + 工具栏整合（2–3 天）【依赖 WP3、WP4】
+**改动**：`core/Inbox.swift`（aggregate + state 读写，§4.1/4.2 契约）；`app/InboxView.swift` + `InboxStore.swift`（v12 骨架复用）；MaintenanceView 九组内容映射迁移后删除该文件；设置里维护组替换为「打开收件箱」一行；AtlasNotify 三类通知的点击路由改深链；UpdatesBanner / PendingReviewChip 从库页移除；侧栏徽标接真源。
+**要点**：聚合是纯函数，先写探针再写 UI；security_critical 不可忽略（§4.2）；每条裁决 oplog + ReceiptLine；清零态展示上次清零时间（读 inbox-state 最新 decision 时间）。
+**验收**：夹具构造九类各一条 → `Inbox.aggregate` 输出顺序与 id 稳定（跑两次 diff 为空）；忽略后复扫不再出现、critical 忽略无效；深链 `skillatlas://inbox/<id>` 滚动定位；通知点击落到条目；`atlas doctor` JSON 不回归。
+**开工提示词**：`读 PLAN.md §3 ADR-10、§4.1/4.2/4.3、§5-I、§6 WP-I、§7 与 DESIGN.md v15/v12 章。先冻结 InboxItem 契约写聚合探针，再迁 MaintenanceView 内容。九类动作全部复用既有 sheet/机制，不新造修复流程。`
 
-**目标**：详情页 = 单技能运营闭环；工具栏收纳 profile/账单两个新元素不破 v13 秩序。
-**改动**：`app/LibraryView.swift` 详情「更多设置」内加运营区块（TrendMini 用 Swift Charts、触发模拟入口、成本行既有）；工具栏排布调整（DESIGN.md §10.2 点击数表不得回退）；ApprovalSheet 待审角标入口（有 pending 时才出现）。
-**要点**：v13 首屏阅读顺序一个字不动；「最近产出」明确不做；宽窄窗/深浅色/Reduce Motion/CJK 长文案四路截图验收（DESIGN.md 惯例）。
-**验收**：既有 `-atlasSelect` 探针链路不回归；新增区块在 hook 未开启时显示引导态而非空白；四路截图落 `docs/`。
-**开工提示词**：`读 PLAN.md §5E、§5.7、§6 WP6、§7 与 DESIGN.md v13 章。运营区块全部进「更多设置」，首屏顺序不动，新原语按 §5.7 状态表实现，字号颜色只用 Theme 令牌。`
+### WP-L · 技能库强化（3 天）【依赖 WP-S】
 
-### WP7 · 卫生（a: Mount 统一先行 1 天；b: 其余 1 天）
+**改动**：SkillTable 行角标升级 `TierDots`（含 Claude 半亮态与点按改档，写走 Supply）；详情 CTA 重排（DESIGN v15 顺序）；Usage/TrendMini 合并 + `mergeHookStats` 优先级翻转（hook 主源）；NSTableView 多选 + 批量操作工具条；右键菜单对齐新动作集。
+**验收**：四路截图；点按角标后软链与 catalog 与界面三方一致（探针）；批量停用走废纸篓纪律；合并后的使用区在 hook 无数据时显示回扫数据并标注来源。
+**开工提示词**：`读 PLAN.md §5-L、§6 WP-L、§7 与 DESIGN.md v15。TierDots 状态表五态齐全，Claude 列才有半亮。详情首屏顺序按 v15 覆盖 v13。多选只做批量启停/收藏/停用，不做批量卸载（破坏性上限纪律）。`
 
-**a（泳道 B 前置）**：`Skill.mountClaude/mountCodex` → `mounts:[Platform:Mount]`；Summary 冗余字段合并；触及 Models/Scanner/Store/LibraryView/SkillTable 的机械替换；atlas.json 不动（它本来就是 per-platform 的 enabled 字典）。
-**b**：删遗留 web 四件（先 `git rm`，README/Models 注释同步清理）；acceptance.md 挪 `docs/history/` 并加「历史存档，版本口径已重置」头注；budget.json 删 `listingSoftCap`；SelfUpdater 下载改 `URLSession.download(for:)` 落盘；`visiblePlatforms` 变设置项（默认现状 6 个）。
-**验收**：a 后全量编译零警告新增、既有探针绿；b 后 `git grep server.py` 只剩 history。
-**开工提示词**：`读 PLAN.md §6 WP7、§7。a 是纯机械重构，禁止顺手改语义；b 的删除全部 git rm 留历史。`
+### WP-D · 创作页（2–3 天）【依赖 WP0；步骤④依赖 WP-I 的 RxFollowup 迁移位】
+
+**改动**：`app/StudioView.swift` + `StudioStore.swift` 四步进（§5-D）；scaffold 面调用 `atlas new` 同等 core 逻辑（不 shell 出去）；沙箱步骤接 `requestSandbox` 既有流程；PrescriptionSheet 双入口注册。
+**验收**：「新想法 → simulate 排第一」全程 ≤5 分钟人工实测一遍并录屏归档 docs/acceptance/；沙箱目录出现且注意事项四条展示；步进态在中途退出后可恢复（读 scaffold 存在性判断步骤）。
+**开工提示词**：`读 PLAN.md §5-D、§6 WP-D、§7。沙箱与 scaffold 都是复活既有代码（SkillSandbox/NewCommand 的 core 路径），不要重写。步进只有四步，禁止加第五步。`
+
+### WP-M · 导入与多源发现（4–5 天）【依赖 WP0；与 S/I/D 并行】
+
+**改动**：`core/Sources.swift`（SourceAdapter 协议 + skills.sh 适配器改造迁入 + SkillHub 适配器 + marketplace.json 适配器 + `-atlasSourceBase` 夹具注入点）；`core/Installer.swift` zip 分支（ADR-16 全流程，解包防线独立函数可探针）；`app/InstallView.swift` 升格为 `app/DiscoverView.swift` 发现页（导入区三合一 + 发现区，§5-M，六阶段安装机保留）；SettingsView 来源开关组；`cli/Commands/SearchCommand.swift` 加 `--source`；MetaSkill 文案增补；DESIGN v15 新原语 `SourceBadge` / `RequiresKeyChip`。
+**要点**：Registry.swift 的「只填仓库地址不猜子路径」纪律对 GitHub 型源继续有效；zip 型源的临时目录用后即焚（defer 清理）；marketplace.json 仓库本身也是 GitHub clone，走既有网络面；官方精选 = anthropics/skills 的硬编码货架（无网络新增）；聚合搜索的源并发发起、超时各自降级，不许一个源卡死整个搜索。
+**验收**：file:// 与本地 HTTP 夹具跑两适配器契约测试；恶意 zip 夹具（含 `curl | sh` 的 setup.sh）安装被拦进审阅、审批后放行、改包重签后审批失效；zip-slip 夹具（`../evil`、绝对路径、符号链接三型）全部拒装且报错人话；真机 SkillHub 搜「写作」出结果、企业条目带认证徽标、`requires_api_key` 条目装前有提示；关掉全部来源开关后抓包零出网（复用既有网络验收探针）；同一 GitHub 仓库双源出现时只展示一条。
+**开工提示词**：`读 PLAN.md §3 ADR-15/16、§5-M、§6 WP-M、§7。先冻结 SourceAdapter 契约并写夹具，再做 SkillHub 适配器（端点与字段见 §5-M，接口容错降级为打开网页）。zip 解包防线先写探针再写实现。安装管线既有护栏一条不降，网络白名单只按 §7-19 扩。`
+
+### WP-H · 手册与文档（1–2 天）【依赖 S/I/D/M 界面定稿】
+
+**改动**：`docs/handbook.md`（ROADMAP §5 规格：你是谁 / 三条编号工作流带完成证据 / 边界）；帮助 sheet（ReaderSheet 渲染打包副本）；README 重写；onboarding 与关于页链接；meta-skill 文案复核（勘误已做，检查其余措辞与四名词一致）。
+**验收**：手册四条工作流各由一名「没看过代码的读者」（另起无上下文 agent 会话模拟）照做走通并出完成证据；README 无失效链接与过期截图引用；应用内帮助与 handbook.md diff 为零（同一来源）。
+**开工提示词**：`读 ROADMAP.md §5、PLAN.md §6 WP-H。手册每条工作流 = 编号步骤 + 完成证据 + 失败分支，datawhale 第 6 课的写法（适用人群前置、smoke test、边界诚实）。写完用无上下文 agent 实测。`
+
+### WP-Z · 卫生（1 天，穿插；截图最后）
+
+**改动**：§5-Z 全部；四路新样张替换 README/landing 引用。
+**验收**：`git status` 干净、`.lody` 不再出现在未跟踪列表；landing 页四名词文案上线；废纸篓可见幽灵 DMG。
+**开工提示词**：`读 PLAN.md §5-Z、§6 WP-Z、§7。删除全部进废纸篓或 git rm 留历史，截图按 DESIGN 四路惯例重拍。`
 
 ---
 
 ## 7. 全局护栏（每个实施 agent 必读的禁令）
 
-1. **atlas.json 新字段必须 Optional**——否则老 catalog 解码失败会静默清空所有 enabled 位（Atlas.swift:124-127 的数据毁灭警告是血泪史）。
-2. **永不写** `~/.cc-switch/`（DB 与 skills 目录只读是产品承诺）。
-3. **破坏性操作只进废纸篓**，never `rm`；写 `~/.claude/settings.json` 系列必须：先备份（HookTelemetry.backup 分域机制）、坏 JSON 拒写、只动自己的键。
-4. **UI 只用 Theme.swift 令牌**：不新增字号/颜色/间距/圆角；一屏一个强调色主按钮；不新增一级页面；破折号不进文案（仓库文案纪律）。
-5. **i18n**：用户可见字符串一律 `L("中文原文")`，新增键补 en/ja/ko 三语行（`native/resources/*.lproj/Localizable.strings`，键=中文原文）；技能名/描述等用户内容保持原文。
-6. **构建两路都要过**：SwiftPM 与 swiftc 兜底（`-swift-version 5`，注意 Xcode 16.2 与本地的 actor 隔离差异历史教训）；不引新第三方依赖（ADR-2）。
-7. **网络面不扩大**：出网仅限 github.com clone、skills.sh 搜索（受 `atlasRegistryEnabled` 开关）、appcast/Release 自更新。CLI 不新增任何出网。
-8. **hook 脚本永远 exit 0**；遥测数据永不出本机、gitignore 必须覆盖。
-9. **探针命名沿用 `-atlasXxx`**（App）与 `ATLAS_HOME` 夹具（CLI）；每个 WP 的验收进 `tests/acceptance.sh`，输出与金样比对（jq 归一化），不再只留「输出文件当验收」。
-10. **注释文化**：中文、写约束与病根，不写流水账；平台目录必须 `resolvedRoot()` 解析后再动（`~/.claude/skills` 被 mirasim 接管是本机现实）。
-11. meta-skill 描述 ≤120 字符；任何新技能相关文案自己先过 ContextDoctor 口径。
-12. 完成定义（每 WP 通用 DoD）：两路构建过 + 本 WP 验收命令绿 + 既有探针不回归 + i18n 补齐 + oplog 覆盖新写操作 + DESIGN.md v14 增量段落提交。
+2.0 护栏 1–12 条全部继承（atlas.json Optional / 永不写 ~/.cc-switch / 破坏性只进废纸篓 + settings 写前备份 / Theme 令牌与文案纪律 / i18n 四语 / 两路构建不引新依赖 / 网络面不扩大 / hook 永远 exit 0 / 探针命名 / 注释文化 + resolvedRoot / meta-skill 描述 ≤120 字 / 通用 DoD），另加：
 
----
+13. **六项封顶与入口深度**（ADR-9）：新能力先答「手册哪条工作流哪一步」，答不出不做界面；高频动作距启动 ≤2 次点击，折叠组不得藏动作。
+14. **skillOverrides 唯一写者**（ADR-11）：除 core/Supply.swift 外 `git grep skillOverrides` 不得出现在任何写路径。
+15. **两轴文案纪律**：界面与文档只说「挂载」（二态，所有平台）与「档位」（三态，仅 Claude），禁止第三种叫法混用。
+16. **AppStore 冻结**（ADR-14）：Store.swift 不新增成员，新页面状态进各自 store；WP 结束时 Store.swift 行数只降不升。
+17. **裁决必留痕**：收件箱每次裁决（含忽略）oplog + ReceiptLine；security_critical 不可忽略。
+18. **CLI ABI 冻结**（ADR-12）：命令名/参数/信封/退出码不动；增量只允许 §3 点名的可选项（本轮新增豁免：`atlas search --source`，纯增参不破坏既有调用）。
+19. **多源纪律**（ADR-15/16）：新市场源必须同时满足三关——公开只读 API、可匿名获取安装物、安装物可内容寻址——三关不齐只能做「打开网页」型源；接入只改 `core/Sources.swift` 一处。网络白名单在 2.0 §7-7 基础上仅扩两条：`api.skillhub.cn` 与其 302 目标 COS 域（均受来源开关控制，关闸即零出网）；其余任何域名照旧禁止。市场的评分、认证、审核标签一律只展示，不得作为跳过本地扫描或降低审批级别的依据。
 
 ## 8. 里程碑
 
 | 里程碑 | 内容 | 演示脚本 |
 |---|---|---|
-| M1（WP0+1） | agent 能读库、开关、诊断 | 在 Claude Code 里问「我有哪些做 PPT 的技能？哪个会触发？」→ agent 跑 list/simulate 答出 |
-| M2（WP2+3） | 安装审批闭环 + 税砍到 8000 | 「装 anthropics/skills 的 xlsx」全流程；恶意夹具被拦到 GUI；账单数字达标 |
-| M3（WP4+5） | miss 闭环 + 5 分钟沉淀 | 夹具 miss 通知 → 处方 → 再命中；atlas new 到 simulate 第一名 |
-| M4（WP6+7） | 运营页 + 卫生收尾 | 四路截图 + 全量探针绿 → 发 2.0.0 |
+| M1（WP0+S+I） | 四名词结构落地，运维有家 | 周一晨会演示：打开收件箱清掉真机 10 个挂载问题；供给页给一个新项目套场景包，回执报数字 |
+| M2（+L+D+M） | 库、创作、发现闭环 | 点角标改档三方一致；新想法 5 分钟沉淀并 simulate 第一；搜「写作」从 SkillHub 装一个技能，全程走扫描与审阅 |
+| M3（+H+Z） | 手册 + 卫生 → 发 2.1.0 | 无上下文 agent 照手册走通四条工作流；四路截图上 landing；tag v2.1.0（Info.plist 版本与 release.yml 校验同步） |
 
 ## 9. 未决问题（实施中验证，不许拍脑袋）
 
-1. skillOverrides 在当前 Claude Code 版本是否生效（WP3 第 0 项探针，结论落文档）。
-2. Codex 有无项目级技能机制（WP3 调研，二期决定）。
-3. CLI 冷扫 134 技能的真实耗时（WP1 实测，>1s 再加缓存）。
-4. 菜单栏/登录项常驻策略（WP4 做成默认关的设置项，数据说话再改默认）。
-5. meta-skill 在 Codex/Gemini 的措辞兼容（「运行命令」通用化，WP2 在两平台各实测一条）。
+0. marketplace.json 解析器挪 P2（2026-08-28 实施注记）：市场仓库本质是 GitHub 仓库，粘贴链接经既有管线已可安装（detect 会扫出其中全部 SKILL.md），发现页已提供 anthropics/skills 官方货架；解析器只省一步浏览，优先级让位。SkillHub zip 直装（ADR-16）已落地并进验收（bsdtar 安全边界四类攻击实测：`..` 拒、绝对路径消毒、穿链拒、符号链接条目由解包后全树遍历整包拒收）。
+
+1. 项目级 `.claude/skills` 扫描与展示（P2；牵动 Scanner 数据模型）。
+2. Codex 的项目级供给机制（继承 2.0 未决）。
+3. 菜单栏 palette 是否加「收件箱」第三模式（等 WP-I 落地后按使用数据决定，默认不加）。
+4. `atlas doctor --inbox-json` 是否转正为 `atlas inbox`（等探针与菜单栏需求明确再说，先不占命令名）。
+5. Usage/Trend 合并后，转录回扫的降级节奏（hook 数据满两周后是否停默认回扫）。
+6. `-atlasSelect` 探针在无头启动下不重绘高亮与详情栏（2026-08-28 实测，2.0.0 同症；`-atlasAction` 探针证明选中状态已置位，交互会话正常；`-atlasSelectMany` 走 `refreshVisible()` 可正常重绘）。四路截图验收需要交互会话或先解此渲染怪癖；批量条截图已用 `-atlasSelectMany` 覆盖。
