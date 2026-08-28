@@ -1,7 +1,7 @@
 {
-  "version": "2.1.0",
-  "notes": "v2.1.0：面板重做成五个名词——技能库、发现、供给、收件箱、创作。发现页可搜市场并直装，供给页管档位与账单，运维事项进收件箱裁决。",
+  "version": "2.1.1",
+  "notes": "v2.1.1：接入千问办公与豆包（平台目录可改）；修掉改档位后账单不刷新、同屏两个数字打架等问题；侧栏徽标不再每帧全量聚合，滚动更跟手。",
   "download": "https://github.com/shoumunan/skill-atlas/releases/latest",
-  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.1.0/Skill.Atlas-2.1.0.dmg",
-  "sha256": "36da1782c59faff278891d3333eccae08a360d362079d9f5b5cff4dd6ef50a93"
+  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.1.1/Skill.Atlas-2.1.1.dmg",
+  "sha256": "9b1e3e8df11702302ff2f5aa7b27c4a8af3f922e5104b522914f16a07bf7cc5a"
 }
