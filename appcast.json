@@ -1,7 +1,7 @@
 {
-  "version": "2.5.0",
-  "notes": "v2.5.0：侧栏放场景。「全部技能」永远在第一位，生效的那条打点，一眼看得出现在压着哪一套，一键退回。场景以前埋在设置→进阶→场景包→管理场景…四层底下。撤掉了上一版那个没什么用的「最近在用」。",
+  "version": "2.5.1",
+  "notes": "v2.5.1 安全修复：一批调试探针读的是持久化偏好设置，其中管场景应用的那个读到值就直接写盘、绕过确认框——任何进程写过一次 defaults，下次启动就会静默改写你的 ~/.claude/settings.json。现在会改文件的探针只认启动参数。装了 2.5.0 建议尽快更新。",
   "download": "https://github.com/shoumunan/skill-atlas/releases/latest",
-  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.5.0/Skill.Atlas-2.5.0.dmg",
-  "sha256": "806872252ab188a57f116c679bf1f0ff21a3cc3e6c64f364030acdeca427733c"
+  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.5.1/Skill.Atlas-2.5.1.dmg",
+  "sha256": "6a14cd34e3d9811dafc726dec77de9d767defe4435f55a3ec0379e1c4eaaacf1"
 }
