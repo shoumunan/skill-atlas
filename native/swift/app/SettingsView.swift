@@ -25,8 +25,7 @@ struct SettingsPage: View {
                 LibraryGroup()
                 DiscoverySourcesGroup()
                 InboxLinkGroup()
-                AdoptGroup()
-                MigrationGroup()
+                LegacyImportGroup()
                 AppGroup()
                 AdvancedSettings()
             }
@@ -73,7 +72,7 @@ private struct AdvancedSettings: View {
             .buttonStyle(.plain)
             .help(open ? L("收起进阶设置") : L("展开进阶设置"))
             if open {
-                ProfileGroup()
+
                 TelemetryGroup()
                 SyncGroup()
             }
@@ -82,66 +81,6 @@ private struct AdvancedSettings: View {
 }
 
 // MARK: - 场景 Profile（三期 G8）
-
-private struct ProfileGroup: View {
-    @Environment(AppStore.self) private var store
-
-    var body: some View {
-        SettingsGroup(title: "场景") {
-            SettingsRow(
-                title: store.activeProfile.map { LF("当前默认：%@", $0.name) } ?? L("只给当前工作留需要的技能"),
-                subtitle: store.profiles.profiles.isEmpty
-                    ? L("技能太多时，建一个场景，只勾这个场景真正要用的。其余的不会自己被想起，仍可手动调用。只对 Claude Code 生效。")
-                    : LF("已有 %d 个场景。改之前会让你确认，并自动备份。",
-                         store.profiles.profiles.count),
-                divider: false
-            ) {
-                Button {
-                    store.loadProfiles()
-                    store.profileSheetPresented = true
-                } label: {
-                    Text(L("管理场景…"))
-                        .font(Theme.Fonts.calloutEmphasis)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, Theme.Space.s12 + 2)
-                        .frame(height: 26)
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressableButtonStyle())
-                .accentGlass(Capsule(style: .continuous))
-            }
-            if store.sandboxCount > 0 {
-                SettingsRow(
-                    title: "试跑目录",
-                    subtitle: "试跑留下的临时目录。不自动清，免得正在跑的会话还在用。",
-                    divider: false
-                ) {
-                    HStack(spacing: Theme.Space.s8) {
-                        Text(LF("%d 个", store.sandboxCount))
-                            .font(Theme.Fonts.caption)
-                            .foregroundStyle(Theme.textTertiary)
-                        Button {
-                            store.clearSandboxes()
-                        } label: {
-                            Text(L("移入废纸篓"))
-                                .font(Theme.Fonts.calloutEmphasis)
-                                .foregroundStyle(Theme.textPrimary)
-                                .padding(.horizontal, Theme.Space.s12)
-                                .frame(height: 26)
-                                .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
-                        }
-                        .buttonStyle(PressableButtonStyle())
-                        .quietControl()
-                    }
-                }
-            }
-        }
-        .onAppear {
-            store.loadProfiles()
-            store.refreshSandboxCount()
-        }
-    }
-}
 
 // MARK: - Hook 实时遥测（三期 G5）
 
@@ -232,74 +171,6 @@ private struct TelemetryGroup: View {
 
 // MARK: - 本地技能收编（散装 → 本库，人人可用）
 
-private struct AdoptGroup: View {
-    @Environment(AppStore.self) private var store
-    @State private var confirming = false
-
-    var body: some View {
-        let adoptable = store.adoptableSkills
-        SettingsGroup(title: "已经在电脑上的技能") {
-            SettingsRow(
-                title: "收进本库",
-                subtitle: adoptable.isEmpty
-                    ? "没有要收的。"
-                    : LF("发现 %d 个已经装在软件目录里的技能。收进来之后可以在这里开关。", adoptable.count),
-                divider: false
-            ) {
-                if adoptable.isEmpty {
-                    HStack(spacing: Theme.Space.s4) {
-                        Image(systemName: "checkmark.circle")
-                            .font(.system(size: 12))
-                        Text(L("已全部在库"))
-                            .font(Theme.Fonts.callout)
-                    }
-                    .foregroundStyle(Theme.textTertiary)
-                } else {
-                    HStack(spacing: Theme.Space.s8) {
-                        Button {
-                            store.jumpToLocalSkills()
-                        } label: {
-                            Text(L("去看看"))
-                                .font(Theme.Fonts.calloutEmphasis)
-                                .foregroundStyle(Theme.textPrimary)
-                                .padding(.horizontal, Theme.Space.s12)
-                                .frame(height: 26)
-                                .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
-                        }
-                        .buttonStyle(PressableButtonStyle())
-                        .quietControl()
-                        .help(L("只看本地安装的技能"))
-                        Button {
-                            confirming = true
-                        } label: {
-                            Text(LF("全部收编（%d）", adoptable.count))
-                                .font(Theme.Fonts.calloutEmphasis)
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, Theme.Space.s12)
-                                .frame(height: 26)
-                                .contentShape(Capsule())
-                        }
-                        .buttonStyle(PressableButtonStyle())
-                        .accentGlass(Capsule(style: .continuous))
-                        .help(L("拷进本库，之后在这里开关"))
-                        .confirmationDialog(
-                            LF("把 %lld 个本地技能收进 Skill Atlas 库？", adoptable.count),
-                            isPresented: $confirming,
-                            titleVisibility: .visible
-                        ) {
-                            Button(L("收编")) { store.adoptAllLocalSkills() }
-                            Button(L("取消"), role: .cancel) {}
-                        } message: {
-                            Text(store.adoptConfirmMessage(adoptable))
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-}
-
 // MARK: - 分组骨架
 
 /// 组标题在卡外（系统设置惯例），卡内行之间发丝分隔
@@ -380,6 +251,70 @@ private struct DiscoverySourcesGroup: View {
         }
         .padding(.horizontal, Theme.Space.s12)
         .padding(.vertical, Theme.Space.s8 + 2)
+    }
+}
+
+/// v15：收编与 CC Switch 迁移的家在发现页导入区，设置只留一行指路。
+/// 完整的迁移向导（机制图 + 迁入 + 撤销 + 清理副本）仍由 MigrationSheet 承载。
+private struct LegacyImportGroup: View {
+    @Environment(AppStore.self) private var store
+
+    var body: some View {
+        SettingsGroup(title: "导入与迁移") {
+            HStack(spacing: Theme.Space.s12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("收编与迁移都在发现页"))
+                        .font(Theme.Fonts.rowTitle)
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(subtitle)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: Theme.Space.s8)
+                Button(L("去发现页")) { store.nav = .discover }
+                    .buttonStyle(.plain)
+                    .font(Theme.Fonts.secondaryEmphasis)
+                    .foregroundStyle(Theme.accent)
+                    .help(L("散落技能的收编与 CC Switch 迁入都在那里"))
+            }
+            .padding(.horizontal, Theme.Space.s12)
+            .frame(height: 52)
+            if store.canRollback {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.06))
+                    .frame(height: 1)
+                    .padding(.leading, Theme.Space.s12)
+                HStack(spacing: Theme.Space.s12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("撤销 CC Switch 迁移"))
+                            .font(Theme.Fonts.rowTitle)
+                            .foregroundStyle(Theme.textPrimary)
+                        Text(L("把迁入的技能退回去，原文件本来就没动过。"))
+                            .font(Theme.Fonts.caption)
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                    Spacer(minLength: Theme.Space.s8)
+                    Button(L("撤销迁移")) { store.rollbackMigration() }
+                        .buttonStyle(.plain)
+                        .font(Theme.Fonts.secondaryEmphasis)
+                        .foregroundStyle(Theme.textSecondary)
+                        .disabled(store.migrating)
+                }
+                .padding(.horizontal, Theme.Space.s12)
+                .frame(height: 52)
+            }
+        }
+    }
+
+    private var subtitle: String {
+        let adoptable = store.adoptableSkills.count
+        if adoptable > 0 {
+            return LF("现在有 %d 个散落技能可以收编。", adoptable)
+        }
+        return store.canMigrate
+            ? L("检测到 CC Switch 的技能，可以在发现页迁入。")
+            : L("散落在平台目录里的技能、CC Switch 的旧库，都从那里进来。")
     }
 }
 
@@ -806,115 +741,6 @@ private struct LibraryGroup: View {
 
 // MARK: - 从 CC Switch 迁移
 
-private struct MigrationGroup: View {
-    @Environment(AppStore.self) private var store
-
-    /// 只对有 CC Switch 痕迹的用户显示：有 DB / 已迁移 / 有回滚清单。
-    /// 纯本地用户的「收进本库」入口是上面的收编组，这块整组不出现。
-    private var relevant: Bool {
-        store.data?.summary.hasCCSwitch == true
-            || store.data?.summary.migrated == true
-            || SkillMigrator.canRollback()
-    }
-
-    var body: some View {
-        if relevant {
-            group
-        }
-    }
-
-    private var group: some View {
-        SettingsGroup(title: "从 CC Switch 迁移") {
-            VStack(alignment: .leading, spacing: Theme.Space.s12) {
-                // 机制：一张图讲清「复制进库，软链出去」
-                MigrationFlow()
-                Text(L("复制进本库，再让各软件指向这里。原来的文件不动，随时可撤。"))
-                    .font(Theme.Fonts.secondary)
-                    .lineSpacing(3)
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(Theme.Space.s16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Rectangle()
-                .fill(Color.primary.opacity(0.06))
-                .frame(height: 1)
-                .padding(.leading, Theme.Space.s16)
-            SettingsRow(title: "状态", subtitle: nil, divider: store.data?.summary.migrated == true) {
-                Text(migrationStatus)
-                    .font(Theme.Fonts.callout)
-                    .foregroundStyle(Theme.textSecondary)
-                    .multilineTextAlignment(.trailing)
-            }
-            if store.data?.summary.migrated == true {
-                SettingsRow(
-                    title: "清理 CC Switch 副本",
-                    subtitle: "原来的副本还占着空间。清理前会先核对，不对的不动。",
-                    divider: false
-                ) {
-                    Button {
-                        store.cleanupSheetPresented = true
-                    } label: {
-                        Text(L("检查并清理…"))
-                            .font(Theme.Fonts.calloutEmphasis)
-                            .foregroundStyle(Theme.textPrimary)
-                            .padding(.horizontal, Theme.Space.s12)
-                            .frame(height: 26)
-                            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
-                    }
-                    .buttonStyle(PressableButtonStyle())
-                    .quietControl()
-                }
-            }
-            HStack(spacing: Theme.Space.s8) {
-                Spacer()
-                Button {
-                    store.rollbackMigration()
-                } label: {
-                    Text(L("撤销迁移"))
-                        .font(Theme.Fonts.calloutEmphasis)
-                        .foregroundStyle(Theme.textPrimary)
-                        .padding(.horizontal, Theme.Space.s12)
-                        .frame(height: 26)
-                        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
-                }
-                .buttonStyle(PressableButtonStyle())
-                .quietControl()
-                .disabled(!store.canRollback || store.migrating)
-                Button {
-                    store.migrationSheetPresented = true
-                } label: {
-                    Text(L("迁入…"))
-                        .font(Theme.Fonts.calloutEmphasis)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, Theme.Space.s12 + 2)
-                        .frame(height: 26)
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressableButtonStyle())
-                .accentGlass(Capsule(style: .continuous))
-                .disabled(!store.canMigrate || store.migrating)
-                .opacity(store.canMigrate && !store.migrating ? 1 : 0.4)
-                .help(store.canMigrate ? L("把 CC Switch 里的技能收进本库") : L("已迁入或本机没有 CC Switch 数据"))
-            }
-            .padding(.horizontal, Theme.Space.s16)
-            .padding(.bottom, Theme.Space.s12)
-        }
-    }
-
-    private var migrationStatus: String {
-        guard let summary = store.data?.summary else { return "尚未扫描" }
-        if summary.migrated {
-            return "已迁入 \(summary.atlasCount) 个技能"
-        }
-        if summary.hasCCSwitch {
-            let plan = SkillMigrator.plan()
-            return "发现 \(plan.total) 个技能可迁入"
-        }
-        return "本机没有 CC Switch 数据"
-    }
-}
-
 /// 迁移机制图：CC Switch --复制--> 本库 --软链--> 可见平台（迁移引导 sheet 复用）
 struct MigrationFlow: View {
     @Environment(AppStore.self) private var store
@@ -1032,7 +858,6 @@ private struct AppGroup: View {
         }
     }
 }
-
 
 // MARK: - 多机同步（二期 F8：库 git 化最小闭环）
 

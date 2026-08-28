@@ -134,10 +134,17 @@ package enum InboxState {
         load().decisions.values.map(\.at).max()
     }
 
-    /// 裁决落盘。不可忽略的类别拒绝 ignored（返回 false），其余写入并进 oplog。
+    package enum DecideResult: Equatable {
+        case ok
+        case notIgnorable
+        case failed(String)
+    }
+
+    /// 裁决落盘。区分「这一类不能忽略」与「写盘失败」——以前两者都返回 false，
+    /// 磁盘满被伪装成产品规则。
     @discardableResult
-    package static func decide(id: String, kind: InboxKind, action: String) -> Bool {
-        if action == "ignored" && !kind.ignorable { return false }
+    package static func decide(id: String, kind: InboxKind, action: String) -> DecideResult {
+        if action == "ignored" && !kind.ignorable { return .notIgnorable }
         var file = load()
         file.decisions[id] = Decision(action: action, at: Int(Date().timeIntervalSince1970))
         // 只增不减会无限膨胀：超过 500 条时把最老的一半清掉（源头早已变化，id 不会再复现）
@@ -152,11 +159,11 @@ package enum InboxState {
             try encoder.encode(file).write(to: url, options: .atomic)
             cache = file
             Oplog.append(op: "inbox-decide", target: id, ok: true, detail: action)
-            return true
+            return .ok
         } catch {
             cache = nil
             Oplog.append(op: "inbox-decide", target: id, ok: false, detail: error.localizedDescription)
-            return false
+            return .failed(error.localizedDescription)
         }
     }
 }

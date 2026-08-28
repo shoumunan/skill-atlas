@@ -31,6 +31,34 @@ enum MenuBarIcon {
         image.isTemplate = true
         return image
     }()
+
+    /// 「有事」态：主卡右上角一个实心点。菜单栏只分安静 / 有事两态
+    /// （DESIGN v15），不做数字、不做颜色——那是通知中心的活。
+    static let alert: NSImage = {
+        let image = NSImage(size: NSSize(width: 18, height: 16), flipped: false) { _ in
+            let cards: [(rect: NSRect, radius: CGFloat, alpha: CGFloat)] = [
+                (NSRect(x: 5.0, y: 12.6, width: 8.0, height: 2.6), 1.3, 0.35),
+                (NSRect(x: 3.5, y: 9.4, width: 11.0, height: 3.4), 1.7, 0.6),
+                (NSRect(x: 2.0, y: 1.0, width: 14.0, height: 7.6), 2.2, 1.0),
+            ]
+            for card in cards {
+                NSColor.black.withAlphaComponent(card.alpha).setFill()
+                NSBezierPath(roundedRect: card.rect, xRadius: card.radius, yRadius: card.radius).fill()
+            }
+            // 先用 destinationOut 挖掉一圈，再点实心点：
+            // 不留这圈空隙，点会和主卡糊成一个缺角
+            NSGraphicsContext.current?.saveGraphicsState()
+            NSGraphicsContext.current?.compositingOperation = .destinationOut
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: NSRect(x: 11.2, y: 8.2, width: 6.6, height: 6.6)).fill()
+            NSGraphicsContext.current?.restoreGraphicsState()
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: NSRect(x: 12.6, y: 9.6, width: 3.8, height: 3.8)).fill()
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }()
 }
 
 // MARK: 全局热键（⌥⌘K）

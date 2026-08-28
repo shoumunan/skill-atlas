@@ -66,9 +66,13 @@ enum InboxAssembler {
             }
         }
 
+        // 每类都要有上限：143 个技能的库能产生上百条，一条队列排不完就等于没排
+        var warningBudget = 8
         for skill in store.skills where !skill.disabled && !store.hasBlockingIssue(skill) {
+            guard warningBudget > 0 else { break }
             let findings = store.advisoryFindings(for: skill)
             guard let first = findings.first else { continue }
+            warningBudget -= 1
             out.append(InboxItem(
                 kind: .securityWarning,
                 target: skill.directory,
@@ -92,7 +96,7 @@ enum InboxAssembler {
             ))
         }
 
-        for skill in store.updatableSkills {
+        for skill in store.updatableSkills.prefix(8) {
             out.append(InboxItem(
                 kind: .update,
                 target: skill.directory,
@@ -128,21 +132,21 @@ enum InboxAssembler {
                 skillName: skill.name
             ))
         }
-        for entry in report.atRisk {
+        for entry in report.atRisk.prefix(6) {
             addDiscover(entry.skill, L("当前技能清单较满，它的介绍可能排在可见范围之外。"), digest: "atrisk")
         }
-        for entry in report.buried {
+        for entry in report.buried.prefix(6) {
             addDiscover(entry.skill,
                         LF("关键说法写得太靠后：%@", entry.phrases.prefix(3).joined(separator: L("、"))),
                         digest: "buried:" + entry.phrases.joined())
         }
-        for entry in report.overlong {
+        for entry in report.overlong.prefix(6) {
             addDiscover(entry.skill,
                         LF("介绍有 %d 个字符，后半段可能不会进入技能清单。", entry.skill.description.count),
                         digest: "overlong:\(entry.skill.description.count)")
         }
 
-        for card in RxFollowup.due() {
+        for card in RxFollowup.due().prefix(5) {
             let skill = store.skills.first { $0.directory == card.directory }
             let sessions = store.usage[card.directory]?.total ?? 0
             out.append(InboxItem(
@@ -181,12 +185,27 @@ final class InboxStore {
            let hit = store.missHits.first(where: { $0.directory == item.target }) {
             store.ignoreMiss(hit)
         }
-        if InboxState.decide(id: item.id, kind: item.kind, action: "ignored") {
+        switch InboxState.decide(id: item.id, kind: item.kind, action: "ignored") {
+        case .ok:
             store.invalidateInbox()
             receipt = ReceiptState(text: LF("已忽略「%@」。同一问题再变化时会重新出现。", item.title), failed: false)
-        } else {
+        case .notIgnorable:
             receipt = ReceiptState(text: L("这一类不能忽略，得处理掉才会消失。"), failed: true)
+        case .failed(let message):
+            receipt = ReceiptState(text: LF("没能记下这次忽略：%@", message), failed: true)
         }
+    }
+
+    /// 审批 token 可能已被 CLI 清掉（会话取消 / 超时）。
+    /// 以前这里点了没有任何反应，条目还赖在队首且不可忽略。
+    func openApproval(_ item: InboxItem, store: AppStore) {
+        guard PendingReviews.load(item.target) != nil else {
+            InboxState.decide(id: item.id, kind: item.kind, action: "stale")
+            store.invalidateInbox()
+            receipt = ReceiptState(text: L("这条审批已经失效（发起它的会话可能已取消）。"), failed: false)
+            return
+        }
+        store.openPendingReview(token: item.target)
     }
 
     func skill(for item: InboxItem, store: AppStore) -> Skill? {

@@ -217,11 +217,11 @@ private struct ClaudeScopeView: View {
         VStack(alignment: .leading, spacing: Theme.Space.s16) {
             billHeader
             presetRow
-            tierGroup(L("完整挂载"), members: buckets[.core] ?? [],
+            tierGroup(L("进清单"), members: buckets[.core] ?? [],
                       hint: L("描述进每个会话的自动清单"))
-            tierGroup(L("仅用户可调"), members: buckets[.userInvocable] ?? [],
+            tierGroup(L("只手动调"), members: buckets[.userInvocable] ?? [],
                       hint: L("不进自动清单，仍可用 /名字 调用"))
-            tierGroup(L("不挂载"), members: buckets[.off] ?? [],
+            tierGroup(L("不进清单"), members: buckets[.off] ?? [],
                       hint: L("从 Claude 清单里完全拿掉"))
         }
     }

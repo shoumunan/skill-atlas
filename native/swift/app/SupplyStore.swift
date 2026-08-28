@@ -131,8 +131,14 @@ final class SupplyStore {
         scope = .project(url.path)
     }
 
-    /// 移除登记只删书签；已绑定的 settings.local.json 覆盖须先在项目卡里解除绑定
+    /// 移除登记。若该目录还绑着场景包，先解绑再删——
+    /// 否则左轨看不见它了，<项目>/.claude/settings.local.json 里的覆盖还在生效，
+    /// 变成一份谁也管不到的孤儿配置。
     func removeProject(_ path: String, appStore: AppStore) {
+        if let binding = appStore.profiles.bindings.first(where: { $0.directory == path }) {
+            appStore.unbindDirectory(binding, silent: true)
+            receipt = ReceiptState(text: L("已解除该目录的场景包绑定，并从列表移除。"), failed: false)
+        }
         var list = appStore.profiles.projects ?? []
         list.removeAll { $0.path == path }
         appStore.profiles.projects = list

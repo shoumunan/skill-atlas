@@ -36,7 +36,8 @@ enum AtlasNotify {
         guard securityEnabled, count > 0 else { return }
         post(id: "security-\(count)-\(Int(Date().timeIntervalSince1970))",
              title: L("安全复扫命中"),
-             body: LF("有 %d 个技能出现关键级发现。打开 Skill Atlas 查看。", count))
+             body: LF("有 %d 个技能出现关键级发现。打开 Skill Atlas 查看。", count),
+             deepLink: "skillatlas://inbox")
     }
 
     static func missDigest(_ hits: [MissHit]) {
@@ -44,7 +45,8 @@ enum AtlasNotify {
         let names = hits.prefix(MissRules.digestCap).map(\.name).joined(separator: "、")
         post(id: "miss-weekly",
              title: L("本周有技能该触发却没触发"),
-             body: names)
+             body: names,
+             deepLink: "skillatlas://inbox")
     }
 
     static func updatesAvailable(count: Int) {
@@ -54,14 +56,19 @@ enum AtlasNotify {
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "atlasNotifyUpdatesAt")
         post(id: "updates-daily",
              title: L("有技能可以更新"),
-             body: LF("%d 个技能有新版本。", count))
+             body: LF("%d 个技能有新版本。", count),
+             deepLink: "skillatlas://inbox")
     }
 
-    private static func post(id: String, title: String, body: String) {
+    /// 通知一律带深链（DESIGN v15）：点开就落到收件箱对应条目，
+    /// 而不是把人扔到主窗口自己找。没有这一步，「不打开窗口的人」这个
+    /// 验收人物就拿不到任何入口。
+    private static func post(id: String, title: String, body: String, deepLink: String) {
         guard canNotify else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
+        content.userInfo = ["deepLink": deepLink]
         let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }

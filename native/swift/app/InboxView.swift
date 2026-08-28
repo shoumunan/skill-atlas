@@ -205,7 +205,7 @@ private struct InboxActions: View {
         HStack(spacing: Theme.Space.s12) {
             switch item.kind {
             case .approval:
-                primary(L("审阅并批准…")) { store.openPendingReview(token: item.target) }
+                primary(L("审阅并批准…")) { inbox.openApproval(item, store: store) }
             case .securityCritical:
                 if let skill = inbox.skill(for: item, store: store),
                    let finding = store.criticalFindings(for: skill).first {

@@ -1,10 +1,14 @@
 import AppKit
 import SwiftUI
+import UserNotifications
 #if SWIFT_PACKAGE
 import AtlasCore
 #endif
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    /// 通知点击的落点由它转交（App 启动时由 SkillAtlasApp 注入）
+    static weak var store: AppStore?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 离线验收探针：命中即解包并退出，不进入正常启动
         ZipChannel.runProbeIfRequested()
@@ -14,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppearanceMode.applyStored()
         SandboxTerminal.opener = { try SkillLauncher.openTerminalForSandbox(command: $0) }
         MetaSkill.ensure()
+        // 通知点击要能落到条目上，否则 userInfo 里的深链没人消费
+        UNUserNotificationCenter.current().delegate = self
         // ⌥⌘K 全局呼出菜单栏搜索浮层（注册失败静默降级，图标仍可点击）
         GlobalHotKey.register { GlobalHotKey.toggleMenuBarPanel() }
         // 调试钩子：-atlasMenubar 1 启动后自动呼出浮层（与热键同一路径，截图用）
@@ -27,6 +33,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 主窗口关闭后保持运行（菜单栏模式）；⌘Q 正常退出
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let info = response.notification.request.content.userInfo
+        if let raw = info["deepLink"] as? String, let url = URL(string: raw) {
+            // 通知回调不在主 actor 上，路由要跳回主线程
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let store = Self.store else { return }
+                    NSApp.activate(ignoringOtherApps: true)
+                    handleDeepLink(url, store: store)
+                }
+            }
+        }
+        completionHandler()
+    }
+
+    /// App 在前台时也要显示通知，否则「有事找人」在你正开着窗口时静默失败
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
     }
 }
 
@@ -135,6 +169,7 @@ struct SkillAtlasApp: App {
                 .onOpenURL { url in
                     handleDeepLink(url, store: store)
                 }
+                .onAppear { AppDelegate.store = store }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1380, height: 860)
@@ -189,7 +224,9 @@ struct SkillAtlasApp: App {
                 .environment(\.locale, store.uiLanguage.resolvedLocale)
                 .environment(store)
         } label: {
-            Image(nsImage: MenuBarIcon.template)
+            // 有待裁决事项时图标带点：App 的存在感来自「有事找你」，
+            // 不是「等你来逛」（DESIGN v15 Ambient surface）
+            Image(nsImage: store.inboxBadgeCount > 0 ? MenuBarIcon.alert : MenuBarIcon.template)
         }
         .menuBarExtraStyle(.window)
     }

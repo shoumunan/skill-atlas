@@ -13,11 +13,14 @@ package enum SlimRules {
 package enum SlimTier: String, CaseIterable, Hashable {
     case core, userInvocable, off
 
+    /// 档位说的是「进不进 Claude 自动清单」，不是软链挂没挂。
+    /// 用「挂载」这个词会让同一个技能既是「已挂载」又是「不挂载」——
+    /// 两轴纪律要求这两个词严格分开（DESIGN v15）。
     package var title: String {
         switch self {
-        case .core: return L("完整挂载")
-        case .userInvocable: return L("仅用户可调")
-        case .off: return L("不挂载")
+        case .core: return L("进清单")
+        case .userInvocable: return L("只手动调")
+        case .off: return L("不进清单")
         }
     }
 }
