@@ -32,14 +32,18 @@ package struct SlimRow: Identifiable, Equatable {
 }
 
 package enum SlimPlanner {
+    /// 出草案。只看挂在 Claude 的技能——档位写的是 Claude 的 skillOverrides，
+    /// 把纯 Codex 技能塞进去既无效又会污染那张表。
     package static func draft(
         skills: [Skill],
         usage: [String: SkillUsage],
         favorites: Set<String>
     ) -> [SlimRow] {
         let cutoff = Date().addingTimeInterval(TimeInterval(-SlimRules.staleDays * 24 * 3600))
+        let claudeLabel = AgentPlatform.claude.label
         return skills
-            .filter { !$0.disabled && $0.directory != MetaSkill.directory }
+            .filter { !$0.disabled && $0.directory != MetaSkill.directory
+                && $0.platforms.contains(claudeLabel) }
             .map { skill -> SlimRow in
                 let record = usage[skill.directory]
                 let sessions = record?.total ?? 0

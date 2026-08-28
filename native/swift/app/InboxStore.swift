@@ -10,13 +10,9 @@ import AtlasCore
 // 这里不发起任何新采集。动作全部转发到既有机制（审阅 sheet / 处方 / 更新 diff /
 // ignoreMiss），裁决记录写 inbox-state.json（core/Inbox.swift）。
 
-/// 侧栏徽标与工具栏副文案的真源：未裁决且严重度 ≤1（挡住使用的 + 建议处理的）。
-/// 整理项（severity 2）只在页内排队，不进徽标——徽标常年亮着大数字就是警报腔。
-/// 依赖的都是 AppStore 的 revision 缓存 + InboxState 的进程内缓存，渲染期可反复求值。
-@MainActor
-func inboxUndecidedCount(store: AppStore) -> Int {
-    InboxAssembler.items(store: store).filter { $0.kind.severity <= 1 }.count
-}
+// 徽标口径见 AppStore.inboxBadgeCount（未裁决且严重度 ≤1）：整理项只在页内排队，
+// 不进徽标——徽标常年亮着大数字就是警报腔。聚合结果由 AppStore.inboxItems 缓存，
+// 视图层不要直接调 InboxAssembler，否则每次渲染都会重跑全量聚合。
 
 /// 聚合器：AppStore 缓存 → [InboxItem]（已裁决过滤 + 固定排序）
 @MainActor
@@ -34,6 +30,9 @@ enum InboxAssembler {
             ))
         }
 
+        // 安全命中与挂载问题是两类事项，各自成条。
+        // 以前 else 分支意味着「同时有断链和关键命中」时只看得到安全那条，
+        // 处理完要等下一轮扫描挂载问题才冒出来。
         for skill in store.blockingSkills {
             let critical = store.criticalFindings(for: skill)
             if let finding = critical.first {
@@ -45,14 +44,23 @@ enum InboxAssembler {
                     digest: critical.map(\.beginnerNote).joined(),
                     skillName: skill.name
                 ))
-            } else {
-                let problem = skill.problems.first ?? L("它与 AI 软件的连接需要确认。")
+            }
+            if !skill.problems.isEmpty {
                 out.append(InboxItem(
                     kind: .mount,
                     target: skill.directory,
                     title: LF("“%@”的挂载出了问题", skill.name),
-                    detail: problem,
+                    detail: skill.problems.first ?? L("它与 AI 软件的连接需要确认。"),
                     digest: skill.problems.joined(),
+                    skillName: skill.name
+                ))
+            } else if critical.isEmpty {
+                out.append(InboxItem(
+                    kind: .mount,
+                    target: skill.directory,
+                    title: LF("“%@”的挂载出了问题", skill.name),
+                    detail: L("它与 AI 软件的连接需要确认。"),
+                    digest: "unknown",
                     skillName: skill.name
                 ))
             }
@@ -90,7 +98,9 @@ enum InboxAssembler {
                 target: skill.directory,
                 title: LF("“%@”有新版本", skill.name),
                 detail: L("先看 diff 再更新；本地改动会走补丁保护。"),
-                digest: "update",
+                // digest 必须随版本变：写死常量会让「忽略一次」把这个技能
+                // 今后所有新版本都静音掉（core/Inbox.swift 的内容寻址契约）
+                digest: "update:\(skill.updatedAt)",
                 skillName: skill.name
             ))
         }
@@ -140,7 +150,8 @@ enum InboxAssembler {
                 target: card.directory,
                 title: LF("“%@”的描述改写该回访了", skill?.name ?? card.directory),
                 detail: LF("写回已 %d 天，现在 %d 次会话。看看命中有没有回升。", card.ageDays, sessions),
-                digest: "rx:\(card.ageDays)",
+                // 用写回时间戳而不是天数：天数每天都变，id 跟着变，忽略永远不生效
+                digest: "rx:\(card.writtenAt)",
                 skillName: skill?.name
             ))
         }
@@ -161,7 +172,7 @@ final class InboxStore {
     var copiedOverlapID: String?
 
     func items(store: AppStore) -> [InboxItem] {
-        InboxAssembler.items(store: store)
+        store.inboxItems
     }
 
     /// 忽略：写裁决记录。安全关键 / 挡住使用 / 待审批拒绝忽略（core 兜底）。
@@ -171,6 +182,7 @@ final class InboxStore {
             store.ignoreMiss(hit)
         }
         if InboxState.decide(id: item.id, kind: item.kind, action: "ignored") {
+            store.invalidateInbox()
             receipt = ReceiptState(text: LF("已忽略「%@」。同一问题再变化时会重新出现。", item.title), failed: false)
         } else {
             receipt = ReceiptState(text: L("这一类不能忽略，得处理掉才会消失。"), failed: true)

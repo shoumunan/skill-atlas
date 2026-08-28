@@ -36,13 +36,26 @@ struct SupplyPage: View {
                     }
                 }
                 .padding(Theme.Space.s20)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                // 可读宽度上限：宽窗不拉成仪表盘（DESIGN ⑤），
+                // 否则档位选择器会被甩到离技能名一千多点远
+                .frame(maxWidth: 760, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .panelScroll()
             .contentSurface()
         }
         .onAppear {
             store.loadProfiles()
+            supply.reloadOverrides()
+            supply.normalizeScope(appStore: store)
+        }
+        // 体检异步重算落地后：补回执数字，并让三档分组跟着新的 overrides 重排。
+        // 场景包 / 瘦身草案走的是全局确认 sheet，回到本页时也靠这条刷新。
+        .onChange(of: store.doctorReport.totalTokens) { _, _ in
+            supply.reloadOverrides()
+            supply.settleReceiptIfNeeded(appStore: store)
+        }
+        .onChange(of: store.profiles.activeProfileID) { _, _ in
             supply.reloadOverrides()
         }
         .sheet(isPresented: Binding(
@@ -158,9 +171,7 @@ private struct ScopeRail: View {
                     .truncationMode(.middle)
                 Spacer(minLength: 0)
                 if bound {
-                    Circle()
-                        .fill(Theme.healthy)
-                        .frame(width: 6, height: 6)
+                    StatusDot(tint: Theme.healthy)
                 }
             }
         }
@@ -197,23 +208,26 @@ private struct ClaudeScopeView: View {
     @Bindable var supply: SupplyStore
 
     var body: some View {
-        let skills = claudeSkills
+        // 一次分桶：原先是「排序一次 + 每档全量过滤一次」，三档就要扫三遍全库
+        let buckets = tierBuckets
         VStack(alignment: .leading, spacing: Theme.Space.s16) {
             billHeader
             presetRow
-            tierGroup(L("完整挂载"), tier: .core, skills: skills,
+            tierGroup(L("完整挂载"), members: buckets[.core] ?? [],
                       hint: L("描述进每个会话的自动清单"))
-            tierGroup(L("仅用户可调"), tier: .userInvocable, skills: skills,
+            tierGroup(L("仅用户可调"), members: buckets[.userInvocable] ?? [],
                       hint: L("不进自动清单，仍可用 /名字 调用"))
-            tierGroup(L("不挂载"), tier: .off, skills: skills,
+            tierGroup(L("不挂载"), members: buckets[.off] ?? [],
                       hint: L("从 Claude 清单里完全拿掉"))
         }
     }
 
-    private var claudeSkills: [Skill] {
-        store.skills
-            .filter { !$0.disabled && $0.platforms.contains(AgentPlatform.claude.label) }
+    private var tierBuckets: [SlimTier: [Skill]] {
+        let claudeLabel = AgentPlatform.claude.label
+        let sorted = store.skills
+            .filter { !$0.disabled && $0.platforms.contains(claudeLabel) }
             .sorted { (store.usage[$0.directory]?.total ?? 0) > (store.usage[$1.directory]?.total ?? 0) }
+        return Dictionary(grouping: sorted) { supply.tier(for: $0) }
     }
 
     private var billHeader: some View {
@@ -234,21 +248,11 @@ private struct ClaudeScopeView: View {
                 Text(L("每个 Claude 会话开场读技能清单的成本。档位只对 Claude Code 生效。"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
-            Button {
-                supply.slimPresented = true
-            } label: {
-                Text(L("瘦身草案…"))
-                    .font(Theme.Fonts.calloutEmphasis)
-                    .foregroundStyle(Theme.textPrimary)
-                    .padding(.horizontal, Theme.Space.s12)
-                    .frame(height: 28)
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(PressableButtonStyle())
-            .glassChrome(Capsule(style: .continuous), interactive: true)
-            .help(L("按使用次数自动分档，逐条确认后应用"))
+            AtlasPrimaryButton(title: L("瘦身草案…")) { supply.slimPresented = true }
+                .help(L("按使用次数自动分档，逐条确认后应用"))
         }
     }
 
@@ -289,9 +293,8 @@ private struct ClaudeScopeView: View {
         }
     }
 
-    private func tierGroup(_ title: String, tier: SlimTier, skills: [Skill], hint: String) -> some View {
-        let members = skills.filter { supply.tier(for: $0) == tier }
-        return VStack(alignment: .leading, spacing: Theme.Space.s8) {
+    private func tierGroup(_ title: String, members: [Skill], hint: String) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s8) {
             HStack(spacing: Theme.Space.s8) {
                 Text(title)
                     .font(Theme.Fonts.secondaryEmphasis)
@@ -303,6 +306,8 @@ private struct ClaudeScopeView: View {
                 Text(hint)
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
             if members.isEmpty {
                 Text(L("这一档暂时没有技能"))
@@ -310,11 +315,11 @@ private struct ClaudeScopeView: View {
                     .foregroundStyle(Theme.textTertiary)
                     .padding(.vertical, Theme.Space.s4)
             } else {
-                VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     ForEach(Array(members.enumerated()), id: \.element.id) { index, skill in
                         if index > 0 {
                             Rectangle()
-                                .fill(Color.primary.opacity(0.05))
+                                .fill(Color.primary.opacity(0.06))
                                 .frame(height: 1)
                                 .padding(.leading, Theme.Space.s12)
                         }
@@ -350,7 +355,7 @@ private struct PresetChip: View {
             .frame(height: 26)
             .background {
                 Capsule(style: .continuous)
-                    .fill(applied ? Theme.accent.opacity(0.13) : Color.primary.opacity(0.05))
+                    .fill(applied ? Theme.accent.opacity(0.13) : Color.primary.opacity(0.06))
             }
             .contentShape(Capsule())
         }
@@ -428,6 +433,7 @@ private struct PlatformScopeView: View {
                 Text(L("该平台按挂载供给，档位仅对 Claude 生效"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             mountGroup(L("已挂载"), skills: mounted, platform: platform)
             mountGroup(L("未挂载"), skills: unmounted, platform: platform)
@@ -451,11 +457,11 @@ private struct PlatformScopeView: View {
                     .foregroundStyle(Theme.textTertiary)
                     .padding(.vertical, Theme.Space.s4)
             } else {
-                VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     ForEach(Array(skills.enumerated()), id: \.element.id) { index, skill in
                         if index > 0 {
                             Rectangle()
-                                .fill(Color.primary.opacity(0.05))
+                                .fill(Color.primary.opacity(0.06))
                                 .frame(height: 1)
                                 .padding(.leading, Theme.Space.s12)
                         }
@@ -503,7 +509,7 @@ private struct MountRow: View {
             }
         }
         .padding(.horizontal, Theme.Space.s12)
-        .frame(height: 40)
+        .frame(height: 44)
     }
 }
 
@@ -565,11 +571,14 @@ private struct ProjectScopeView: View {
                             .foregroundStyle(Theme.textPrimary)
                             .padding(.horizontal, Theme.Space.s12)
                             .frame(height: 28)
-                            .contentShape(Capsule())
+                            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
                     }
-                    .menuStyle(.borderlessButton)
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden)
                     .fixedSize()
-                    .glassChrome(Capsule(style: .continuous), interactive: true)
+                    .quietControl()
+                    .help(L("把一组技能一次性钉到这个项目的会话上"))
 
                     if let binding {
                         Button(L("解除绑定")) {

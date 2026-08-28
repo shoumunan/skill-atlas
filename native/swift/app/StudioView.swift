@@ -51,14 +51,10 @@ struct StudioPage: View {
                                 .padding(.horizontal, Theme.Space.s12)
                                 .frame(height: 32)
                                 .quietControl()
-                                Button(L("建骨架")) { studio.create(appStore: store) }
-                                    .buttonStyle(PressableButtonStyle())
-                                    .font(Theme.Fonts.calloutEmphasis)
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, Theme.Space.s12)
-                                    .frame(height: 30)
-                                    .background(Capsule(style: .continuous).fill(Theme.accent))
-                                    .disabled(studio.draftName.trimmingCharacters(in: .whitespaces).count < 2)
+                                AtlasPrimaryButton(
+                                    title: L("建骨架"),
+                                    enabled: studio.draftName.trimmingCharacters(in: .whitespaces).count >= 2
+                                ) { studio.create(appStore: store) }
                             }
                             Toggle(isOn: Binding(
                                 get: { studio.includeClipboard },
@@ -68,7 +64,8 @@ struct StudioPage: View {
                                     .font(Theme.Fonts.caption)
                                     .foregroundStyle(Theme.textSecondary)
                             }
-                            .toggleStyle(.checkbox)
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
                         }
                     }
                 }
@@ -88,14 +85,10 @@ struct StudioPage: View {
                                 }
                             }
                             HStack {
-                                Button(L("开一个只装它的会话…")) { store.requestSandbox(draft) }
-                                    .buttonStyle(PressableButtonStyle())
-                                    .font(Theme.Fonts.calloutEmphasis)
-                                    .foregroundStyle(Theme.textPrimary)
-                                    .padding(.horizontal, Theme.Space.s12)
-                                    .frame(height: 28)
-                                    .contentShape(Capsule())
-                                    .glassChrome(Capsule(style: .continuous), interactive: true)
+                                AtlasPrimaryButton(title: L("开一个只装它的会话…")) {
+                                    store.requestSandbox(draft)
+                                }
+                                .help(L("在隔离环境里只装这一个技能试跑"))
                                 if store.sandboxCount > 0 {
                                     Text(LF("当前 %d 个试跑目录，设置页可一键清理", store.sandboxCount))
                                         .font(Theme.Fonts.caption)
@@ -125,15 +118,11 @@ struct StudioPage: View {
                                 .frame(height: 32)
                                 .quietControl()
                                 .onSubmit { studio.runSimulate(appStore: store) }
-                                Button(L("预演")) { studio.runSimulate(appStore: store) }
-                                    .buttonStyle(PressableButtonStyle())
-                                    .font(Theme.Fonts.calloutEmphasis)
-                                    .foregroundStyle(Theme.textPrimary)
-                                    .padding(.horizontal, Theme.Space.s12)
-                                    .frame(height: 28)
-                                    .contentShape(Capsule())
-                                    .glassChrome(Capsule(style: .continuous), interactive: true)
-                                    .disabled(studio.simulateText.trimmingCharacters(in: .whitespaces).count < 2)
+                                AtlasPrimaryButton(
+                                    title: L("预演"),
+                                    enabled: studio.simulateText.trimmingCharacters(in: .whitespaces).count >= 2
+                                ) { studio.runSimulate(appStore: store) }
+                                .help(L("看这句话会不会把它排到第一"))
                             }
                             if !studio.candidates.isEmpty {
                                 simulateResults(draft: draft)

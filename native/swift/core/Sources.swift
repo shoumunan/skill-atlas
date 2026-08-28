@@ -21,17 +21,73 @@ package enum SourceKind: String, CaseIterable, Identifiable {
         }
     }
 
-    /// 每源独立开关；`atlasRegistryEnabled` 是总闸（关掉即全部市场搜索零出网）
-    package var enabledKey: String {
-        switch self {
-        case .skillssh: return "atlasSourceSkillsSh"
-        case .skillhub: return "atlasSourceSkillHub"
-        }
+    /// 每源独立开关；总闸见 SourcePrefs.masterEnabled（关掉即全部市场搜索零出网）
+    package var enabled: Bool {
+        SourcePrefs.enabled(self)
+    }
+}
+
+// MARK: - 来源开关（App 与 CLI 共享）
+//
+// 必须落文件：App 与 atlas 是两个可执行文件、两个 UserDefaults domain，
+// 设置页的开关根本管不到 CLI。而设置页文案明写「关掉后 atlas search --remote
+// 全部零出网」——承诺与行为不符比没有开关更糟。
+
+package enum SourcePrefs {
+    package static var url: URL { AtlasPaths.root.appendingPathComponent("sources.json") }
+
+    private struct File: Codable {
+        var master: Bool?
+        var sources: [String: Bool]?
     }
 
-    package var enabled: Bool {
-        guard SkillRegistry.enabled else { return false }
-        return UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
+    private nonisolated(unsafe) static var cache: (key: String, file: File)?
+
+    private static func load() -> File {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let modified = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let size = (attributes?[.size] as? Int) ?? 0
+        let key = "\(modified)|\(size)"
+        if let cache, cache.key == key { return cache.file }
+        var file = File()
+        if let data = try? Data(contentsOf: url),
+           let decoded = try? JSONDecoder().decode(File.self, from: data) {
+            file = decoded
+        }
+        cache = (key, file)
+        return file
+    }
+
+    /// 总闸。沿用旧键 atlasRegistryEnabled 的语义：未设置视为开。
+    package static var masterEnabled: Bool {
+        load().master ?? true
+    }
+
+    package static func enabled(_ kind: SourceKind) -> Bool {
+        guard masterEnabled else { return false }
+        return load().sources?[kind.rawValue] ?? true
+    }
+
+    package static func setMaster(_ on: Bool) throws {
+        var file = load()
+        file.master = on
+        try write(file)
+    }
+
+    package static func set(_ on: Bool, for kind: SourceKind) throws {
+        var file = load()
+        var map = file.sources ?? [:]
+        map[kind.rawValue] = on
+        file.sources = map
+        try write(file)
+    }
+
+    private static func write(_ file: File) throws {
+        try FileManager.default.createDirectory(at: AtlasPaths.root, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(file).write(to: url, options: .atomic)
+        cache = nil
     }
 }
 

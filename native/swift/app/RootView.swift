@@ -522,7 +522,7 @@ private struct RailItem: View {
 
     private var badge: Int {
         // v15：徽标只挂收件箱，真源 = 聚合器同一口径（已裁决的不计）
-        page == .inbox ? inboxUndecidedCount(store: store) : 0
+        page == .inbox ? store.inboxBadgeCount : 0
     }
 }
 

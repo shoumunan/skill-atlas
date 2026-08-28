@@ -20,7 +20,7 @@ package struct AtlasError: LocalizedError {
 }
 
 package enum AgentPlatform: String, CaseIterable, Identifiable, Codable, Hashable {
-    case claude, codex, gemini, opencode, hermes, grokbuild, cursor, workbuddy, openclaw
+    case claude, codex, gemini, opencode, hermes, grokbuild, cursor, workbuddy, openclaw, qwenwork, doubao
 
     package var id: String { rawValue }
 
@@ -35,6 +35,8 @@ package enum AgentPlatform: String, CaseIterable, Identifiable, Codable, Hashabl
         case .cursor: return "Cursor"
         case .workbuddy: return "WorkBuddy"
         case .openclaw: return "OpenClaw"
+        case .qwenwork: return "QwenWork"
+        case .doubao: return "Doubao"
         }
     }
 
@@ -51,12 +53,21 @@ package enum AgentPlatform: String, CaseIterable, Identifiable, Codable, Hashabl
         case .openclaw: return "OpenClaw"
         case .opencode: return "OpenCode"
         case .hermes: return "Hermes"
+        case .qwenwork: return "千问办公"
+        case .doubao: return "豆包"
         }
     }
 
     package var dbColumn: String { "enabled_\(rawValue)" }
 
     package func root(home: URL) -> URL {
+        // 用户覆盖优先（PlatformRoots）：不是所有 agent 都用固定的 ~/.<name>/skills
+        if let custom = PlatformRoots.override(for: self) { return custom }
+        return defaultRoot(home: home)
+    }
+
+    /// 内置默认路径。设置页要拿它做占位与「恢复默认」。
+    package func defaultRoot(home: URL) -> URL {
         switch self {
         case .claude: return home.appendingPathComponent(".claude/skills")
         case .codex: return home.appendingPathComponent(".codex/skills")
@@ -70,8 +81,19 @@ package enum AgentPlatform: String, CaseIterable, Identifiable, Codable, Hashabl
         case .cursor: return home.appendingPathComponent(".cursor/skills")
         case .workbuddy: return home.appendingPathComponent(".workbuddy/skills")
         case .openclaw: return home.appendingPathComponent(".openclaw/skills")
+        // 千问办公：阿里云官方文档与 qwenwork.cn 文档一致写明 ~/.qwenworkcn/skills（2026-08-28 核对）
+        case .qwenwork: return home.appendingPathComponent(".qwenworkcn/skills")
+        // 豆包办公模式读的是用户在它里面指定的文件夹，没有官方固定路径。
+        // 这里给一个约定俗成的默认值，设置页可改（PlatformRoots）。
+        case .doubao: return home.appendingPathComponent(".doubao/skills")
         }
     }
+
+    /// 目录路径是否由用户改过（设置页显示「已自定义」）
+    package var hasCustomRoot: Bool { PlatformRoots.override(for: self) != nil }
+
+    /// 该平台的默认路径是否只是约定、需要用户确认（豆包）
+    package var rootNeedsConfirmation: Bool { self == .doubao }
 
     /// 写软链的真实目录：根本身是软链时（~/.claude/skills → ~/.mirasim/skills）先 resolve
     package func resolvedRoot(home: URL) -> URL {

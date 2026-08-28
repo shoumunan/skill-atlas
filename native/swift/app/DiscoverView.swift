@@ -28,7 +28,7 @@ struct DiscoverPage: View {
         }
         .panelScroll()
         .contentSurface()
-        .onAppear { discover.loadFeaturedIfNeeded() }
+        .onAppear { discover.syncEnabledSources(); discover.loadFeaturedIfNeeded() }
     }
 
     // MARK: 导入区（三合一）
@@ -174,11 +174,11 @@ struct DiscoverPage: View {
                     .padding(.vertical, Theme.Space.s8)
             }
         } else {
-            VStack(spacing: 0) {
+            LazyVStack(spacing: 0) {
                 ForEach(Array(hits.enumerated()), id: \.element.id) { index, hit in
                     if index > 0 {
                         Rectangle()
-                            .fill(Color.primary.opacity(0.05))
+                            .fill(Color.primary.opacity(0.06))
                             .frame(height: 1)
                             .padding(.leading, Theme.Space.s12)
                     }
@@ -268,11 +268,13 @@ private struct SourceHitRow: View {
                         .controlSize(.small)
                         .help(L("正在下载并安全解包…"))
                 } else {
+                    let busy = discover.busyHitID != nil
                     Button(L("安装…")) { discover.installFromSkillHub(hit, appStore: store) }
                         .buttonStyle(PressableButtonStyle())
                         .font(Theme.Fonts.secondaryEmphasis)
-                        .foregroundStyle(Theme.accent)
-                        .disabled(discover.busyHitID != nil)
+                        // 有别的条目在下载时整列变灰：不变灰会让人以为能并发点
+                        .foregroundStyle(busy ? Theme.textTertiary : Theme.accent)
+                        .disabled(busy)
                         .help(L("下载 zip 安装包，解包后照样过装前扫描与审阅"))
                 }
                 if let web = hit.webURL, let url = URL(string: web) {
@@ -281,11 +283,12 @@ private struct SourceHitRow: View {
                     } label: {
                         Image(systemName: "safari")
                             .font(.system(size: 11))
-                            .foregroundStyle(Theme.textTertiary)
-                            .frame(width: 22, height: 22)
-                            .contentShape(Circle())
+                            .foregroundStyle(Theme.textSecondary)
+                            .frame(width: 28, height: 28)
+                            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressableButtonStyle())
+                    .quietControl()
                     .help(L("到 SkillHub 网页看详情与评测报告"))
                 }
             } else if let web = hit.webURL, let url = URL(string: web) {
@@ -310,7 +313,7 @@ private struct SourceBadge: View {
             Text(hit.kind.displayName)
             if let publisher = hit.publisher {
                 Image(systemName: "checkmark.seal")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .help(LF("市场认证发布方：%@（仅供参考）", publisher))
             }
         }
@@ -327,7 +330,7 @@ private struct RequiresKeyChip: View {
     var body: some View {
         HStack(spacing: 2) {
             Image(systemName: "key")
-                .font(.system(size: 8, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
             Text(L("要密钥"))
                 .font(Theme.Fonts.caption)
         }

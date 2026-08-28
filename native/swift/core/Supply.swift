@@ -82,6 +82,18 @@ package enum SupplyWriter {
         )
     }
 
+    /// 当前 settings 里由我们写的档位键（值是三档之一）。
+    /// 「全部技能」与 UI 计数都要它，否则只能看见场景包那一部分。
+    package static func ownedKeys(target: URL) -> [String] {
+        guard let settings = try? ProfileWriter.readSettings(at: target),
+              let overrides = settings["skillOverrides"] as? [String: Any] else { return [] }
+        let ourValues = Set(ProfileExclusion.allCases.map(\.rawValue))
+        return overrides.compactMap { key, value in
+            guard let text = value as? String, ourValues.contains(text) else { return nil }
+            return key
+        }.sorted()
+    }
+
     /// 撤销：只删我们写过、且值仍是我们三档之一的键（原 ProfileWriter.revert 语义原样搬入）。
     /// 不把键设成 "on"，理由见 SupplyAssignment.core。
     package static func revert(target: URL, appliedKeys: [String]) throws {

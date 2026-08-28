@@ -92,8 +92,25 @@ package enum RxFollowup {
         package var id: String { directory }
     }
 
-    /// oplog 里 rx-writeback 满 14 天的条目，供维护区对比卡。
+    /// oplog 的解析结果按（修改时间, 大小）缓存：oplog 按 2MB 轮转，
+    /// 逐行 JSON 解析放在渲染路径上会随日志增长逐渐拖垮界面。
+    private nonisolated(unsafe) static var cache: (key: String, cards: [Card])?
+
+    /// oplog 里 rx-writeback 满 14 天的条目，供收件箱回访卡。
     package static func due(now: Date = Date()) -> [Card] {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: Oplog.url.path)
+        let modified = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let size = (attributes?[.size] as? Int) ?? 0
+        // 天数会随时间变化，缓存键带上当天日期，跨天自动重算
+        let day = Int(now.timeIntervalSince1970) / 86400
+        let key = "\(modified)|\(size)|\(day)"
+        if let cache, cache.key == key { return cache.cards }
+        let cards = compute(now: now)
+        cache = (key, cards)
+        return cards
+    }
+
+    private static func compute(now: Date) -> [Card] {
         guard let text = try? String(contentsOf: Oplog.url, encoding: .utf8) else { return [] }
         let cutoff = Int(now.timeIntervalSince1970) - 14 * 24 * 3600
         var latest: [String: Int] = [:]

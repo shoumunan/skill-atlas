@@ -275,4 +275,25 @@ else
   echo "WP-M(b) skipped（未找到 SkillAtlas 可执行，先 swift build）"
 fi
 
+# --- 2.1.1 新平台接入与目录覆盖 ---
+"$ATLAS" enable alpha --platform qwenwork --json >/dev/null
+[[ -L "$HOME_FIX/.qwenworkcn/skills/alpha" ]] || { echo "千问办公应挂到 ~/.qwenworkcn/skills" >&2; exit 1; }
+"$ATLAS" enable alpha --platform doubao --json >/dev/null
+[[ -L "$HOME_FIX/.doubao/skills/alpha" ]] || { echo "豆包默认路径应挂载" >&2; exit 1; }
+# 目录覆盖：豆包读的是用户指定的文件夹，改了就得挂到新地方
+mkdir -p "$HOME_FIX/custom-doubao"
+printf '{"doubao":"%s/custom-doubao"}' "$HOME_FIX" > "$HOME_FIX/.skill-atlas/platform-roots.json"
+"$ATLAS" enable beta --platform doubao --json >/dev/null
+[[ -L "$HOME_FIX/custom-doubao/beta" ]] || { echo "覆盖目录后应挂到自定义路径" >&2; exit 1; }
+[[ ! -e "$HOME_FIX/.doubao/skills/beta" ]] || { echo "覆盖后不应再写默认路径" >&2; exit 1; }
+rm -f "$HOME_FIX/.skill-atlas/platform-roots.json"
+echo "平台接入 acceptance OK"
+
+# --- 2.1.1 来源开关必须同时管住 CLI（App 与 CLI 的 UserDefaults 域不通，故落文件）---
+printf '{"master":false}' > "$HOME_FIX/.skill-atlas/sources.json"
+OFF_JSON=$("$ATLAS" search ppt --remote --source all --json)
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["data"]["remote"] is None, "总闸关掉后不应有远程结果"' "$OFF_JSON"
+rm -f "$HOME_FIX/.skill-atlas/sources.json"
+echo "来源开关 acceptance OK"
+
 echo "ALL acceptance OK"

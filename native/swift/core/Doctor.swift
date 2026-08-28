@@ -87,14 +87,19 @@ package enum ContextDoctor {
         return String(trimmed.prefix(80)) + "…"
     }
 
-    /// skillOverrides 为 off / user-invocable-only 的不进 Claude 自动清单，不计税。
-    /// meta-skill 永远可见。
+    /// Claude 自动清单里真正出现的技能：**必须挂在 Claude**，且 skillOverrides
+    /// 不是 off / user-invocable-only。meta-skill 永远可见。
+    ///
+    /// 平台过滤不能省：账单口径是「每个 Claude 会话开场读技能清单的成本」，
+    /// 把只挂 Codex 的技能算进来，同一屏就会出现两个互相打架的 token 数。
     package static func listingVisible(_ skills: [Skill]) -> [Skill] {
         let settings = (try? ProfileWriter.readSettings(at: ProfileWriter.userSettingsURL)) ?? [:]
         let raw = settings["skillOverrides"] as? [String: Any] ?? [:]
+        let claudeLabel = AgentPlatform.claude.label
         return skills.filter { skill in
             if skill.disabled { return false }
             if skill.directory == MetaSkill.directory { return true }
+            guard skill.platforms.contains(claudeLabel) else { return false }
             guard let text = raw[skill.name] as? String else { return true }
             return text != ProfileExclusion.off.rawValue
                 && text != ProfileExclusion.userInvocableOnly.rawValue

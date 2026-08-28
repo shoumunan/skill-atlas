@@ -59,6 +59,10 @@ enum PlatformBrand {
             tintedGlyph: true
         )
         case .openclaw: return Spec(file: "openclaw", template: true, tint: Color(hex: 0xE8503A), glyphScale: 0.66)
+        // 没有 logo 资源：file 留空走首字母兜底，但保留品牌色芯片，
+        // 免得一排彩色芯片里突然出现两个灰块。
+        case .qwenwork: return Spec(file: "", template: false, tint: Color(hex: 0x615CED))
+        case .doubao: return Spec(file: "", template: false, tint: Color(hex: 0x1664FF))
         case .opencode, .hermes: return nil
         }
     }
@@ -66,7 +70,7 @@ enum PlatformBrand {
     private static var cache: [String: NSImage] = [:]
 
     static func image(for platform: AgentPlatform) -> NSImage? {
-        guard let spec = spec(for: platform) else { return nil }
+        guard let spec = spec(for: platform), !spec.file.isEmpty else { return nil }
         if let cached = cache[spec.file] { return cached }
         let image = loadSVG(named: spec.file)
         if let image {

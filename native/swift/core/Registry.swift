@@ -42,9 +42,10 @@ package enum SkillRegistry {
         UserDefaults.standard.string(forKey: "atlasRegistryBase") ?? "https://www.skills.sh"
     }
 
-    /// 关掉后界面完全不出现搜索框，也不会有任何出网请求
+    /// 关掉后界面完全不出现搜索框，也不会有任何出网请求。
+    /// 读 SourcePrefs（落盘配置），这样 App 里的开关对 CLI 同样生效。
     package static var enabled: Bool {
-        UserDefaults.standard.object(forKey: "atlasRegistryEnabled") as? Bool ?? true
+        SourcePrefs.masterEnabled
     }
 
     package enum RegistryError: LocalizedError {

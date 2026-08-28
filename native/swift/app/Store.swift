@@ -89,7 +89,46 @@ final class AppStore: InstallHost {
     private var libraryGeneration = 0
     @ObservationIgnored private var doctorReportCache: (revision: Int, window: Int, report: DoctorReport)?
     /// 只让读了 `doctorReport` 的视图刷新，不再带动整棵树。
-    private var cachedDoctorReport = DoctorReport()
+    private var cachedDoctorReport = DoctorReport() { didSet { inboxInputRevision &+= 1 } }
+
+    // MARK: 收件箱条目缓存
+    //
+    // 侧栏徽标、工具栏副文案、收件箱页读的是同一份聚合结果。没有缓存时它们会在
+    // **每次渲染**重跑全量聚合——遍历全部技能查安全命中、枚举 pending-reviews 目录、
+    // 逐行解析 oplog（RxFollowup），是 2.1 首版滚动与点击卡顿的主因。
+    // 失效键：dataRevision（技能数据）+ inboxInputRevision（安全/miss/重叠/体检/裁决）。
+    @ObservationIgnored private var inboxCache: (stamp: Int, items: [InboxItem])?
+    /// 聚合输入的版本号。非 Observation 忽略：视图读 inboxItems 时要靠它建立依赖。
+    private var inboxInputRevision = 0
+
+    /// 裁决落盘等外部改动后手动抬版本，让缓存失效
+    func invalidateInbox() { inboxInputRevision &+= 1 }
+
+    /// 供给写入（档位 / 场景包 / 瘦身草案）后必须调这一下。
+    ///
+    /// 病根：写 skillOverrides 只改 ~/.claude/settings.json，技能数据本身没变，
+    /// 于是 dataRevision 不抬、doctorReportCache 永远命中——账单数字和库页
+    /// TierDots 半亮态会一直停在写入前的样子。rescan() 也救不了（它比对的是
+    /// 扫描结果，settings 不在其中），只有显式作废体检缓存才行。
+    func invalidateSupply() {
+        doctorReportCache = nil
+        scheduleDoctorReport()
+        libraryGeneration &+= 1   // 让 TierDots 半亮态跟着重画
+        inboxInputRevision &+= 1
+    }
+
+    var inboxItems: [InboxItem] {
+        let stamp = dataRevision &* 1_000_003 &+ inboxInputRevision
+        if let cache = inboxCache, cache.stamp == stamp { return cache.items }
+        let items = InboxAssembler.items(store: self)
+        inboxCache = (stamp, items)
+        return items
+    }
+
+    /// 徽标与副文案口径：未裁决且严重度 ≤1（整理项只在页内排队，不进徽标）
+    var inboxBadgeCount: Int {
+        inboxItems.filter { $0.kind.severity <= 1 }.count
+    }
     @ObservationIgnored private var doctorComputeTask: Task<Void, Never>?
     @ObservationIgnored private var deferredWork: Task<Void, Never>?
     @ObservationIgnored private var firstLaunchDeferred = true
@@ -112,7 +151,7 @@ final class AppStore: InstallHost {
     var favorites: Set<String>
 
     /// 触发词重叠（每次扫描后计算一次，不计入健康统计）
-    var triggerOverlaps: [TriggerOverlap] = []
+    var triggerOverlaps: [TriggerOverlap] = [] { didSet { inboxInputRevision &+= 1 } }
 
     /// 使用频率统计（key = 技能目录名；后台增量索引会话日志）
     var usage: [String: SkillUsage] = [:] {
@@ -194,7 +233,7 @@ final class AppStore: InstallHost {
     @ObservationIgnored var skillTable: SkillTableController?
 
     /// 已装技能的安全复扫结果（key = 技能目录名；后台增量，逐文件缓存落盘）
-    var securityFindings: [String: [SecurityFinding]] = [:]
+    var securityFindings: [String: [SecurityFinding]] = [:] { didSet { inboxInputRevision &+= 1 } }
 
     /// 体检/详情用的安全展示（装前静态规则复扫）
     var securityDisplay: [String: [SecurityFinding]] { securityFindings }
@@ -444,6 +483,7 @@ final class AppStore: InstallHost {
                                    request.profile.name, applied.count)
             }
             persistProfiles()
+            invalidateSupply()
             Oplog.append(op: "profile-apply", target: request.profile.name, ok: true,
                          detail: "excluded \(applied.count)")
         } catch {
@@ -454,6 +494,7 @@ final class AppStore: InstallHost {
     func applySlimDraft(_ rows: [SlimRow]) {
         do {
             try SlimPlanner.apply(rows, target: ProfileWriter.userSettingsURL)
+            invalidateSupply()
             let core = rows.filter { $0.tier == .core }.count
             let trimmed = rows.filter { $0.tier != .core }.count
             profileNotice = LF("已应用瘦身草案：%d 个完整挂载，%d 个不再进自动清单。只对 Claude Code 生效。", core, trimmed)
@@ -463,13 +504,27 @@ final class AppStore: InstallHost {
         }
     }
 
+    /// 「全部技能」= 让所有技能重新进自动清单。
+    ///
+    /// 只 revert 场景包写过的键是不够的：逐技能档位与瘦身草案写的是同一张
+    /// skillOverrides 表，不一并清掉就会出现「chip 说全都回来了，下面还躺着
+    /// 12 个不挂载」。这里按值回收全部属于我们三档的键。
     func revertDefaultProfile(silent: Bool = false) {
+        let ourKeys = SupplyWriter.ownedKeys(target: ProfileWriter.userSettingsURL)
         do {
-            try ProfileWriter.revert(target: ProfileWriter.userSettingsURL, appliedKeys: profiles.activeAppliedKeys)
+            try ProfileWriter.revert(
+                target: ProfileWriter.userSettingsURL,
+                appliedKeys: Array(Set(profiles.activeAppliedKeys).union(ourKeys))
+            )
             profiles.activeProfileID = nil
             profiles.activeAppliedKeys = []
             persistProfiles()
-            if !silent { profileNotice = L("已恢复默认：所有技能重新进入自动清单。") }
+            invalidateSupply()
+            if !silent {
+                profileNotice = ourKeys.isEmpty
+                    ? L("本来就没有技能被排除，自动清单没有变化。")
+                    : LF("已恢复默认：%d 个技能重新进入自动清单。", ourKeys.count)
+            }
         } catch {
             actionError = error.localizedDescription
         }
@@ -481,6 +536,7 @@ final class AppStore: InstallHost {
             try ProfileWriter.revert(target: target, appliedKeys: binding.appliedKeys)
             profiles.bindings.removeAll { $0.directory == binding.directory }
             persistProfiles()
+            invalidateSupply()
             if !silent { profileNotice = L("已解除绑定，该目录恢复默认技能清单。") }
         } catch {
             actionError = error.localizedDescription
@@ -1300,7 +1356,7 @@ final class AppStore: InstallHost {
     }
 
     var hookConsentPresented = false
-    var missHits: [MissHit] = []
+    var missHits: [MissHit] = [] { didSet { inboxInputRevision &+= 1 } }
     var ignoredMisses: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "atlasIgnoredMisses") ?? [])
 
     func refreshMisses() {
@@ -1399,7 +1455,7 @@ final class AppStore: InstallHost {
         case .supply:
             return L("谁带哪些技能进场")
         case .inbox:
-            let pending = inboxUndecidedCount(store: self)
+            let pending = inboxBadgeCount
             return pending > 0 ? LF("%d 件事项待处理", pending) : L("一切安静")
         case .studio:
             return L("把流程沉淀成技能")

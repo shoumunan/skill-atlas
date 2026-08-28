@@ -32,6 +32,11 @@ final class DiscoverStore {
     ///（detect → 装前扫描 → 审阅 → 入库全复用；溯源经 pendingProvenance 交接）。
     func installFromSkillHub(_ hit: SourceHit, appStore: AppStore) {
         guard hit.kind == .skillhub, busyHitID == nil else { return }
+        // 来源开关关掉后，缓存里的旧结果不该还能触发出网（护栏 §7-19）
+        guard SourceKind.skillhub.enabled else {
+            installError = L("SkillHub 已在设置里关闭。打开后再安装。")
+            return
+        }
         busyHitID = hit.id
         installError = nil
         Task {
@@ -45,6 +50,19 @@ final class DiscoverStore {
             busyHitID = nil
         }
     }
+
+    /// 开关变了就丢掉旧结果：否则关掉 SkillHub 后它的榜单还留在屏幕上
+    func syncEnabledSources() {
+        let signature = SourceKind.allCases.filter(\.enabled).map(\.rawValue).joined(separator: ",")
+        guard signature != lastEnabledSignature else { return }
+        lastEnabledSignature = signature
+        featured = []
+        hits = []
+        loadedFeatured = false
+        loadFeaturedIfNeeded()
+    }
+
+    @ObservationIgnored private var lastEnabledSignature = ""
 
     func loadFeaturedIfNeeded() {
         guard !loadedFeatured, anySourceEnabled else { return }

@@ -933,7 +933,7 @@ private struct DetailTierControl: View {
             Oplog.append(op: "supply-tier", target: skill.directory, ok: true,
                          detail: "\(skill.name) -> \(new.rawValue)")
             tier = new
-            Task { await store.rescan() }
+            store.invalidateSupply()
         } catch {
             store.actionError = error.localizedDescription
         }

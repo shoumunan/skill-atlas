@@ -313,40 +313,51 @@ private struct AdoptGroup: View {
 /// 组标题在卡外（系统设置惯例），卡内行之间发丝分隔
 /// v15 WP-M：发现来源开关（护栏 §7-19：总闸 + 每源双控，关闸即零出网）
 private struct DiscoverySourcesGroup: View {
-    @AppStorage("atlasRegistryEnabled") private var master = true
-    @AppStorage("atlasSourceSkillsSh") private var skillssh = true
-    @AppStorage("atlasSourceSkillHub") private var skillhub = true
+    @Environment(AppStore.self) private var store
+    /// 开关落 ~/.skill-atlas/sources.json（App 与 CLI 共享），不是 UserDefaults：
+    /// 两个可执行文件的 domain 不通，用 @AppStorage 的话设置页管不到 atlas 命令。
+    @State private var revision = 0
 
     var body: some View {
         SettingsGroup(title: "发现来源") {
             sourceRow(
                 title: L("远程发现"),
                 caption: L("总闸。关掉后发现页与 atlas search --remote 全部零出网。"),
-                isOn: $master, enabled: true
-            )
+                isOn: SourcePrefs.masterEnabled,
+                enabled: true
+            ) { try SourcePrefs.setMaster($0) }
             divider
             sourceRow(
                 title: "skills.sh",
                 caption: L("Vercel 全球索引，结果指向 GitHub 仓库，走既有安装管线。"),
-                isOn: $skillssh, enabled: master
-            )
+                isOn: SourceKind.skillssh.enabled,
+                enabled: SourcePrefs.masterEnabled
+            ) { try SourcePrefs.set($0, for: .skillssh) }
             divider
             sourceRow(
                 title: "SkillHub",
                 caption: L("腾讯技能市场（skillhub.cn）。榜单与认证仅供参考，安装照样过扫描。"),
-                isOn: $skillhub, enabled: master
-            )
+                isOn: SourceKind.skillhub.enabled,
+                enabled: SourcePrefs.masterEnabled
+            ) { try SourcePrefs.set($0, for: .skillhub) }
         }
+        .id(revision)
     }
 
     private var divider: some View {
         Rectangle()
-            .fill(Color.primary.opacity(0.05))
+            .fill(Color.primary.opacity(0.06))
             .frame(height: 1)
             .padding(.leading, Theme.Space.s12)
     }
 
-    private func sourceRow(title: String, caption: String, isOn: Binding<Bool>, enabled: Bool) -> some View {
+    private func sourceRow(
+        title: String,
+        caption: String,
+        isOn: Bool,
+        enabled: Bool,
+        write: @escaping (Bool) throws -> Void
+    ) -> some View {
         HStack(spacing: Theme.Space.s12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -358,11 +369,22 @@ private struct DiscoverySourcesGroup: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: Theme.Space.s8)
-            Toggle("", isOn: isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-                .disabled(!enabled)
+            Toggle("", isOn: Binding(
+                get: { isOn },
+                set: { next in
+                    do {
+                        try write(next)
+                        revision &+= 1
+                    } catch {
+                        store.actionError = error.localizedDescription
+                    }
+                }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .disabled(!enabled)
+            .accessibilityLabel(title)
         }
         .padding(.horizontal, Theme.Space.s12)
         .padding(.vertical, Theme.Space.s8 + 2)
@@ -492,24 +514,77 @@ private struct NotifyGroup: View {
 
 private struct VisiblePlatformsGroup: View {
     @Environment(AppStore.self) private var store
+    @State private var rootRevision = 0
 
     var body: some View {
         SettingsGroup(title: "可见平台") {
             ForEach(Array(AgentPlatform.allCases.enumerated()), id: \.element.id) { index, platform in
                 SettingsRow(
                     title: platform.displayName,
-                    subtitle: L("关掉就不占界面位置，已有软链不动。"),
+                    subtitle: subtitle(for: platform),
                     divider: index < AgentPlatform.allCases.count - 1
                 ) {
-                    Toggle("", isOn: Binding(
-                        get: { store.visiblePlatforms.contains(platform) },
-                        set: { store.setVisible(platform, on: $0) }
-                    ))
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .labelsHidden()
+                    HStack(spacing: Theme.Space.s8) {
+                        Button(L("目录…")) { chooseRoot(platform) }
+                            .buttonStyle(.plain)
+                            .font(Theme.Fonts.secondaryEmphasis)
+                            .foregroundStyle(Theme.accent)
+                            .help(L("改成这个软件真正读取的技能目录"))
+                        if platform.hasCustomRoot {
+                            Button(L("恢复默认")) { setRoot(nil, for: platform) }
+                                .buttonStyle(.plain)
+                                .font(Theme.Fonts.caption)
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                        Toggle("", isOn: Binding(
+                            get: { store.visiblePlatforms.contains(platform) },
+                            set: { store.setVisible(platform, on: $0) }
+                        ))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                    }
                 }
             }
+        }
+        .id(rootRevision)
+    }
+
+    /// 副文案就说这个平台的技能目录在哪——这是「同步点亮了却没生效」时
+    /// 唯一能自查的信息，不该藏起来。
+    private func subtitle(for platform: AgentPlatform) -> String {
+        let path = platform.root(home: AtlasPaths.home).path
+            .replacingOccurrences(of: AtlasPaths.home.path, with: "~")
+        if platform.hasCustomRoot {
+            return LF("已自定义：%@", path)
+        }
+        if platform.rootNeedsConfirmation {
+            return LF("%@（豆包读的是你在它里面指定的文件夹，不一致就点「目录…」改）", path)
+        }
+        return path
+    }
+
+    private func chooseRoot(_ platform: AgentPlatform) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = L("选定")
+        panel.message = LF("选择 %@ 实际读取技能的目录", platform.displayName)
+        panel.directoryURL = platform.root(home: AtlasPaths.home)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        setRoot(url.path, for: platform)
+    }
+
+    private func setRoot(_ path: String?, for platform: AgentPlatform) {
+        do {
+            try PlatformRoots.set(path, for: platform)
+            Oplog.append(op: "platform-root", target: platform.rawValue, ok: true, detail: path ?? "default")
+            rootRevision &+= 1
+            Task { await store.rescan() }
+        } catch {
+            store.actionError = error.localizedDescription
         }
     }
 }
@@ -936,19 +1011,8 @@ private struct AppGroup: View {
                 subtitle: L("四条工作流与边界都在这一份里。agent 不用读，元技能已教会它。"),
                 divider: true
             ) {
-                Button {
-                    openHandbook()
-                } label: {
-                    Text(L("打开"))
-                        .font(Theme.Fonts.calloutEmphasis)
-                        .foregroundStyle(Theme.textPrimary)
-                        .padding(.horizontal, Theme.Space.s12)
-                        .frame(height: 28)
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressableButtonStyle())
-                .glassChrome(Capsule(style: .continuous), interactive: true)
-                .help(L("与仓库 docs/handbook.md 是同一份"))
+                AtlasSecondaryButton(title: L("打开")) { openHandbook() }
+                    .help(L("与仓库 docs/handbook.md 是同一份"))
             }
             SettingsRow(
                 title: "Skill Atlas \(version)",

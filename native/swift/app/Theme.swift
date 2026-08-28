@@ -463,6 +463,55 @@ struct StatusDot: View {
     }
 }
 
+/// 强调主按钮（一屏一个，DESIGN 铁律）。
+///
+/// label 必须整个建在 Button 里：padding/frame 挂在 Button **外面**时，
+/// 自定义 ButtonStyle 的命中区只有那行文字——按钮看着有 12pt 内边距，
+/// 实际点空白处没反应。2.1 的创作页踩过三次。
+/// PressableButtonStyle 不会自动画禁用态，所以 opacity 要显式给。
+struct AtlasPrimaryButton: View {
+    var title: String
+    var enabled: Bool = true
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(Theme.Fonts.calloutEmphasis)
+                .foregroundStyle(.white)
+                .padding(.horizontal, Theme.Space.s16)
+                .frame(height: 28)
+                .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(PressableButtonStyle())
+        .accentGlass(Capsule(style: .continuous))
+        .opacity(enabled ? 1 : 0.4)
+        .disabled(!enabled)
+    }
+}
+
+/// 次级按钮：安静材质、与主按钮等高。玻璃不落在 L1 内容上（DESIGN ④）。
+struct AtlasSecondaryButton: View {
+    var title: String
+    var enabled: Bool = true
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(Theme.Fonts.calloutEmphasis)
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.horizontal, Theme.Space.s12)
+                .frame(height: 28)
+                .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(PressableButtonStyle())
+        .quietControl(cornerRadius: 14)
+        .opacity(enabled ? 1 : 0.4)
+        .disabled(!enabled)
+    }
+}
+
 /// v15 写操作回执行：成功报数字变化，失败报原因（DESIGN.md v15）
 struct ReceiptLine: View {
     var text: String

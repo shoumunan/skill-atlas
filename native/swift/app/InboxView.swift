@@ -33,13 +33,13 @@ struct InboxPage: View {
                                 .font(Theme.Fonts.secondaryEmphasis)
                                 .foregroundStyle(Theme.textSecondary)
                                 .padding(.leading, Theme.Space.s4)
-                            VStack(spacing: 0) {
+                            LazyVStack(spacing: 0) {
                                 ForEach(Array(items.dropFirst().enumerated()), id: \.element.id) { index, item in
                                     if index > 0 {
                                         Rectangle()
-                                            .fill(Color.primary.opacity(0.05))
+                                            .fill(Color.primary.opacity(0.06))
                                             .frame(height: 1)
-                                            .padding(.leading, Theme.Space.s16)
+                                            .padding(.leading, Theme.Space.s12)
                                     }
                                     InboxRow(inbox: inbox, item: item)
                                         .id(item.id)
@@ -121,7 +121,9 @@ private struct PrimaryTaskCard: View {
         }
         .padding(Theme.Space.s20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .quietControl(cornerRadius: Theme.Radius.tile, tint: item.kind.severity == 0 ? Theme.warning : nil)
+        // 底色不着语义色：严重度由 InboxKindBadge 单独承载。
+        // 同一条目「琥珀底 + 红徽标」是两个语义色描述一件事（DESIGN 色彩收敛）。
+        .quietControl(cornerRadius: Theme.Radius.tile)
     }
 }
 
@@ -143,13 +145,14 @@ private struct InboxRow: View {
                 Text(item.detail)
                     .font(Theme.Fonts.secondary)
                     .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                 InboxActions(inbox: inbox, item: item, emphasized: false)
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, Theme.Space.s16)
-        .padding(.vertical, Theme.Space.s12)
+        .padding(.horizontal, Theme.Space.s12)
+        .padding(.vertical, Theme.Space.s8 + 2)
     }
 }
 
@@ -183,13 +186,10 @@ private struct InboxKindBadge: View {
             }
         }
         .foregroundStyle(meta.tint)
-        .padding(.horizontal, compact ? 0 : Theme.Space.s8)
-        .frame(height: compact ? 22 : 20)
-        .frame(minWidth: compact ? 22 : 0)
-        .background {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(meta.tint.opacity(0.10))
-        }
+        .padding(.horizontal, compact ? 0 : Theme.Space.s4 + 2)
+        .frame(height: 20)
+        .frame(minWidth: compact ? 20 : 0)
+        .quietControl(tint: meta.tint)
         .help(meta.label)
     }
 }
@@ -282,17 +282,8 @@ private struct InboxActions: View {
     @ViewBuilder
     private func primary(_ title: String, action: @escaping () -> Void) -> some View {
         if emphasized {
-            // 主任务卡：一屏一个强调色主按钮（DESIGN 铁律）
-            Button(action: action) {
-                Text(title)
-                    .font(Theme.Fonts.secondaryEmphasis)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, Theme.Space.s12)
-                    .frame(height: 28)
-                    .background(Capsule(style: .continuous).fill(Theme.accent))
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(PressableButtonStyle())
+            // 主任务卡：一屏一个强调色主按钮（DESIGN 铁律），材质与全 App 一致
+            AtlasPrimaryButton(title: title, action: action)
         } else {
             secondary(title, action: action)
         }

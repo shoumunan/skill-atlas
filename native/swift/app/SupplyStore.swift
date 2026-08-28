@@ -31,6 +31,16 @@ final class SupplyStore {
         var failed: Bool
     }
 
+    /// Claude 可以在设置里被隐藏。左轨只列可见平台，scope 却默认钉在 Claude，
+    /// 结果是左轨无选中、右侧照样渲染 Claude 档位板。进页时校正一次。
+    func normalizeScope(appStore: AppStore) {
+        if case .platform(let platform) = scope,
+           !appStore.visiblePlatforms.contains(platform),
+           let fallback = appStore.visiblePlatforms.first {
+            scope = .platform(fallback)
+        }
+    }
+
     func reloadOverrides() {
         let settings = (try? ProfileWriter.readSettings(at: ProfileWriter.userSettingsURL)) ?? [:]
         let raw = settings["skillOverrides"] as? [String: Any] ?? [:]
@@ -45,10 +55,13 @@ final class SupplyStore {
         }
     }
 
-    /// 逐技能改档（Claude 用户级）。回执报账单前后数字；全局体检随后异步跟上。
+    /// 逐技能改档（Claude 用户级）。回执报账单前后数字。
+    ///
+    /// 账单一律读 `appStore.doctorReport.totalTokens`——它和页头大数字、左轨、
+    /// 库页链接是同一个口径。以前这里自己再算一遍，同屏两个数字必然打架。
     func applyTier(_ tier: SlimTier, to skill: Skill, appStore: AppStore) {
         guard self.tier(for: skill) != tier else { return }
-        let before = billTokens(appStore: appStore)
+        let before = appStore.doctorReport.totalTokens
         let assignment: SupplyAssignment
         switch tier {
         case .core: assignment = .core
@@ -63,14 +76,9 @@ final class SupplyStore {
             Oplog.append(op: "supply-tier", target: skill.directory, ok: true,
                          detail: "\(skill.name) -> \(tier.rawValue)")
             reloadOverrides()
-            let after = billTokens(appStore: appStore)
-            receipt = ReceiptState(
-                text: after == before
-                    ? LF("已改为「%@」，账单不变（%d tok）", tier.title, after)
-                    : LF("已改为「%@」，账单 %d → %d tok", tier.title, before, after),
-                failed: false
-            )
-            Task { await appStore.rescan() }
+            // 体检缓存作废并重算：不调这一下，账单和 TierDots 会停在写入前
+            appStore.invalidateSupply()
+            pendingReceipt = (tier.title, before)
         } catch {
             receipt = ReceiptState(text: error.localizedDescription, failed: true)
             Oplog.append(op: "supply-tier", target: skill.directory, ok: false,
@@ -78,17 +86,21 @@ final class SupplyStore {
         }
     }
 
-    /// 按当前 overrides 现算 Claude 清单账单（口径 = ContextDoctor，report 内部自读 settings）
-    func billTokens(appStore: AppStore) -> Int {
-        let skills = appStore.skills.filter { !$0.disabled && $0.platforms.contains(AgentPlatform.claude.label) }
-        let window = UserDefaults.standard.integer(forKey: "atlasContextWindow")
-        let report = ContextDoctor.report(
-            skills: skills,
-            usage: appStore.usage,
-            staleDirectories: [],
-            contextWindowTokens: window > 0 ? window : 200_000
+    /// 体检是异步重算的：先记下「改成了什么档、改之前多少 token」，
+    /// 等新账单落地再把回执补全，避免报一个还没生效的数字。
+    @ObservationIgnored private var pendingReceipt: (tierTitle: String, before: Int)?
+
+    /// 由 SupplyPage 在 doctorReport 变化时调用
+    func settleReceiptIfNeeded(appStore: AppStore) {
+        guard let pending = pendingReceipt else { return }
+        let after = appStore.doctorReport.totalTokens
+        pendingReceipt = nil
+        receipt = ReceiptState(
+            text: after == pending.before
+                ? LF("已改为「%@」，账单不变（%d tok）", pending.tierTitle, after)
+                : LF("已改为「%@」，账单 %d → %d tok", pending.tierTitle, pending.before, after),
+            failed: false
         )
-        return report.totalTokens
     }
 
     // MARK: 项目登记（ADR-13：只登记与绑定，不扫描项目内技能目录）
