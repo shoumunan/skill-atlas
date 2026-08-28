@@ -1,11 +1,11 @@
 #!/bin/zsh
-# Skill Atlas 2.4.0 发版：构建 → 校验版本 → DMG。
+# Skill Atlas 2.5.0 发版：构建 → 校验版本 → DMG。
 # 推送、打 tag、上传 Release、写 appcast 由本脚本末尾提示的命令手动执行（外发动作要人确认）。
 set -euo pipefail
 APP_DIR="${0:A:h}"
 cd "$APP_DIR"
 
-VERSION="2.4.0"
+VERSION="2.5.0"
 TAG="v$VERSION"
 
 echo "== 构建 =="
@@ -31,8 +31,8 @@ ls -lh "$DMG"
 cat <<TIP
 
 == 本地产物就绪。以下是外发步骤（确认后手动执行）==
-  git push -u origin v2.4-dev
-  git checkout main && git merge --ff-only v2.4-dev && git push
+  git push -u origin v2.5-dev
+  git checkout main && git merge --ff-only v2.5-dev && git push
   git tag $TAG && git push origin $TAG
   gh release create $TAG "\$DMG" --title "Skill Atlas $VERSION" --notes-file <(cat)
   # 取 Release 资产摘要后写回 appcast.json 的 sha256：

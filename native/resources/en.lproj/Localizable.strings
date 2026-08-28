@@ -1391,3 +1391,9 @@
 "比如写基金材料时不想看到编程技能。Claude Code 里走它自己的三档开关；勾上别的软件后，没勾的技能会在那边先摘下来，撤场景时原样挂回。" = "Say you do not want coding skills around while writing fund copy. Claude Code uses its own three tiers; tick other apps and unchecked skills get unhooked there too, then hooked back exactly as they were when you drop the scenario.";
 "管哪些软件：" = "Covers these apps:";
 "这三档是 Claude Code 自己的开关，别的软件没有中间档。要让别的软件也少装几个，去设置里给场景勾上那些软件。" = "These three tiers are Claude Code's own switch; other apps have no middle setting. To thin things out elsewhere, tick those apps on a scenario in Settings.";
+"不压任何场景：所有技能都进开场清单。" = "No scenario applied: every skill is in the opening list.";
+"只留 %d 个技能。Claude Code 里其余的不进开场清单；%@ 里会把软链先摘下来，撤场景时原样挂回。" = "Keeps %d skills. In Claude Code the rest stay out of the opening list; in %@ their links come off and go back exactly as they were when you drop the scenario.";
+"只留 %d 个技能，其余的不进 Claude Code 的开场清单（打 /名字 仍可用）。" = "Keeps %d skills; the rest stay out of Claude Code's opening list (typing /name still works).";
+"新建、改名、挑技能、选管哪些软件" = "Create, rename, pick skills, choose which apps it covers";
+"比如「写基金材料」只留投研相关的技能，其余的先收起来" = "For example, a Writing fund copy scenario keeps only the research skills and puts the rest away";
+"配一套…" = "Set one up…";

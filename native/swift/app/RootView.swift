@@ -397,11 +397,16 @@ struct SidebarRail: View {
             }
             .padding(.horizontal, Theme.Space.s8)
 
-            // 三项导航撑不满一根满高的栏。但把检查页的数字搬过来填空是假充实——
-            // 那些数字在它们该在的地方已经有了。这里放的是**别处答不了的那个问题**：
-            // 「我这些技能，Claude 最近到底在用哪几个？」没有使用记录时整块不出现，
-            // 宁可空着也不摆一个空盒子。
-            RecentlyUsedBlock()
+            // 侧栏放的是「你要切换的东西」，不是日志。
+            //
+            // 上一版这里摆过「最近在用」，是填充物：最近用过什么你自己清楚，
+            // 在这儿再看一遍没有任何决定可做。场景才是这个位置该有的形状——
+            // 一组具名的上下文，选一个生效，而且它是全局状态（切了之后所有 AI
+            // 看到的技能清单都不一样），本来就该常驻在 chrome 里。
+            //
+            // 它以前埋在 设置 → 进阶 → 场景包 → 管理场景… 四层底下，
+            // 你根本看不出现在生效的是哪一套。
+            ScenarioRail()
 
             Spacer(minLength: Theme.Space.s16)
 
@@ -459,66 +464,110 @@ private struct BrandRow: View {
     }
 }
 
-/// 侧栏「最近在用」：按最后一次触发时间排的前六个。
+/// 侧栏「场景」：一组具名的上下文，选一个生效。
 ///
-/// 点一条直接跳到那个技能。这是这根栏唯一放得下、又只有这里答得了的信息——
-/// 技能总数在库页标题上，待办数在导航角标上，开场长度在检查页顶，都不该在这儿重复一遍。
-private struct RecentlyUsedBlock: View {
+/// 「全部技能」是不设场景的那一档，永远在第一位——你得能一眼看到「现在没压任何
+/// 场景」，也得能一键退回来。生效的那条打勾。
+///
+/// 应用场景要写 ~/.claude/settings.json、还会摘别的软件下的软链，所以点一下走的
+/// 是既有的确认流程（先把写盘计划原样给你看）。退回「全部技能」是纯撤销，不拦。
+private struct ScenarioRail: View {
     @Environment(AppStore.self) private var store
 
-    private var recent: [(skill: Skill, at: Date)] {
-        var pairs: [(skill: Skill, at: Date)] = []
-        for skill in store.skills {
-            guard let at = store.usage[skill.directory]?.lastUsed else { continue }
-            pairs.append((skill: skill, at: at))
-        }
-        pairs.sort { $0.at > $1.at }
-        return Array(pairs.prefix(6))
-    }
-
     var body: some View {
-        let rows = recent
-        if !rows.isEmpty {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(L("最近在用"))
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: Theme.Space.s4) {
+                Text(L("场景"))
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.textTertiary)
-                    .padding(.horizontal, Theme.Space.s8 + 2)
-                    .padding(.top, Theme.Space.s16)
-                    .padding(.bottom, Theme.Space.s4)
-                ForEach(rows, id: \.skill.directory) { row in
-                    RecentRow(skill: row.skill, at: row.at)
+                Spacer(minLength: 0)
+                Button {
+                    store.loadProfiles()
+                    store.profileSheetPresented = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(L("新建、改名、挑技能、选管哪些软件"))
+            }
+            .padding(.horizontal, Theme.Space.s8 + 2)
+            .padding(.top, Theme.Space.s16)
+            .padding(.bottom, Theme.Space.s4)
+
+            ScenarioRow(
+                title: L("全部技能"),
+                active: store.profiles.activeProfileID == nil,
+                help: L("不压任何场景：所有技能都进开场清单。")
+            ) {
+                store.revertDefaultProfile()
+            }
+
+            ForEach(store.profiles.profiles) { profile in
+                ScenarioRow(
+                    title: profile.name,
+                    active: store.profiles.activeProfileID == profile.id,
+                    help: Self.help(for: profile, store: store)
+                ) {
+                    store.requestProfileApply(profile, directory: nil)
                 }
             }
-            .padding(.horizontal, Theme.Space.s8)
+
+            if store.profiles.profiles.isEmpty {
+                Button {
+                    store.loadProfiles()
+                    store.profileSheetPresented = true
+                } label: {
+                    Text(L("配一套…"))
+                        .font(Theme.Fonts.callout)
+                        .foregroundStyle(Theme.accent)
+                        .padding(.horizontal, Theme.Space.s8 + 2)
+                        .frame(height: 26)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(L("比如「写基金材料」只留投研相关的技能，其余的先收起来"))
+            }
         }
+        .padding(.horizontal, Theme.Space.s8)
+    }
+
+    /// tooltip 要说清这一套到底管什么，别只报个名字
+    private static func help(for profile: AtlasProfile, store: AppStore) -> String {
+        let extra = ScenarioMounts.mountPlatforms(of: profile)
+        let names = extra.map(\.displayName).joined(separator: L("、"))
+        return extra.isEmpty
+            ? LF("只留 %d 个技能，其余的不进 Claude Code 的开场清单（打 /名字 仍可用）。", profile.members.count)
+            : LF("只留 %d 个技能。Claude Code 里其余的不进开场清单；%@ 里会把软链先摘下来，撤场景时原样挂回。",
+                 profile.members.count, names)
     }
 }
 
-private struct RecentRow: View {
-    @Environment(AppStore.self) private var store
+private struct ScenarioRow: View {
     @State private var hovering = false
-    var skill: Skill
-    var at: Date
+    var title: String
+    var active: Bool
+    var help: String
+    var action: () -> Void
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-        Button {
-            store.nav = .library
-            store.select(skill.name)
-        } label: {
+        Button(action: action) {
             HStack(spacing: Theme.Space.s8) {
-                Text(skill.name)
-                    .font(Theme.Fonts.callout)
-                    .foregroundStyle(Theme.textSecondary)
+                Image(systemName: active ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(active ? Theme.accent : Theme.textTertiary)
+                    .frame(width: 14)
+                Text(title)
+                    .font(active ? Theme.Fonts.calloutEmphasis : Theme.Fonts.callout)
+                    .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Spacer(minLength: Theme.Space.s4)
-                Text(Self.ago(at))
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textTertiary)
-                    .monospacedDigit()
-                    .layoutPriority(1)
+                Spacer(minLength: 0)
             }
             .padding(.horizontal, Theme.Space.s8 + 2)
             .frame(height: 26)
@@ -528,17 +577,8 @@ private struct RecentRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(LF("%@：最后一次是 %@。点击在技能库里打开。", skill.name, Self.ago(at)))
-    }
-
-    /// 「3 天前」这种粗粒度就够了：这里要的是新鲜度，不是时刻
-    static func ago(_ date: Date) -> String {
-        let seconds = Int(Date().timeIntervalSince(date))
-        if seconds < 3600 { return L("刚刚") }
-        if seconds < 86_400 { return LF("%d 小时前", seconds / 3600) }
-        let days = seconds / 86_400
-        if days < 30 { return LF("%d 天前", days) }
-        return LF("%d 个月前", max(1, days / 30))
+        .help(help)
+        .accessibilityAddTraits(active ? [.isSelected] : [])
     }
 }
 
