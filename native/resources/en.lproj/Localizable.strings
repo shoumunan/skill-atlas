@@ -117,7 +117,6 @@
 "克隆失败：%@" = "Clone failed: %@";
 "全不选" = "Deselect All";
 "全权工具声明（allowed-tools 只被解析、不被强制执行）" = "Full-grant tool declaration (allowed-tools is parsed but not enforced)";
-"全选" = "Select All";
 "全部" = "All";
 "全部停用" = "Disable All";
 "全部停用（%lld）" = "Disable All (%lld)";

@@ -307,4 +307,8 @@ else
   echo "导航与深链 skipped（未找到 SkillAtlas 可执行）"
 fi
 
+# --- 三语翻译完整性（漏翻是静默失败，界面会安静掉回中文）---
+python3 "$ROOT/tests/assert_i18n.py" "$ROOT/native"
+echo "i18n acceptance OK"
+
 echo "ALL acceptance OK"
