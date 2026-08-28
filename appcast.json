@@ -1,7 +1,7 @@
 {
-  "version": "2.3.0",
-  "notes": "v2.3.0：点平台图标不再触发全量重扫（511ms → 1ms 以内）。检查页按原因归并——6 个技能同报同一条挂载缺失是 1 件事不是 6 件，14 条塌成 6 张卡，能一次修完的才给批量键。十一个平台全部有图标。暗色下选中项不再是黑洞。侧栏加「最近在用」。",
+  "version": "2.4.0",
+  "notes": "v2.4.0：场景不再只对 Claude Code 生效。勾上别的软件后，没勾的技能会在那边把软链先摘下来，撤场景时原样挂回——目录表里的意图位一个字节不动，你自己关掉的不会被替你打开。落地页主图重拍。",
   "download": "https://github.com/shoumunan/skill-atlas/releases/latest",
-  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.3.0/Skill.Atlas-2.3.0.dmg",
-  "sha256": "5fc23438405ab0412313b1f53671614f118a45de77d953f87bc29d6a30841a40"
+  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.4.0/Skill.Atlas-2.4.0.dmg",
+  "sha256": "70d8396782c083f8ee20af06247893458f17b1ce6662739f022ae5ac56886b32"
 }
