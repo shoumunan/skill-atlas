@@ -78,7 +78,7 @@ enum AtlasCLI {
     }
 
     private static func printHelp() {
-        say(LF("atlas %@ — Skill Atlas 命令行", AtlasVersion.string))
+        say(LF("atlas %@ · Skill Atlas 命令行", AtlasVersion.string))
         say(helpLine())
     }
 }
