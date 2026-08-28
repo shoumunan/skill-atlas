@@ -34,7 +34,44 @@ enum SearchCommand {
         var remoteJSON: Any = NSNull()
         var remoteError: Any = NSNull()
         if args.remote {
-            if !SkillRegistry.enabled {
+            // --source 走多源聚合（ADR-15 增量面，2.1 唯一放行的 CLI 新参数）；
+            // 不带 --source 保持 2.0 的 skills.sh 单源路径与输出结构，一个字不动（ADR-12）。
+            if let sourceRaw = args.source {
+                let only: SourceKind?
+                switch sourceRaw {
+                case "all", "": only = nil
+                case "skillssh": only = .skillssh
+                case "skillhub": only = .skillhub
+                default:
+                    return fail(op: "search", json: args.json, code: .usage,
+                                message: LF("未知来源「%@」", sourceRaw),
+                                hint: "--source skillssh|skillhub|all")
+                }
+                if !SkillRegistry.enabled {
+                    remoteError = L("远程搜索不可用（已关闭或连不上）")
+                } else {
+                    switch runSync({ await SkillSources.search(query, only: only) }) {
+                    case .success(let hits):
+                        remoteJSON = hits.map { hit -> [String: Any] in
+                            [
+                                "id": hit.id,
+                                "sourceKind": hit.kind.rawValue,
+                                "key": hit.key,
+                                "name": hit.name,
+                                "summary": hit.summary,
+                                "metric": hit.metric,
+                                "repoURL": jsonOrNull(hit.repoURL),
+                                "webURL": jsonOrNull(hit.webURL),
+                                "publisher": jsonOrNull(hit.publisher),
+                                "requiresKey": hit.requiresKey,
+                                "version": jsonOrNull(hit.version),
+                            ]
+                        }
+                    case .failure:
+                        remoteError = L("远程搜索不可用（已关闭或连不上）")
+                    }
+                }
+            } else if !SkillRegistry.enabled {
                 remoteError = L("远程搜索不可用（已关闭或连不上）")
             } else {
                 switch runSync({ try await SkillRegistry.search(query) }) {

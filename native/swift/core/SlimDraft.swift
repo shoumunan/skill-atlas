@@ -3,7 +3,7 @@ import Foundation
 // MARK: - 瘦身草案（WP3）
 //
 // 三档：完整挂载 / 仅用户可调 / 不挂载。一个 Profile 只能给非成员写同一种
-// exclusion，所以混合三档不能走 ProfileWriter.apply，直接写 skillOverrides。
+// exclusion，所以混合三档不走 ProfileWriter.apply；写盘统一经 SupplyWriter（ADR-11）。
 
 package enum SlimRules {
     package static let coreMinSessions = 5
@@ -60,29 +60,16 @@ package enum SlimPlanner {
             .sorted { $0.sessions > $1.sessions }
     }
 
-    /// 把草案写进 Claude 的 skillOverrides。meta-skill 永不进排除集。
+    /// 把草案交给供给单写者（ADR-11）。meta-skill 豁免与备份在 SupplyWriter 集中执行。
     package static func apply(_ rows: [SlimRow], target: URL) throws {
-        var settings = try ProfileWriter.readSettings(at: target)
-        var overrides = settings["skillOverrides"] as? [String: Any] ?? [:]
-        let ourValues = Set(ProfileExclusion.allCases.map(\.rawValue))
+        var assignments: [String: SupplyAssignment] = [:]
         for row in rows {
-            if row.directory == MetaSkill.directory { continue }
             switch row.tier {
-            case .core:
-                if let text = overrides[row.name] as? String, ourValues.contains(text) {
-                    overrides.removeValue(forKey: row.name)
-                }
-            case .userInvocable:
-                overrides[row.name] = ProfileExclusion.userInvocableOnly.rawValue
-            case .off:
-                overrides[row.name] = ProfileExclusion.off.rawValue
+            case .core: assignments[row.name] = .core
+            case .userInvocable: assignments[row.name] = .userInvocable
+            case .off: assignments[row.name] = .off
             }
         }
-        if overrides.isEmpty {
-            settings.removeValue(forKey: "skillOverrides")
-        } else {
-            settings["skillOverrides"] = overrides
-        }
-        try ProfileWriter.writeSettings(settings, to: target)
+        try SupplyWriter.write(assignments: assignments, target: target)
     }
 }

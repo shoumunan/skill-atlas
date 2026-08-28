@@ -228,4 +228,51 @@ echo "$SANDBOX_JSON" | jget ok | grep -q true
 echo "$SANDBOX_JSON" | jget data.command | grep -q claude
 echo "WP5 acceptance OK"
 
+# --- WP-M(b) zip 直装通道：bsdtar 安全解包探针（离线夹具，App 二进制承载） ---
+find_app() {
+  local candidates=(
+    "native/.build/release/SkillAtlas"
+    "native/.build/debug/SkillAtlas"
+  )
+  local path
+  for path in "${candidates[@]}"; do
+    if [[ -x "$ROOT/$path" ]]; then
+      print -- "$ROOT/$path"
+      return 0
+    fi
+  done
+  return 1
+}
+if APP=$(find_app); then
+  ZIPFIX="$HOME_FIX/zipfix"
+  mkdir -p "$ZIPFIX"
+  python3 - "$ZIPFIX" <<'PY'
+import sys, zipfile
+base = sys.argv[1]
+# 路径穿越：bsdtar 拒 `..`，探针应 exit 3
+with zipfile.ZipFile(base + "/slip.zip", "w") as z:
+    z.writestr("../evil.txt", "escape")
+# 符号链接条目：bsdtar 会解出，探针的全树遍历应整包拒收（exit 3）
+with zipfile.ZipFile(base + "/link.zip", "w") as z:
+    info = zipfile.ZipInfo("door")
+    info.external_attr = (0o120777 << 16)
+    z.writestr(info, "/etc")
+    z.writestr("ok.txt", "x")
+# 干净包：应 exit 0 且能数出文件
+with zipfile.ZipFile(base + "/clean.zip", "w") as z:
+    z.writestr("demo/SKILL.md", "---\nname: demo\ndescription: d\n---\nbody")
+    z.writestr("demo/notes.md", "hello")
+PY
+  ret=0; "$APP" -atlasZipProbe "$ZIPFIX/slip.zip" >/dev/null 2>&1 || ret=$?
+  [[ "$ret" == 3 ]] || { echo "slip.zip 应被安全拒收（exit 3），实际 $ret" >&2; exit 1; }
+  ret=0; "$APP" -atlasZipProbe "$ZIPFIX/link.zip" >/dev/null 2>&1 || ret=$?
+  [[ "$ret" == 3 ]] || { echo "link.zip 应被安全拒收（exit 3），实际 $ret" >&2; exit 1; }
+  ret=0; "$APP" -atlasZipProbe "$ZIPFIX/clean.zip" -atlasScanProbe "$ZIPFIX/out.json" >/dev/null 2>&1 || ret=$?
+  [[ "$ret" == 0 ]] || { echo "clean.zip 应通过（exit 0），实际 $ret" >&2; exit 1; }
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["ok"] is True and d["files"] >= 2' "$ZIPFIX/out.json"
+  echo "WP-M(b) acceptance OK"
+else
+  echo "WP-M(b) skipped（未找到 SkillAtlas 可执行，先 swift build）"
+fi
+
 echo "ALL acceptance OK"

@@ -73,9 +73,10 @@ package enum MetaSkill {
         ## 什么时候用哪个命令
 
         - 用户要的能力库里可能已有：`\(binary) search <关键词> --json`
+        - 库里没有、要去市场找：`\(binary) search <关键词> --remote --source all --json`（结果里 repoURL 非空的可直接 install）
         - 用户明确要装：`\(binary) install <github-url|owner/repo> --json`
         - 用户抱怨技能没触发：`\(binary) simulate "<用户原话>" --json`
-        - 用户要把流程沉淀下来：`\(binary) new <name> --json`（WP5 之后）
+        - 用户要把流程沉淀下来：`\(binary) new <name> --json`，装完可用 `\(binary) sandbox <name>` 隔离试跑
         - 诊断挂载/安全/重叠：`\(binary) doctor --json`
         - 看库存：`\(binary) list --json`
 

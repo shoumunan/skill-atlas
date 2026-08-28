@@ -72,6 +72,19 @@ package struct ProfileBinding: Codable, Equatable, Identifiable {
     }
 }
 
+/// 供给页「项目」范围的登记项（ADR-13：P0 只做绑定与登记，不扫描项目内技能目录）
+package struct SupplyProject: Codable, Equatable, Identifiable {
+    package var path: String
+    package var addedAt: Int
+
+    package var id: String { path }
+
+    package init(path: String, addedAt: Int) {
+        self.path = path
+        self.addedAt = addedAt
+    }
+}
+
 package struct ProfilesFile: Codable {
     package var version: Int = 1
     package var profiles: [AtlasProfile] = []
@@ -79,21 +92,24 @@ package struct ProfilesFile: Codable {
     package var activeProfileID: String?
     package var activeAppliedKeys: [String] = []
     package var bindings: [ProfileBinding] = []
-
-    // 今后新增字段一律 Optional 或给 decodeIfPresent——理由同 AtlasSkillRecord
+    /// 供给页登记的项目目录（Optional：老版本 App 读到不认识的键会整段丢弃，
+    /// 反向老文件缺键也要能解——理由同 AtlasSkillRecord）
+    package var projects: [SupplyProject]?
 
     package init(
         version: Int = 1,
         profiles: [AtlasProfile] = [],
         activeProfileID: String? = nil,
         activeAppliedKeys: [String] = [],
-        bindings: [ProfileBinding] = []
+        bindings: [ProfileBinding] = [],
+        projects: [SupplyProject]? = nil
     ) {
         self.version = version
         self.profiles = profiles
         self.activeProfileID = activeProfileID
         self.activeAppliedKeys = activeAppliedKeys
         self.bindings = bindings
+        self.projects = projects
     }
 }
 
@@ -186,50 +202,22 @@ package enum ProfileWriter {
     }
 
     /// 应用：把非成员写成 exclusion 值。返回实际写入的键，供解绑时精确回收。
+    /// 写盘走供给单写者（ADR-11）：旧键回收、meta 豁免、备份都在 SupplyWriter 集中执行。
     @discardableResult
     package static func apply(profile: AtlasProfile, skills: [Skill], target: URL, previousKeys: [String]) throws -> [String] {
-        var settings = try readSettings(at: target)
-        var overrides = settings["skillOverrides"] as? [String: Any] ?? [:]
-
-        // 先撤上一次我们写的（Profile 换了成员，旧键要退场，否则越积越多）
-        for key in previousKeys {
-            if let text = overrides[key] as? String,
-               ProfileExclusion.allCases.map(\.rawValue).contains(text) {
-                overrides.removeValue(forKey: key)
-            }
-        }
-
         let plan = plan(profile: profile, skills: skills, target: target)
+        let tier: SupplyAssignment = profile.exclusion == .off ? .off : .userInvocable
+        var assignments: [String: SupplyAssignment] = [:]
         for name in plan.excluded {
-            overrides[name] = profile.exclusion.rawValue
+            assignments[name] = tier
         }
-        if overrides.isEmpty {
-            settings.removeValue(forKey: "skillOverrides")
-        } else {
-            settings["skillOverrides"] = overrides
-        }
-        try writeSettings(settings, to: target)
+        try SupplyWriter.write(assignments: assignments, target: target, previousKeys: previousKeys)
         return plan.excluded
     }
 
-    /// 撤销：只删我们写过、且值仍是我们写的那个的键。
-    /// 不把键设成 "on"——"on" 本身也是一条覆盖，会压住用户自己在 /skills 里的选择。
+    /// 撤销（转发到供给单写者，语义不变：只删我们写过、值仍是我们那档的键）
     package static func revert(target: URL, appliedKeys: [String]) throws {
-        guard FileManager.default.fileExists(atPath: target.path) else { return }
-        var settings = try readSettings(at: target)
-        guard var overrides = settings["skillOverrides"] as? [String: Any] else { return }
-        let ourValues = Set(ProfileExclusion.allCases.map(\.rawValue))
-        for key in appliedKeys {
-            if let text = overrides[key] as? String, ourValues.contains(text) {
-                overrides.removeValue(forKey: key)
-            }
-        }
-        if overrides.isEmpty {
-            settings.removeValue(forKey: "skillOverrides")
-        } else {
-            settings["skillOverrides"] = overrides
-        }
-        try writeSettings(settings, to: target)
+        try SupplyWriter.revert(target: target, appliedKeys: appliedKeys)
     }
 
     // MARK: 安全读写

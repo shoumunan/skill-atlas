@@ -89,6 +89,20 @@ package final class InstallerModel {
     /// 审阅页已确认「仍要安装」
     private var reviewConfirmed = false
     package var sourceCommit = "local"
+    /// 非 GitHub 来源的溯源标记（ADR-16）：zip 直装前由调用方设置，写进 catalog
+    package var provenanceKind: String?
+    package var provenanceVersion: String?
+    /// 归档 sha256（zip 直装），进 oplog 作内容寻址凭据
+    package var provenanceDigest: String?
+    /// zip 直装的溯源交接：发现页设置，安装 sheet onAppear 消费（sheet 自建 model，
+    /// 外部拿不到实例，走静态交接——与 Inbox.pendingFocusID 同款模式）
+    package static var pendingProvenance: (kind: String, version: String?, digest: String)?
+
+    /// zip 通道解包的临时目录按前缀标记归属：安装完或关窗由管线清理，
+    /// 普通本地文件夹安装绝不误删用户目录。
+    package static func ownsTemporaryDirectory(_ path: String) -> Bool {
+        URL(fileURLWithPath: path).lastPathComponent.hasPrefix("skill-atlas-zip-")
+    }
 
     package var parsedRepoDisplay: String {
         parsedRef?.display ?? "local"
@@ -196,7 +210,7 @@ package final class InstallerModel {
                 throw InstallError(redirect)
             }
             dir = URL(fileURLWithPath: local)
-            ownsCloneDir = false
+            ownsCloneDir = Self.ownsTemporaryDirectory(local)
             cloneDir = dir
         } else {
             dir = try await clone(ref)
@@ -234,7 +248,7 @@ package final class InstallerModel {
                         throw InstallError(redirect)
                     }
                     dir = URL(fileURLWithPath: local)
-                    ownsCloneDir = false
+                    ownsCloneDir = Self.ownsTemporaryDirectory(local)
                     cloneDir = dir
                     stage = .detecting
                     statusText = L("正在找技能…")
@@ -337,8 +351,14 @@ package final class InstallerModel {
                     repoName: parsedRef?.repo ?? "",
                     repoBranch: parsedRef?.branch ?? "main",
                     installedAt: Int(Date().timeIntervalSince1970),
-                    updatedAt: Int(Date().timeIntervalSince1970)
+                    updatedAt: Int(Date().timeIntervalSince1970),
+                    sourceKind: provenanceKind,
+                    sourceVersion: provenanceVersion
                 ))
+                if let kind = provenanceKind {
+                    Oplog.append(op: "install-\(kind)", target: candidate.directory, ok: true,
+                                 detail: "sha256:\(provenanceDigest ?? "?") v:\(provenanceVersion ?? "?")")
+                }
 
                 var linked: [String] = []
                 for platform in AgentPlatform.allCases where selectedPlatforms.contains(platform.rawValue) {
@@ -414,6 +434,9 @@ package final class InstallerModel {
 
     package func reset() {
         reviewConfirmed = false
+        provenanceKind = nil
+        provenanceVersion = nil
+        provenanceDigest = nil
         cleanupClone()
         urlText = ""
         stage = .input

@@ -29,12 +29,13 @@ struct Args {
     var platform: String? { options["platform"] }
     var platforms: String? { options["platforms"] ?? options["platform"] }
     var project: String? { options["project"] }
+    var source: String? { options["source"] }
 }
 
-/// 解析子命令名之后的其余 token。`--platform` 是唯一取值 flag，其余 `--x` 一律当布尔开关。
+/// 解析子命令名之后的其余 token。取值 flag 只有白名单里这几个，其余 `--x` 一律当布尔开关。
 func parseArgs(_ raw: [String]) -> Args {
     var result = Args()
-    let valueOptions: Set<String> = ["platform", "platforms", "project"]
+    let valueOptions: Set<String> = ["platform", "platforms", "project", "source"]
     var index = 0
     while index < raw.count {
         let token = raw[index]

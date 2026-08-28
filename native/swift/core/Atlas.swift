@@ -151,6 +151,10 @@ package struct AtlasSkillRecord: Codable, Equatable {
     package var updatedAt: Int
     /// meta-skill 等由 App 管理的条目（WP2）。Optional：老 catalog 没有这个键。
     package var managed: Bool?
+    /// 非 GitHub 来源的溯源（ADR-16）：如 "skillhub"。Optional：老 catalog 没有这个键。
+    package var sourceKind: String?
+    /// 来源侧版本号（SkillHub 的 version 字段），供以后的更新轮询比对。Optional。
+    package var sourceVersion: String?
 
     /// 合成的 memberwise init 是 internal，CLI target 看不见。package 显式写出。
     package init(
@@ -161,7 +165,9 @@ package struct AtlasSkillRecord: Codable, Equatable {
         repoBranch: String,
         installedAt: Int,
         updatedAt: Int,
-        managed: Bool? = nil
+        managed: Bool? = nil,
+        sourceKind: String? = nil,
+        sourceVersion: String? = nil
     ) {
         self.directory = directory
         self.enabled = enabled
@@ -171,6 +177,8 @@ package struct AtlasSkillRecord: Codable, Equatable {
         self.installedAt = installedAt
         self.updatedAt = updatedAt
         self.managed = managed
+        self.sourceKind = sourceKind
+        self.sourceVersion = sourceVersion
     }
 
     package func isEnabled(_ platform: AgentPlatform) -> Bool {
