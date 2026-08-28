@@ -1,7 +1,7 @@
 {
-  "version": "2.0.0",
-  "notes": "v2.0.0：agent 用 atlas CLI 搜、装、启停、诊断；关键级安装要人批准；技能清单可按使用次数瘦身。",
+  "version": "2.1.0",
+  "notes": "v2.1.0：面板重做成五个名词——技能库、发现、供给、收件箱、创作。发现页可搜市场并直装，供给页管档位与账单，运维事项进收件箱裁决。",
   "download": "https://github.com/shoumunan/skill-atlas/releases/latest",
-  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.0.0/Skill.Atlas-2.0.0.dmg",
-  "sha256": "cb6ef2ba0d3d12b4d0ff6cc357aad5b70d460e3eb4006f1d35068d535f4f02f0"
+  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.1.0/Skill.Atlas-2.1.0.dmg",
+  "sha256": "36da1782c59faff278891d3333eccae08a360d362079d9f5b5cff4dd6ef50a93"
 }
