@@ -1,7 +1,7 @@
 {
-  "version": "2.2.0",
-  "notes": "v2.2.0：运营三页塌缩成一页「检查」，四个页面按你的处境命名——技能库、添加技能、检查、设置。检查页只留四类真待办（等你点头、有危险写法、装了用不了、叫不动），平时是空的。档位改叫自动 / 点名才用 / 关掉。三语翻译补齐并加闸。",
+  "version": "2.3.0",
+  "notes": "v2.3.0：点平台图标不再触发全量重扫（511ms → 1ms 以内）。检查页按原因归并——6 个技能同报同一条挂载缺失是 1 件事不是 6 件，14 条塌成 6 张卡，能一次修完的才给批量键。十一个平台全部有图标。暗色下选中项不再是黑洞。侧栏加「最近在用」。",
   "download": "https://github.com/shoumunan/skill-atlas/releases/latest",
-  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.2.0/Skill.Atlas-2.2.0.dmg",
-  "sha256": "f1601a70686a6d870d94cf2e580ac4bdbd8e095c992624d7617791873092460a"
+  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.3.0/Skill.Atlas-2.3.0.dmg",
+  "sha256": "5fc23438405ab0412313b1f53671614f118a45de77d953f87bc29d6a30841a40"
 }
