@@ -1,11 +1,11 @@
 #!/bin/zsh
-# Skill Atlas 2.1.3 发版：构建 → 校验版本 → DMG。
+# Skill Atlas 2.2.0 发版：构建 → 校验版本 → DMG。
 # 推送、打 tag、上传 Release、写 appcast 由本脚本末尾提示的命令手动执行（外发动作要人确认）。
 set -euo pipefail
 APP_DIR="${0:A:h}"
 cd "$APP_DIR"
 
-VERSION="2.1.3"
+VERSION="2.2.0"
 TAG="v$VERSION"
 
 echo "== 构建 =="
