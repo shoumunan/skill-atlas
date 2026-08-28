@@ -736,7 +736,7 @@ final class AppStore: InstallHost {
             }
         }
         // 调试钩子：-atlasInstallURL <url> 自动打开安装 sheet 并预填（验收用）
-        if UserDefaults.standard.string(forKey: "atlasInstallURL") != nil {
+        if LaunchArgs.value("atlasInstallURL") != nil {
             installSheetPresented = true
         }
         // 调试钩子：-atlasCleanup 1 启动即打开清理向导（截图/验收用）
@@ -862,7 +862,7 @@ final class AppStore: InstallHost {
             }
             // 调试钩子：-atlasAction disable/enable/adopt/uninstall* 对当前选中技能执行（验收用，只跑一次）
             if !debugActionDone,
-               let action = UserDefaults.standard.string(forKey: "atlasAction"),
+               let action = LaunchArgs.value("atlasAction"),
                let skill = selectedSkill {
                 debugActionDone = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
@@ -878,7 +878,7 @@ final class AppStore: InstallHost {
                     default:
                         self?.setSkillDisabled(skill, disabled: action == "disable")
                     }
-                    if let path = UserDefaults.standard.string(forKey: "atlasUninstallProbe") {
+                    if let path = LaunchArgs.value("atlasUninstallProbe") {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                             let link = AgentPlatform.claude.resolvedRoot(home: AtlasPaths.home)
                                 .appendingPathComponent(skill.directory)
@@ -912,12 +912,12 @@ final class AppStore: InstallHost {
             offerMigrationIfNeeded()
             writeOfferProbe()
             writeDoctorProbe()
-            if UserDefaults.standard.bool(forKey: "atlasMigrate") {
+            if LaunchArgs.flag("atlasMigrate") {
                 UserDefaults.standard.set(false, forKey: "atlasMigrate")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
                     self?.performMigration()
                 }
-            } else if UserDefaults.standard.bool(forKey: "atlasRollback") {
+            } else if LaunchArgs.flag("atlasRollback") {
                 UserDefaults.standard.set(false, forKey: "atlasRollback")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
                     self?.rollbackMigration()
@@ -991,8 +991,7 @@ final class AppStore: InstallHost {
                     self.quitIfRequested()
                 }
             }
-            if let target = UserDefaults.standard.string(forKey: "atlasApplyUpdateProbe") {
-                UserDefaults.standard.removeObject(forKey: "atlasApplyUpdateProbe")
+            if let target = LaunchArgs.value("atlasApplyUpdateProbe") {
                 let skill = result.skills.first(where: { $0.name == target || $0.directory == target })
                 pauseWatching()
                 Task {
@@ -1020,8 +1019,7 @@ final class AppStore: InstallHost {
                 }
             }
             // G3 单技能试跑 probe：建沙箱并落盘计划，不开终端
-            if let target = UserDefaults.standard.string(forKey: "atlasSandboxProbe") {
-                UserDefaults.standard.removeObject(forKey: "atlasSandboxProbe")
+            if let target = LaunchArgs.value("atlasSandboxProbe") {
                 let path = UserDefaults.standard.string(forKey: "atlasProbeOut")
                 if let skill = result.skills.first(where: { $0.name == target || $0.directory == target }) {
                     do {
@@ -1036,17 +1034,16 @@ final class AppStore: InstallHost {
             }
             // G8 Profile probe：create|apply|bind|unbind|status
             // -atlasProfileName <名> -atlasProfileMembers <逗号分隔目录> -atlasProfileDir <目录>
-            if let action = UserDefaults.standard.string(forKey: "atlasProfileProbe") {
-                UserDefaults.standard.removeObject(forKey: "atlasProfileProbe")
+            if let action = LaunchArgs.value("atlasProfileProbe") {
                 loadProfiles()
                 var payload: [String: Any] = ["action": action]
-                let name = UserDefaults.standard.string(forKey: "atlasProfileName") ?? "验收场景"
-                let dirPath = UserDefaults.standard.string(forKey: "atlasProfileDir")
+                let name = LaunchArgs.value("atlasProfileName") ?? "验收场景"
+                let dirPath = LaunchArgs.value("atlasProfileDir")
                 do {
                     switch action {
                     case "create":
                         var profile = AtlasProfile.new(name: name)
-                        let raw = UserDefaults.standard.string(forKey: "atlasProfileMembers") ?? ""
+                        let raw = LaunchArgs.value("atlasProfileMembers") ?? ""
                         profile.members = raw.split(separator: ",").map {
                             $0.trimmingCharacters(in: .whitespaces)
                         }.filter { !$0.isEmpty }
@@ -1092,8 +1089,7 @@ final class AppStore: InstallHost {
                 quitIfRequested()
             }
             // G5 Hook 遥测 probe：install / uninstall / status
-            if let action = UserDefaults.standard.string(forKey: "atlasHookProbe") {
-                UserDefaults.standard.removeObject(forKey: "atlasHookProbe")
+            if let action = LaunchArgs.value("atlasHookProbe") {
                 var payload: [String: Any] = ["action": action]
                 do {
                     switch action {
@@ -1140,8 +1136,7 @@ final class AppStore: InstallHost {
                 writeProbeJSON(payload)
                 quitIfRequested()
             }
-            if let target = UserDefaults.standard.string(forKey: "atlasRollbackProbe") {
-                UserDefaults.standard.removeObject(forKey: "atlasRollbackProbe")
+            if let target = LaunchArgs.value("atlasRollbackProbe") {
                 let skill = result.skills.first(where: { $0.name == target || $0.directory == target })
                 pauseWatching()
                 Task {
@@ -1790,12 +1785,12 @@ final class AppStore: InstallHost {
             return
         }
         if suppressMigrationOffer { return }
-        if UserDefaults.standard.bool(forKey: "atlasRollback") { return }
-        if UserDefaults.standard.bool(forKey: "atlasQuit") && UserDefaults.standard.bool(forKey: "atlasMigrate") {
+        if LaunchArgs.flag("atlasRollback") { return }
+        if UserDefaults.standard.bool(forKey: "atlasQuit") && LaunchArgs.flag("atlasMigrate") {
             // 探针模式由 performMigration 接手，不弹向导
         }
         let hasCC = data?.summary.hasCCSwitch == true
-        if UserDefaults.standard.bool(forKey: "atlasShowMigrate") {
+        if LaunchArgs.flag("atlasShowMigrate") {
             migrationSheetPresented = true
             return
         }
@@ -2056,7 +2051,7 @@ final class AppStore: InstallHost {
             || UserDefaults.standard.bool(forKey: "atlasCheckSkillUpdates")
             || LaunchArgs.value("atlasTriggerProbe") != nil
             || UserDefaults.standard.string(forKey: "atlasUpdateReviewProbe") != nil
-            || UserDefaults.standard.string(forKey: "atlasAction") != nil
+            || LaunchArgs.value("atlasAction") != nil
             || UserDefaults.standard.string(forKey: "atlasToggle") != nil
             || UserDefaults.standard.string(forKey: "atlasDoctorProbe") != nil
     }

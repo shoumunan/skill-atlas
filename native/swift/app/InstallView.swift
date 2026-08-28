@@ -172,10 +172,10 @@ struct InstallSheet: View {
             // 空库示例 / 调试钩子：预填链接并开装
             let pending = store.pendingInstallURL
             store.pendingInstallURL = nil
-            let preset = pending ?? UserDefaults.standard.string(forKey: "atlasInstallURL")
+            let preset = pending ?? LaunchArgs.value("atlasInstallURL")
             if let preset, model.urlText.isEmpty {
                 model.urlText = preset
-                if UserDefaults.standard.bool(forKey: "atlasInstallCodex") {
+                if LaunchArgs.flag("atlasInstallCodex") {
                     model.selectedPlatforms.insert(AgentPlatform.codex.rawValue)
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { model.start() }
@@ -188,7 +188,7 @@ struct InstallSheet: View {
         }
         .onChange(of: model.stage) { _, stage in
             // 调试钩子：-atlasInstallGo 1 检测完成后自动安装选中项（验收用）
-            if stage == .selecting, UserDefaults.standard.bool(forKey: "atlasInstallGo") {
+            if stage == .selecting, LaunchArgs.flag("atlasInstallGo") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { model.install(store: store) }
             }
         }

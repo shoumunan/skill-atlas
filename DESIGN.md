@@ -835,3 +835,34 @@ v16 用「最近在用」填侧栏的空白，是**填充物**：最近用过哪
 ### 填空的判据
 
 往 chrome 里加东西之前先问：**这里有决定可做吗？** 有就放，没有就宁可空着。日志、统计、最近记录都不满足这一条——它们是「看一眼」的东西，属于页面，不属于常驻栏。
+
+## v19 · 2.5.1 调试探针不许住在持久化 UserDefaults 里（安全）
+
+### 出了什么事
+
+一次纯截图的会话里，App 在**没有任何点击**的情况下把 137 个技能写成 `off`，覆盖掉用户自己调了 60 条（41 个「点名才用」+ 19 个「关掉」）的 `~/.claude/settings.json`。
+
+### 根因
+
+`atlasProfileProbe` 这段验收探针读的是 `UserDefaults.standard.string(forKey:)`，读到值就直接调 `confirmProfileApply()` —— **绕过确认框**。而 UserDefaults 是**持久化**的：任何进程一句 `defaults write` 写进去，就会在**下一次启动**触发，与写它的人早已失去时间上的关联。
+
+同一类的还有 15 个：迁移、回滚、卸载、装技能、装 hook、应用更新、沙箱、单技能动作。
+
+### 已在沙箱里坐实因果
+
+用 `ATLAS_HOME` 注入假 HOME，`defaults write atlasProfileProbe apply` + `atlasProfileName 新场景`，然后只是启动：
+
+- 旧代码：`skillOverrides` 被写入，零交互；
+- 改后：同样的键、同样的启动，`skillOverrides` 保持为空。
+
+### 规矩
+
+**会改用户文件的探针只认启动参数**（`LaunchArgs`，只读 `CommandLine.arguments`）。启动参数是一次性的、显式的、跟着那一次启动走；持久化的键不是。
+
+只读探针（`atlasPage`、`atlasSelect`、`atlasReader`、各种 `*Probe` 落盘报告）可以保留 UserDefaults 兜底——它们不改用户的东西。
+
+`tests/assert_probe_safety.py` 静态扫源码挡回归。**必须是静态检查**：等跑起来才发现，用户的配置已经被改了。
+
+### 更一般的一条
+
+一个动作能不经确认就改用户的文件，那么它的**触发条件**也必须和「用户此刻的意图」严格绑定。持久化状态做不到这件事——它把「谁触发的」和「什么时候触发」拆开了。

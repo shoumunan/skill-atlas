@@ -363,6 +363,37 @@ PY2
 "$ATLAS" enable beta --platform codex --json >/dev/null
 [[ -L "$HOME_FIX/.codex/skills/beta" ]] || { echo "手动重新挂上应生效" >&2; exit 1; }
 [[ ! -e "$HOME_FIX/.codex/skills/gamma" ]] || { echo "用户自己关掉的 gamma 不该被场景机制打开" >&2; exit 1; }
+
+# A → B 直接切换：账不能叠。第一套压着的必须在压第二套之前挂回来，
+# 否则 B 的账里没有 A 摘的那些，撤 B 时它们就永远回不来了。
+"$ATLAS" enable alpha --platform codex --json >/dev/null
+"$ATLAS" enable beta --platform codex --json >/dev/null
+python3 - "$HOME_FIX" <<'PY2'
+import json, os, sys, time
+path = os.path.join(sys.argv[1], ".skill-atlas", "profiles.json")
+now = int(time.time())
+json.dump({"version": 1, "profiles": [
+    {"id": "a", "name": "只留 alpha", "symbol": "s", "members": ["alpha"],
+     "exclusion": "user-invocable-only", "updatedAt": now, "platforms": ["codex"]},
+    {"id": "b", "name": "只留 beta", "symbol": "s", "members": ["beta"],
+     "exclusion": "user-invocable-only", "updatedAt": now, "platforms": ["codex"]},
+], "activeAppliedKeys": [], "bindings": []}, open(path, "w"))
+PY2
+"$ATLAS" profile apply "只留 alpha" --json >/dev/null
+[[ -L "$HOME_FIX/.codex/skills/alpha" ]] || { echo "A：成员 alpha 应留着" >&2; exit 1; }
+[[ ! -e "$HOME_FIX/.codex/skills/beta" ]] || { echo "A：非成员 beta 应摘掉" >&2; exit 1; }
+"$ATLAS" profile apply "只留 beta" --json >/dev/null
+# 切到 B：alpha 变成非成员该摘掉，beta 是成员该挂回来（关键——A 摘的必须先还）
+[[ -L "$HOME_FIX/.codex/skills/beta" ]] || { echo "A→B：beta 应被挂回来，账叠住了" >&2; exit 1; }
+[[ ! -e "$HOME_FIX/.codex/skills/alpha" ]] || { echo "A→B：alpha 应摘掉" >&2; exit 1; }
+# B 的账里只该有 alpha 一条
+python3 -c 'import json,os,sys
+s=json.load(open(os.path.join(sys.argv[1],".skill-atlas","scenario-mounts.json")))
+dirs=sorted(e["directory"] for e in s["suppressed"])
+assert dirs==["alpha"], "切换后账本该只剩 alpha: %s" % (dirs,)
+assert s["profileID"]=="b", "账本该记着当前是 B"' "$HOME_FIX"
+rm -f "$HOME_FIX/.skill-atlas/scenario-mounts.json" "$HOME_FIX/.skill-atlas/profiles.json"
+
 rm -f "$HOME_FIX/.skill-atlas/scenario-mounts.json" "$HOME_FIX/.skill-atlas/profiles.json"
 echo "场景跨平台 acceptance OK"
 
@@ -391,5 +422,9 @@ echo "i18n acceptance OK"
 # --- 界面不许说旧黑话（i18n 闸只查翻译齐不齐，查不出「收件箱」这种没人懂的词）---
 python3 "$ROOT/tests/assert_plain_language.py"
 echo "文案 acceptance OK"
+
+# --- 会改用户数据的探针只认启动参数（持久化的键会在下次启动静默触发）---
+python3 "$ROOT/tests/assert_probe_safety.py"
+echo "探针 acceptance OK"
 
 echo "ALL acceptance OK"
