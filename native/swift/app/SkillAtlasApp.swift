@@ -113,6 +113,43 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// 无头验收探针：`-atlasNavProbe <out.json>` 跑完导航与深链路由后落盘退出。
+///
+/// 六页导航、⌘1–⌘6 与 skillatlas:// 此前没有任何自动化用例——改坏了只能靠
+/// 人肉点。这里把路由当纯函数验：不开窗口、不依赖渲染。
+@MainActor
+func runNavProbeIfRequested(store: AppStore) {
+    guard let out = LaunchArgs.value("atlasNavProbe") else { return }
+    var result: [String: Any] = [:]
+
+    // 1) 每一页都要能被 rawValue 命中，且 allCases 顺序 = ⌘1–⌘6
+    result["pages"] = NavPage.allCases.map(\.rawValue)
+    result["titlesNonEmpty"] = NavPage.allCases.allSatisfy { !$0.title.isEmpty }
+    result["helpNonEmpty"] = NavPage.allCases.allSatisfy { !$0.help.isEmpty }
+
+    // 2) 深链路由：每条都要落到预期页面
+    var routes: [String: String] = [:]
+    for raw in ["skillatlas://discover", "skillatlas://supply", "skillatlas://inbox",
+                "skillatlas://inbox/mount:demo:abc12345", "skillatlas://skill/demo"] {
+        store.nav = .settings
+        if let url = URL(string: raw) { handleDeepLink(url, store: store) }
+        routes[raw] = store.nav.rawValue
+    }
+    result["routes"] = routes
+    result["focusConsumed"] = Inbox.pendingFocusID != nil
+
+    // 3) 徽标口径：整理项不进徽标
+    result["badgeExcludesTidy"] = InboxKind.allCases
+        .filter { $0.severity > 1 }
+        .allSatisfy { $0.ignorable }
+
+    if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]),
+       let text = String(data: data, encoding: .utf8) {
+        try? text.write(toFile: out, atomically: true, encoding: .utf8)
+    }
+    exit(0)
+}
+
 @MainActor
 func handleDeepLink(_ url: URL, store: AppStore) {
     guard url.scheme == "skillatlas" else { return }
@@ -169,7 +206,10 @@ struct SkillAtlasApp: App {
                 .onOpenURL { url in
                     handleDeepLink(url, store: store)
                 }
-                .onAppear { AppDelegate.store = store }
+                .onAppear {
+                    AppDelegate.store = store
+                    runNavProbeIfRequested(store: store)
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1380, height: 860)

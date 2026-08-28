@@ -296,4 +296,15 @@ python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["data"]["remote
 rm -f "$HOME_FIX/.skill-atlas/sources.json"
 echo "来源开关 acceptance OK"
 
+# --- 2.1.1 六页导航与深链（无头探针，不依赖渲染）---
+if APP=$(find_app); then
+  NAV_OUT="$HOME_FIX/nav.json"
+  "$APP" -atlasNavProbe "$NAV_OUT" >/dev/null 2>&1 || true
+  [[ -f "$NAV_OUT" ]] || { echo "导航探针未产出" >&2; exit 1; }
+  python3 "$ROOT/tests/assert_nav.py" "$NAV_OUT"
+  echo "导航与深链 acceptance OK"
+else
+  echo "导航与深链 skipped（未找到 SkillAtlas 可执行）"
+fi
+
 echo "ALL acceptance OK"

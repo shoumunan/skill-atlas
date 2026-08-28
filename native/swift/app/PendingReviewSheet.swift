@@ -21,12 +21,34 @@ struct PendingReviewSheet: View {
                 Text(L("来自会话的安装审阅"))
                     .font(Theme.Fonts.calloutEmphasis)
                     .foregroundStyle(Theme.textPrimary)
+                Spacer(minLength: 0)
+                if let review {
+                    // 来源徽标（v15 ApprovalSheet）：批准前必须看得出这是谁发起的。
+                    // 「agent 提议、人批准」是安全边界，界面不写清楚这条就没有意义。
+                    HStack(spacing: Theme.Space.s4) {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(review.requestedBy.isEmpty ? L("会话") : review.requestedBy)
+                            .font(Theme.Fonts.caption)
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(Theme.warning)
+                    .padding(.horizontal, Theme.Space.s4 + 2)
+                    .frame(height: 20)
+                    .quietControl(tint: Theme.warning)
+                    .help(L("这次安装由终端会话里的 agent 发起，不是你在窗口里点的"))
+                }
             }
             if let review {
                 Text(review.source.url)
                     .font(Theme.Fonts.secondary)
                     .foregroundStyle(Theme.textSecondary)
                     .textSelection(.enabled)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(LF("发起于 %@", Format.day.string(from: Date(timeIntervalSince1970: TimeInterval(review.createdAt)))))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
                 ScrollView {
                     VStack(alignment: .leading, spacing: Theme.Space.s12) {
                         ForEach(review.findings, id: \.file) { finding in

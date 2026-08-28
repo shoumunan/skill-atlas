@@ -268,17 +268,11 @@ private struct ClaudeScopeView: View {
                 .font(Theme.Fonts.secondaryEmphasis)
                 .foregroundStyle(Theme.textSecondary)
             HStack(spacing: Theme.Space.s8) {
-                PresetChip(
-                    title: L("全部技能"),
-                    applied: store.profiles.activeProfileID == nil
-                ) {
+                PresetChip(title: L("全部技能"), state: allSkillsState) {
                     store.revertDefaultProfile()
                 }
                 ForEach(store.profiles.profiles) { profile in
-                    PresetChip(
-                        title: profile.name,
-                        applied: store.profiles.activeProfileID == profile.id
-                    ) {
+                    PresetChip(title: profile.name, state: presetState(profile)) {
                         store.requestProfileApply(profile, directory: nil)
                     }
                 }
@@ -297,6 +291,23 @@ private struct ClaudeScopeView: View {
                 .help(L("管理场景…"))
             }
         }
+    }
+
+    /// 「全部技能」= 一个覆盖都不剩才算真的生效
+    private var allSkillsState: PresetState {
+        guard store.profiles.activeProfileID == nil else { return .idle }
+        let leftover = supply.overrides.count
+        return leftover == 0 ? .applied : .partial(leftover)
+    }
+
+    /// 场景包生效中，但有成员被单独改成别的档位 → 部分应用
+    private func presetState(_ profile: AtlasProfile) -> PresetState {
+        guard store.profiles.activeProfileID == profile.id else { return .idle }
+        let memberDirs = Set(profile.members)
+        let strayMembers = store.skills.filter {
+            memberDirs.contains($0.directory) && supply.overrides[$0.name] != nil
+        }.count
+        return strayMembers == 0 ? .applied : .partial(strayMembers)
     }
 
     private func tierGroup(_ title: String, members: [Skill], hint: String) -> some View {
@@ -339,34 +350,73 @@ private struct ClaudeScopeView: View {
     }
 }
 
-/// 场景包标签（v15 PresetChip：未应用 / 已应用 ✓）
+/// v15 PresetChip 三态：未应用 / 部分应用（带计数）/ 已应用 ✓。
+///
+/// 「部分应用」不是装饰：场景包与逐技能档位写同一张 skillOverrides，成员技能上
+/// 若已有手动 off，应用场景包后它仍不在清单里——只有两态的话，chip 会举着 ✓
+/// 说全都生效了，而下面的分组里明摆着还躺着几个。
+enum PresetState: Equatable {
+    case idle
+    case partial(Int)
+    case applied
+
+    var isActive: Bool { self != .idle }
+}
+
 private struct PresetChip: View {
     var title: String
-    var applied: Bool
+    var state: PresetState
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: Theme.Space.s4) {
-                if applied {
+                switch state {
+                case .applied:
                     Image(systemName: "checkmark")
                         .font(.system(size: 9, weight: .bold))
+                case .partial:
+                    Image(systemName: "circle.lefthalf.filled")
+                        .font(.system(size: 9, weight: .bold))
+                case .idle:
+                    EmptyView()
                 }
                 Text(title)
-                    .font(applied ? Theme.Fonts.calloutEmphasis : Theme.Fonts.callout)
+                    .font(state.isActive ? Theme.Fonts.calloutEmphasis : Theme.Fonts.callout)
                     .lineLimit(1)
+                if case .partial(let count) = state {
+                    Text("\(count)")
+                        .font(Theme.Fonts.caption)
+                        .monospacedDigit()
+                }
             }
-            .foregroundStyle(applied ? Theme.accent : Theme.textSecondary)
+            .foregroundStyle(tint)
             .padding(.horizontal, Theme.Space.s12)
             .frame(height: 26)
             .background {
                 Capsule(style: .continuous)
-                    .fill(applied ? Theme.accent.opacity(0.13) : Color.primary.opacity(0.06))
+                    .fill(state.isActive ? tint.opacity(0.13) : Color.primary.opacity(0.05))
             }
             .contentShape(Capsule())
         }
         .buttonStyle(PressableButtonStyle())
-        .help(applied ? L("当前生效") : LF("应用「%@」", title))
+        .help(helpText)
+    }
+
+    private var tint: Color {
+        switch state {
+        case .applied: return Theme.accent
+        case .partial: return Theme.warning
+        case .idle: return Theme.textSecondary
+        }
+    }
+
+    private var helpText: String {
+        switch state {
+        case .applied: return L("当前生效")
+        case .partial(let count): return LF("这个场景包生效了，但有 %d 个成员被单独设成了别的档位。点一下重新应用。", count)
+        case .idle: return LF("应用「%@」", title)
+        }
     }
 }
 

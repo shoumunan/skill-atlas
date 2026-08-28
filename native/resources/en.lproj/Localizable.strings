@@ -1025,3 +1025,7 @@
 "进清单" = "In the list";
 "只手动调" = "Manual only";
 "不进清单" = "Not in the list";
+"这个场景包生效了，但有 %d 个成员被单独设成了别的档位。点一下重新应用。" = "This profile is active, but %d of its members were set to a different tier individually. Click to re-apply.";
+"会话" = "Session";
+"这次安装由终端会话里的 agent 发起，不是你在窗口里点的" = "This install was requested by an agent in a terminal session, not by you in this window";
+"发起于 %@" = "Requested %@";
