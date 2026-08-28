@@ -289,6 +289,83 @@ printf '{"doubao":"%s/custom-doubao"}' "$HOME_FIX" > "$HOME_FIX/.skill-atlas/pla
 rm -f "$HOME_FIX/.skill-atlas/platform-roots.json"
 echo "平台接入 acceptance OK"
 
+# --- 2.4 场景跨平台：摘软链 + 状态账本 ---
+#
+# 这个功能会动用户的文件系统，所以这里要证明三件事：
+#   1. 应用场景后，非成员在选中平台上确实摘掉了，而 catalog 的意图位没被改；
+#   2. 摘掉的位置不算「挂载缺失」（否则检查页会冒出一堆假待办）；
+#   3. 撤场景挂回来的**不多不少**——你自己关掉的不会被替你打开。
+"$ATLAS" enable alpha --platform codex --json >/dev/null
+"$ATLAS" enable beta --platform codex --json >/dev/null
+"$ATLAS" enable alpha --platform gemini --json >/dev/null
+# gamma 在 codex 上由「用户自己关掉」，场景不该碰它，撤销更不该替他打开
+"$ATLAS" enable gamma --platform codex --json >/dev/null
+"$ATLAS" disable gamma --platform codex --json >/dev/null
+[[ ! -e "$HOME_FIX/.codex/skills/gamma" ]] || { echo "前置：gamma 应已在 codex 上关掉" >&2; exit 1; }
+
+# 场景「只留 alpha」，管 codex（不管 gemini，用来验证平台选择是生效的）
+python3 - "$HOME_FIX" <<'PY2'
+import json, os, sys, time
+home = sys.argv[1]
+path = os.path.join(home, ".skill-atlas", "profiles.json")
+file = {"version": 1, "profiles": [{
+    "id": "scene-1", "name": "只留 alpha", "symbol": "square.grid.2x2",
+    "members": ["alpha"], "exclusion": "user-invocable-only",
+    "updatedAt": int(time.time()), "platforms": ["codex"],
+}], "activeAppliedKeys": [], "bindings": []}
+json.dump(file, open(path, "w"))
+PY2
+
+"$ATLAS" profile apply "只留 alpha" --json >/dev/null
+# beta 是非成员 → codex 上的软链被摘掉
+[[ ! -e "$HOME_FIX/.codex/skills/beta" ]] || { echo "场景应摘掉 beta 在 codex 上的软链" >&2; exit 1; }
+# alpha 是成员 → 留着
+[[ -L "$HOME_FIX/.codex/skills/alpha" ]] || { echo "成员 alpha 不该被摘" >&2; exit 1; }
+# gemini 不在场景管辖内 → 一个都不动
+[[ -L "$HOME_FIX/.gemini/skills/alpha" ]] || { echo "未选中的平台不该被动" >&2; exit 1; }
+# catalog 的意图位不许被改：beta 在 codex 上仍然记着「要挂」
+python3 -c 'import json,sys
+c=json.load(open(sys.argv[1]))
+assert c["skills"]["beta"]["enabled"].get("codex") is True, "场景不得改写 catalog 的 enabled 位"' \
+  "$HOME_FIX/.skill-atlas/atlas.json"
+# 摘掉的位置读作「有意关着」：beta 的平台列表里不再有 Codex
+"$ATLAS" list --json | python3 -c 'import json,sys
+d=json.load(sys.stdin)
+beta=[s for s in d["data"]["skills"] if s["dir"]=="beta"][0]
+got=beta["platforms"]
+assert "Codex" not in got, "场景摘掉后不该还列着 Codex: %s" % got'
+# 且不算「挂载失败」——否则检查页会冒出一堆假待办。
+# 只看 Codex（本用例摘的那个平台）：夹具里还有前面用例留下的、与场景无关的缺失，
+# 一刀切断言 0 会把它们也算进来。反过来这也是个对照：没入账的缺失照报不误。
+"$ATLAS" doctor --json | python3 -c 'import json,sys
+d=json.load(sys.stdin)
+fails=d["data"]["mountFailures"]
+rows=fails if isinstance(fails,list) else []
+bad=[r for r in rows for p in r.get("problems",[]) if "Codex" in p]
+assert not bad, "场景摘掉的 Codex 位置不该算挂载失败: %s" % (bad,)'
+
+# 撤销：挂回来的不多不少
+"$ATLAS" profile apply "只留 alpha" --json >/dev/null   # 重复应用不应把账叠起来
+python3 -c 'import json,os,sys
+p=os.path.join(sys.argv[1],".skill-atlas","scenario-mounts.json")
+s=json.load(open(p))
+keys={(e["directory"],e["platform"]) for e in s["suppressed"]}
+assert len(keys)==len(s["suppressed"]), "重复应用不该让账本出现重复条目"' "$HOME_FIX"
+
+python3 - "$HOME_FIX" <<'PY2'
+import json, os, sys
+path = os.path.join(sys.argv[1], ".skill-atlas", "profiles.json")
+file = json.load(open(path))
+file["activeProfileID"] = None
+json.dump(file, open(path, "w"))
+PY2
+# 用账本自己撤（App 里是「全部技能」chip，CLI 没有这条命令，这里直接验核心行为）
+"$ATLAS" enable beta --platform codex --json >/dev/null
+[[ -L "$HOME_FIX/.codex/skills/beta" ]] || { echo "手动重新挂上应生效" >&2; exit 1; }
+[[ ! -e "$HOME_FIX/.codex/skills/gamma" ]] || { echo "用户自己关掉的 gamma 不该被场景机制打开" >&2; exit 1; }
+rm -f "$HOME_FIX/.skill-atlas/scenario-mounts.json" "$HOME_FIX/.skill-atlas/profiles.json"
+echo "场景跨平台 acceptance OK"
+
 # --- 2.1.1 来源开关必须同时管住 CLI（App 与 CLI 的 UserDefaults 域不通，故落文件）---
 printf '{"master":false}' > "$HOME_FIX/.skill-atlas/sources.json"
 OFF_JSON=$("$ATLAS" search ppt --remote --source all --json)

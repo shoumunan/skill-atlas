@@ -1378,3 +1378,16 @@
 "只对 Claude Code 生效——只有它有「装着、但不进开场清单」这个开关。别的软件只有装或不装两种状态，没有中间档，场景在那边无从谈起。" = "Claude Code only. It is the one app with a keep-it-installed-but-out-of-the-opening-list switch. Everywhere else a skill is either in or out, with nothing in between, so scenarios have nothing to work with.";
 "按你用过多少次排的。「自动」是 Claude 会自己想到用；「点名才用」是你打 /名字 才用，不占开场篇幅；「关掉」是完全不用。只对 Claude Code 生效——只有它有「装着、但不进开场清单」这个开关。" = "Sorted by how often you have used them. Automatic means Claude reaches for it on its own; On request means it only runs when you type /name, costing nothing up front; Off means never. Claude Code only, because it is the one app with a keep-it-installed-but-out-of-the-opening-list switch.";
 "比如写基金材料时不想看到编程技能。只对 Claude Code 生效——只有它有「装着、但不进开场清单」这个开关。别的软件只有装或不装两种状态，没有中间档，场景在那边无从谈起。" = "Say you do not want coding skills around while writing fund copy. Claude Code only. It is the one app with a keep-it-installed-but-out-of-the-opening-list switch. Everywhere else a skill is either in or out, with nothing in between, so scenarios have nothing to work with.";
+"已应用场景「%@」：Claude Code 里 %d 个技能不再进自动清单，另外 %d 处在别的软件里先摘下来了。" = "Applied scenario %@: %d skills are out of Claude Code's auto list, and %d links were unhooked in other apps.";
+"已恢复默认：%d 个技能重新进入自动清单，%d 处软链挂回来了。" = "Back to default: %d skills are in the auto list again and %d links were hooked back up.";
+"已把「%@」设为默认场景：Claude Code 里 %d 个技能不再进自动清单，另外 %d 处在别的软件里先摘下来了。撤场景时会原样挂回。" = "%@ is now the default scenario: %d skills are out of Claude Code's auto list, and %d links were unhooked in other apps. Dropping the scenario hooks them all back up exactly as they were.";
+"%@：场景生效时，没勾的技能会从这里摘下来" = "%@: while the scenario is on, unchecked skills get unhooked from here";
+"%@：点亮后，场景生效时没勾的技能会从这里摘下来" = "%@: turn this on and unchecked skills get unhooked from here while the scenario is active";
+"Claude Code 恒定生效，不能取消——场景本来就是为它的三档设计的。" = "Claude Code is always covered and cannot be turned off. Scenarios were built around its three tiers.";
+"Claude Code 走它自己的开关，别的软件靠摘软链。两边都可逆。" = "Claude Code uses its own switch; other apps rely on unhooking links. Both are reversible.";
+"Claude Code 里没勾的技能只是不进开场清单，打 /名字 照样能用。" = "In Claude Code, unchecked skills just stay out of the opening list. Type /name and they still run.";
+"别的软件没有「装着但不进清单」这一档，只能把软链先摘下来。撤场景时原样挂回，你自己关掉的不会被打开。" = "Other apps have no installed-but-hidden tier, so the link has to come off. Dropping the scenario hooks it back exactly as it was, and anything you switched off yourself stays off.";
+"已应用场景「%@」：%d 个技能不再进自动清单。这个场景只管 Claude Code。" = "Applied scenario %@: %d skills are out of the auto list. This scenario covers Claude Code only.";
+"比如写基金材料时不想看到编程技能。Claude Code 里走它自己的三档开关；勾上别的软件后，没勾的技能会在那边先摘下来，撤场景时原样挂回。" = "Say you do not want coding skills around while writing fund copy. Claude Code uses its own three tiers; tick other apps and unchecked skills get unhooked there too, then hooked back exactly as they were when you drop the scenario.";
+"管哪些软件：" = "Covers these apps:";
+"这三档是 Claude Code 自己的开关，别的软件没有中间档。要让别的软件也少装几个，去设置里给场景勾上那些软件。" = "These three tiers are Claude Code's own switch; other apps have no middle setting. To thin things out elsewhere, tick those apps on a scenario in Settings.";

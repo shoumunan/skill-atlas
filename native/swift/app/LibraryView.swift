@@ -894,7 +894,7 @@ private struct DetailTierControl: View {
                 .foregroundStyle(Theme.textSecondary)
             TierSegment(tier: tier, accessibilityName: skill.name) { apply($0) }
             Text(L("只对 Claude Code 生效。"))
-                .help(L("只对 Claude Code 生效——只有它有「装着、但不进开场清单」这个开关。别的软件只有装或不装两种状态，没有中间档，场景在那边无从谈起。"))
+                .help(L("这三档是 Claude Code 自己的开关，别的软件没有中间档。要让别的软件也少装几个，去设置里给场景勾上那些软件。"))
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(Theme.textTertiary)
             Spacer(minLength: 0)

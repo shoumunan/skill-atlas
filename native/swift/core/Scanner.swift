@@ -266,6 +266,8 @@ package enum SkillScanner {
             hits.append((url, name, true))
         }
 
+        // 场景账本读一次，别在下面的双重循环里逐技能读文件
+        let suppressed = ScenarioMounts.suppressedSet()
         var result: [Skill] = []
         for hit in hits.sorted(by: { $0.directory < $1.directory }) {
             let record = catalog.skills[hit.directory]
@@ -290,7 +292,12 @@ package enum SkillScanner {
             var platforms: [String] = []
             var mounts: [AgentPlatform: Mount] = [:]
             for platform in AgentPlatform.allCases {
-                let enabled = (record?.isEnabled(platform) ?? false) && !hit.disabled
+                // 场景压着的位置算「有意关着」，不算「挂载缺失」。catalog 的 enabled 位
+                // 是你的意图，场景只是临时覆盖，两者都要如实反映（core/ScenarioMounts.swift）
+                let scenarioOff = suppressed.contains(
+                    SuppressedMount(directory: hit.directory, platform: platform.rawValue)
+                )
+                let enabled = (record?.isEnabled(platform) ?? false) && !hit.disabled && !scenarioOff
                 let mount = mountState(
                     root: platform.root(home: home),
                     directory: hit.directory,
@@ -558,10 +565,14 @@ package enum SkillScanner {
             severity = .error
         }
 
+        let suppressed = ScenarioMounts.suppressedSet()
         var platforms: [String] = []
         var mounts: [AgentPlatform: Mount] = [:]
         for platform in AgentPlatform.allCases {
-            let on = (enabled[platform] ?? false) && !skill.disabled
+            let scenarioOff = suppressed.contains(
+                SuppressedMount(directory: skill.directory, platform: platform.rawValue)
+            )
+            let on = (enabled[platform] ?? false) && !skill.disabled && !scenarioOff
             let mount = mountState(
                 root: platform.root(home: home),
                 directory: skill.directory,

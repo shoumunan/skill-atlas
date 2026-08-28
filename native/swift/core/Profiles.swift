@@ -43,11 +43,21 @@ package struct AtlasProfile: Codable, Identifiable, Equatable {
     package var members: [String]
     package var exclusion: ProfileExclusion
     package var updatedAt: Int
+    /// 这个场景还要管哪些平台（AgentPlatform.rawValue）。
+    ///
+    /// Claude Code 恒定生效、且不在这个列表里 —— 它走 skillOverrides，有三档；
+    /// 其余平台只有装/不装两档，走摘软链（core/ScenarioMounts.swift）。
+    ///
+    /// **必须是 Optional**：老 profiles.json 没有这个键，非 Optional 会让整份文件
+    /// 解码失败，你所有的场景定义一次读空（理由同 AtlasSkillRecord 头上的警告）。
+    /// nil 与空数组同义：只管 Claude Code，也就是 2.3 及以前的行为。
+    package var platforms: [String]?
 
     package static func new(name: String, symbol: String = "square.grid.2x2") -> AtlasProfile {
         AtlasProfile(
             id: UUID().uuidString, name: name, symbol: symbol, members: [],
-            exclusion: .userInvocableOnly, updatedAt: Int(Date().timeIntervalSince1970)
+            exclusion: .userInvocableOnly, updatedAt: Int(Date().timeIntervalSince1970),
+            platforms: nil
         )
     }
 }

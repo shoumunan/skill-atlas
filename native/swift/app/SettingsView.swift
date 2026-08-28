@@ -95,7 +95,7 @@ private struct ProfileEntryGroup: View {
                     Text(L("给不同项目配不同的技能"))
                         .font(Theme.Fonts.rowTitle)
                         .foregroundStyle(Theme.textPrimary)
-                    Text(L("比如写基金材料时不想看到编程技能。只对 Claude Code 生效——只有它有「装着、但不进开场清单」这个开关。别的软件只有装或不装两种状态，没有中间档，场景在那边无从谈起。"))
+                    Text(L("比如写基金材料时不想看到编程技能。Claude Code 里走它自己的三档开关；勾上别的软件后，没勾的技能会在那边先摘下来，撤场景时原样挂回。"))
                         .font(Theme.Fonts.caption)
                         .foregroundStyle(Theme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)

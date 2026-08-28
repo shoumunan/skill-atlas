@@ -177,6 +177,7 @@ struct ProfileSheet: View {
             VStack(alignment: .leading, spacing: Theme.Space.s12) {
                 nameRow(profile)
                 exclusionRow(profile)
+                platformRow(profile)
                 memberPicker(profile)
                 bindingsBlock(profile)
                 actionRow(profile)
@@ -259,6 +260,48 @@ struct ProfileSheet: View {
             .labelsHidden()
             .frame(width: 320)
             Spacer()
+        }
+    }
+
+    /// 场景还管哪些软件。
+    ///
+    /// Claude Code 恒亮且点不动：它走的是 skillOverrides（三档，可逆且不动文件），
+    /// 是场景的原生落地方式。其余软件只有装/不装两档，场景在那边只能摘软链——
+    /// 所以这一行必须说清楚代价，而不是让用户以为两边是一回事。
+    private func platformRow(_ profile: AtlasProfile) -> some View {
+        let selectedPlatforms = Set(profile.platforms ?? [])
+        return VStack(alignment: .leading, spacing: Theme.Space.s4) {
+            HStack(spacing: Theme.Space.s8) {
+                Text(L("管哪些软件："))
+                    .font(Theme.Fonts.secondary)
+                    .foregroundStyle(Theme.textSecondary)
+                PlatformLogo(platform: .claude, size: 22, lit: true)
+                    .help(L("Claude Code 恒定生效，不能取消——场景本来就是为它的三档设计的。"))
+                ForEach(store.visiblePlatforms.filter { $0 != .claude }) { platform in
+                    let on = selectedPlatforms.contains(platform.rawValue)
+                    Button {
+                        var copy = profile
+                        var next = selectedPlatforms
+                        if on { next.remove(platform.rawValue) } else { next.insert(platform.rawValue) }
+                        copy.platforms = next.isEmpty ? nil : next.sorted()
+                        store.upsertProfile(copy)
+                    } label: {
+                        PlatformLogo(platform: platform, size: 22, lit: on)
+                            .contentShape(Rectangle().inset(by: -2))
+                    }
+                    .buttonStyle(.plain)
+                    .help(on
+                        ? LF("%@：场景生效时，没勾的技能会从这里摘下来", platform.displayName)
+                        : LF("%@：点亮后，场景生效时没勾的技能会从这里摘下来", platform.displayName))
+                }
+                Spacer(minLength: 0)
+            }
+            Text(selectedPlatforms.isEmpty
+                ? L("Claude Code 里没勾的技能只是不进开场清单，打 /名字 照样能用。")
+                : L("别的软件没有「装着但不进清单」这一档，只能把软链先摘下来。撤场景时原样挂回，你自己关掉的不会被打开。"))
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -351,7 +394,7 @@ struct ProfileSheet: View {
 
     private func actionRow(_ profile: AtlasProfile) -> some View {
         HStack(spacing: Theme.Space.s8) {
-            Text(L("只对 Claude Code 生效——只有它有「装着、但不进开场清单」这个开关。别的软件只有装或不装两种状态，没有中间档，场景在那边无从谈起。"))
+            Text(L("Claude Code 走它自己的开关，别的软件靠摘软链。两边都可逆。"))
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(Theme.textTertiary)
             Spacer()

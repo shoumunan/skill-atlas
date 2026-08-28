@@ -102,7 +102,12 @@ enum ProfileCommand {
             let applied = try ProfileWriter.apply(
                 profile: profile, skills: scanData.skills, target: target, previousKeys: previous
             )
+            // 非 Claude 平台没有「装着但不进清单」这一档，只能摘软链（账记在
+            // scenario-mounts.json，catalog 的意图位不动）。只在全局场景时做：
+            // 软链是全机唯一的，跟着某个项目目录翻会影响所有会话。
+            var unmounted = 0
             if args.project == nil {
+                unmounted = try ScenarioMounts.apply(profile: profile, skills: scanData.skills)
                 file.activeProfileID = profile.id
                 file.activeAppliedKeys = applied
                 try ProfileStore.save(file)
@@ -114,8 +119,15 @@ enum ProfileCommand {
                 "target": target.path,
                 "excluded": applied.count,
             ]
+            // data 的形状不动（ADR-12 CLI ABI 冻结）：多摘的软链只写进人读的那行，
+            // JSON 消费方拿到的键与 2.3 一致
             return succeed(op: "profile", json: args.json, data: data) {
-                say(LF("已应用场景「%@」：%d 个技能不再进自动清单。只对 Claude Code 生效。", profile.name, applied.count))
+                if unmounted > 0 {
+                    say(LF("已应用场景「%@」：Claude Code 里 %d 个技能不再进自动清单，另外 %d 处在别的软件里先摘下来了。",
+                           profile.name, applied.count, unmounted))
+                } else {
+                    say(LF("已应用场景「%@」：%d 个技能不再进自动清单。这个场景只管 Claude Code。", profile.name, applied.count))
+                }
                 say(target.path)
             }
         } catch {

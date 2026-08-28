@@ -468,6 +468,14 @@ final class AppStore: InstallHost {
             let applied = try ProfileWriter.apply(
                 profile: request.profile, skills: skills, target: target, previousKeys: previous
             )
+            // 非 Claude 平台没有「装着但不进清单」这一档，只能摘软链。
+            // 账记在 scenario-mounts.json，catalog 的意图位一个字节不动。
+            // 只在默认场景（全局）时做：项目级绑定靠 Claude Code 自己的设置级联，
+            // 而软链是全机唯一的，跟着某个目录翻会影响所有会话。
+            var unmounted = 0
+            if request.directory == nil {
+                unmounted = try ScenarioMounts.apply(profile: request.profile, skills: skills)
+            }
             if let directory = request.directory {
                 profiles.bindings.removeAll { $0.directory == directory.path }
                 profiles.bindings.append(ProfileBinding(
@@ -481,8 +489,11 @@ final class AppStore: InstallHost {
             } else {
                 profiles.activeProfileID = request.profile.id
                 profiles.activeAppliedKeys = applied
-                profileNotice = LF("已把「%@」设为默认场景：%d 个技能不再进自动清单。原配置已备份。",
-                                   request.profile.name, applied.count)
+                profileNotice = unmounted > 0
+                    ? LF("已把「%@」设为默认场景：Claude Code 里 %d 个技能不再进自动清单，另外 %d 处在别的软件里先摘下来了。撤场景时会原样挂回。",
+                         request.profile.name, applied.count, unmounted)
+                    : LF("已把「%@」设为默认场景：%d 个技能不再进自动清单。原配置已备份。",
+                         request.profile.name, applied.count)
             }
             persistProfiles()
             invalidateSupply()
@@ -575,14 +586,18 @@ final class AppStore: InstallHost {
                 target: ProfileWriter.userSettingsURL,
                 appliedKeys: Array(Set(profiles.activeAppliedKeys).union(ourKeys))
             )
+            let restored = try ScenarioMounts.revert(skills: skills)
             profiles.activeProfileID = nil
             profiles.activeAppliedKeys = []
             persistProfiles()
             invalidateSupply()
+            if restored > 0 { Task { await rescan(keepSelection: true) } }
             if !silent {
-                profileNotice = ourKeys.isEmpty
-                    ? L("本来就没有技能被排除，自动清单没有变化。")
-                    : LF("已恢复默认：%d 个技能重新进入自动清单。", ourKeys.count)
+                profileNotice = restored > 0
+                    ? LF("已恢复默认：%d 个技能重新进入自动清单，%d 处软链挂回来了。", ourKeys.count, restored)
+                    : (ourKeys.isEmpty
+                        ? L("本来就没有技能被排除，自动清单没有变化。")
+                        : LF("已恢复默认：%d 个技能重新进入自动清单。", ourKeys.count))
             }
         } catch {
             actionError = error.localizedDescription
@@ -727,6 +742,11 @@ final class AppStore: InstallHost {
         // 调试钩子：-atlasCleanup 1 启动即打开清理向导（截图/验收用）
         if LaunchArgs.flag("atlasCleanup") {
             cleanupSheetPresented = true
+        }
+        // 调试钩子：-atlasProfileSheet 1 启动即打开场景编辑器（截图/验收用）
+        if LaunchArgs.flag("atlasProfileSheet") {
+            loadProfiles()
+            profileSheetPresented = true
         }
     }
 
@@ -1643,6 +1663,8 @@ final class AppStore: InstallHost {
             try SkillActions.setPlatform(directory: skill.directory, platform: platform, enabled: enabled)
             Oplog.append(op: enabled ? "enable" : "disable", target: skill.directory, ok: true,
                          detail: platform.rawValue)
+            // 手动动作优先于场景：你亲手点亮的，撤场景时不必再挂一遍
+            if enabled { ScenarioMounts.forget(directory: skill.directory, platform: platform) }
             patchMounts(directory: skill.directory)
         } catch {
             actionError = error.localizedDescription
