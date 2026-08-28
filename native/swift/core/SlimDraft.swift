@@ -13,14 +13,23 @@ package enum SlimRules {
 package enum SlimTier: String, CaseIterable, Hashable {
     case core, userInvocable, off
 
-    /// 档位说的是「进不进 Claude 自动清单」，不是软链挂没挂。
-    /// 用「挂载」这个词会让同一个技能既是「已挂载」又是「不挂载」——
-    /// 两轴纪律要求这两个词严格分开（DESIGN v15）。
+    /// 说的是「Claude 会不会自己想到用它」，用户视角而不是机制视角。
+    /// 「进清单/不进清单」是我的实现词（skillOverrides 里的自动清单），
+    /// 用户不知道有个清单存在——他只想知道这技能是自动来还是得点名（ROADMAP 2.2 §4）。
     package var title: String {
         switch self {
-        case .core: return L("进清单")
-        case .userInvocable: return L("只手动调")
-        case .off: return L("不进清单")
+        case .core: return L("自动")
+        case .userInvocable: return L("点名才用")
+        case .off: return L("关掉")
+        }
+    }
+
+    /// 选中后的一句解释，放在控件旁边
+    package var explanation: String {
+        switch self {
+        case .core: return L("Claude 会自己想到用它")
+        case .userInvocable: return L("你打 /名字 才会用，不占开场的篇幅")
+        case .off: return L("完全不用它")
         }
     }
 }

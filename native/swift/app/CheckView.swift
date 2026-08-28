@@ -3,13 +3,18 @@ import SwiftUI
 import AtlasCore
 #endif
 
-// MARK: - 收件箱（v15 一级页，WP-I）
+// MARK: - 检查（v16 一级页，ROADMAP 2.2）
 //
-// 回答「现在有什么事要我裁决」。v12 行动中心骨架复用：主任务卡（四要素：发生了
-// 什么 / 影响什么 / 建议怎么做 / 按钮去哪）+「接下来」纵向队列 + 清零态。
-// 条目由 InboxAssembler 渲染时聚合（ADR-10），动作全部接既有机制，裁决必留痕。
+// 回答用户会用人话问出来的那句：「有什么要我处理吗？」
+//
+// 这里只放**待办**：有限、必须逐条决定、处理完就没了。安全提示（本机 118 条）、
+// 触发词重叠、介绍埋太深那些属于技能自身的**性质**，数量大又不需要逐条决定，
+// 排进队列的结果是既清不完又看不懂——它们回到技能行上当标记。
+//
+// 页顶那张卡是原「供给页」的全部实际价值：技能清单占多少 token，一键清理。
+// 一个数字 + 一个动作，不需要一整页和「供给」这个没人懂的词。
 
-struct InboxPage: View {
+struct CheckPage: View {
     @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var inbox = InboxStore()
@@ -25,13 +30,14 @@ struct InboxPage: View {
                         }
                         .receiptTransition(reduceMotion: reduceMotion)
                     }
+                    TokenCard()
                     if items.isEmpty {
                         quietState
                     } else {
                         PrimaryTaskCard(inbox: inbox, item: items[0])
                             .id(items[0].id)
                         if items.count > 1 {
-                            Text(L("接下来"))
+                            Text(L("还有这些"))
                                 .font(Theme.Fonts.secondaryEmphasis)
                                 .foregroundStyle(Theme.textSecondary)
                                 .padding(.leading, Theme.Space.s4)
@@ -71,7 +77,7 @@ struct InboxPage: View {
     private var quietState: some View {
         EmptyStateBlock(
             symbol: "checkmark.circle",
-            title: L("一切安静"),
+            title: L("没有要处理的事"),
             caption: lastClearedText,
             actionTitle: L("再查一遍")
         ) {
@@ -81,13 +87,13 @@ struct InboxPage: View {
 
     private var lastClearedText: String {
         guard let at = InboxState.lastDecisionAt else {
-            return L("还没有处理过事项。检出的运维事项会在这里排队。")
+            return L("技能装了就能用。真出问题时会出现在这里。")
         }
         let date = Date(timeIntervalSince1970: TimeInterval(at))
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
-        return LF("上次裁决：%@", formatter.string(from: date))
+        return LF("上次处理：%@", formatter.string(from: date))
     }
 }
 
@@ -162,12 +168,12 @@ private struct InboxKindBadge: View {
 
     private var meta: (symbol: String, label: String, tint: Color) {
         switch kind {
-        case .approval: return ("person.badge.shield.checkmark", L("待审批"), Theme.warning)
-        case .securityCritical: return ("lock.shield", L("安全关键"), Theme.error)
-        case .securityWarning: return ("exclamationmark.triangle", L("安全提醒"), Theme.warning)
-        case .mount: return ("link.badge.plus", L("挂载"), Theme.warning)
-        case .miss: return ("bell.badge", L("miss"), Theme.warning)
-        case .update: return ("arrow.down.circle", L("可更新"), Theme.accent)
+        case .approval: return ("person.badge.shield.checkmark", L("等你确认"), Theme.warning)
+        case .securityCritical: return ("lock.shield", L("可能不安全"), Theme.error)
+        case .securityWarning: return ("exclamationmark.triangle", L("可能不安全"), Theme.warning)
+        case .mount: return ("link.badge.plus", L("装了用不了"), Theme.warning)
+        case .miss: return ("bell.badge", L("叫不动"), Theme.warning)
+        case .update: return ("arrow.down.circle", L("有新版本"), Theme.accent)
         case .overlap: return ("arrow.triangle.branch", L("触发重叠"), Theme.idle)
         case .overlong: return ("text.magnifyingglass", L("介绍"), Theme.idle)
         case .rx: return ("chart.bar", L("回访"), Theme.accent)
@@ -230,7 +236,7 @@ private struct InboxActions: View {
                     primary(L("开处方")) { store.requestPrescription(skill) }
                 }
                 if hit?.userInvocableOnly == true {
-                    secondary(L("去供给页升档")) { store.nav = .supply }
+                    secondary(L("去供给页升档")) { store.nav = .check }
                 }
                 ignoreButton
             case .update:
@@ -297,5 +303,57 @@ private struct InboxActions: View {
         }
         .buttonStyle(.plain)
         .help(title)
+    }
+}
+
+
+// MARK: - 技能清单占用（原「供给页」的全部实际价值）
+
+/// 一个数字 + 一个动作。原来这需要一整页、一条 ScopeRail、三档控件、场景包
+/// chips 和「上下文账单」这个词——而用户真正想知道的只有「占了多少、能不能少点」。
+private struct TokenCard: View {
+    @Environment(AppStore.self) private var store
+    @State private var slimPresented = false
+
+    var body: some View {
+        let tokens = store.doctorReport.totalTokens
+        let stale = store.staleSkills.count
+        HStack(alignment: .center, spacing: Theme.Space.s16) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s8) {
+                    Text(LF("%d tok", tokens))
+                        .font(Theme.Fonts.panelTitle)
+                        .monospacedDigit()
+                        .foregroundStyle(tokens > 10_000 ? Theme.warning : Theme.textPrimary)
+                        .contentTransition(.numericText())
+                    Text(L("估算"))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                Text(L("每次跟 Claude 说话，它都要先读一遍你所有技能的简介。这是那份简介的长度。"))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if stale > 0 {
+                    Text(LF("其中 %d 个技能三个月没用过了。", stale))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+            Spacer(minLength: Theme.Space.s8)
+            Button(L("挑出不用的")) { slimPresented = true }
+                .buttonStyle(PressableButtonStyle())
+                .font(Theme.Fonts.calloutEmphasis)
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.horizontal, Theme.Space.s12)
+                .frame(height: 28)
+                .contentShape(Capsule())
+                .glassChrome(Capsule(style: .continuous), interactive: true)
+                .help(L("按使用次数排一遍，你逐个确认要不要关掉"))
+        }
+        .padding(Theme.Space.s16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .quietControl(cornerRadius: Theme.Radius.tile)
+        .sheet(isPresented: $slimPresented) { SlimDraftSheet() }
     }
 }

@@ -166,13 +166,12 @@ func handleDeepLink(_ url: URL, store: AppStore) {
             store.requestProfileApply(profile, directory: nil)
         }
     } else if host == "discover" {
-        store.nav = .discover
-    } else if host == "supply" {
-        // WP-S：supply/<scope> 定位具体范围；先落页
-        store.nav = .supply
+        store.nav = .add
+    } else if host == "supply" || host == "check" {
+        store.nav = .check
     } else if host == "inbox" {
         if let id = rest.first { Inbox.pendingFocusID = id }
-        store.nav = .inbox
+        store.nav = .check
     }
 }
 
@@ -221,7 +220,7 @@ struct SkillAtlasApp: App {
                 // ⌘N 落到发现页（DESIGN v15 入口表），不再直接弹旧安装 sheet：
                 // 发现页才是「找并装上一个新技能」这条工作流的入口。
                 Button(L("找并装技能…")) {
-                    store.nav = .discover
+                    store.nav = .add
                     store.discoverSearchFocus += 1
                 }
                 .keyboardShortcut("n", modifiers: .command)

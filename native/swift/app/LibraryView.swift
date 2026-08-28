@@ -888,7 +888,7 @@ private struct DetailTierControl: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.s8) {
-            Text(L("Claude 档位"))
+            Text(L("怎么用它"))
                 .font(Theme.Fonts.secondaryEmphasis)
                 .foregroundStyle(Theme.textSecondary)
             TierSegment(tier: tier, accessibilityName: skill.name) { apply($0) }
@@ -1419,7 +1419,7 @@ private struct UseMissHelp: View {
             // 用一句话验证它会不会被唤到。
             Button(L("试一句话，看它会不会被唤到")) {
                 store.simulatePhrase = AppStore.callPhrase(for: skill)
-                store.nav = .studio
+                store.nav = .add
             }
             .buttonStyle(.plain)
             .font(Theme.Fonts.secondaryEmphasis)

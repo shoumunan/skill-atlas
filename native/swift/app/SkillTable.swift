@@ -937,7 +937,7 @@ private enum SkillRowMenu {
             store.toggleFavorite(skill.name)
         }
         add(menu, L("在访达中显示")) { store.openFolder(skill.sourcePath) }
-        add(menu, L("档位与供给…")) { store.nav = .supply }
+        add(menu, L("档位与供给…")) { store.nav = .check }
         if skill.origin != .ccSwitch {
             menu.addItem(.separator())
             add(menu, skill.disabled ? L("恢复") : L("停用")) {

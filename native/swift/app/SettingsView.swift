@@ -73,6 +73,7 @@ private struct AdvancedSettings: View {
             .help(open ? L("收起进阶设置") : L("展开进阶设置"))
             if open {
 
+                ProfileEntryGroup()
                 TelemetryGroup()
                 SyncGroup()
             }
@@ -81,6 +82,38 @@ private struct AdvancedSettings: View {
 }
 
 // MARK: - 场景 Profile（三期 G8）
+
+/// 场景包（v16：从供给页降到进阶）。作者本机数据：定义 1 个、绑定 0、生效 0、
+/// 登记项目 0——投入几百行换来 0 使用率。留着入口，不占一级页。
+private struct ProfileEntryGroup: View {
+    @Environment(AppStore.self) private var store
+
+    var body: some View {
+        SettingsGroup(title: "场景包") {
+            HStack(spacing: Theme.Space.s12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("给不同项目配不同的技能"))
+                        .font(Theme.Fonts.rowTitle)
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(L("比如写基金材料时不想看到编程技能。只对 Claude Code 生效。"))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: Theme.Space.s8)
+                Button(L("管理场景…")) {
+                    store.loadProfiles()
+                    store.profileSheetPresented = true
+                }
+                .buttonStyle(.plain)
+                .font(Theme.Fonts.secondaryEmphasis)
+                .foregroundStyle(Theme.accent)
+            }
+            .padding(.horizontal, Theme.Space.s12)
+            .frame(height: 56)
+        }
+    }
+}
 
 // MARK: - Hook 实时遥测（三期 G5）
 
@@ -316,7 +349,7 @@ private struct LegacyImportGroup: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: Theme.Space.s8)
-                Button(L("去发现页")) { store.nav = .discover }
+                Button(L("去发现页")) { store.nav = .add }
                     .buttonStyle(.plain)
                     .font(Theme.Fonts.secondaryEmphasis)
                     .foregroundStyle(Theme.accent)
@@ -378,7 +411,7 @@ private struct InboxLinkGroup: View {
                         .foregroundStyle(Theme.textTertiary)
                 }
                 Spacer(minLength: Theme.Space.s8)
-                Button(L("打开收件箱")) { store.nav = .inbox }
+                Button(L("打开收件箱")) { store.nav = .check }
                     .buttonStyle(.plain)
                     .font(Theme.Fonts.secondaryEmphasis)
                     .foregroundStyle(Theme.accent)

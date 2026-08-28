@@ -24,8 +24,8 @@ enum InboxAssembler {
             out.append(InboxItem(
                 kind: .approval,
                 target: review.token,
-                title: L("来自会话的安装等待批准"),
-                detail: LF("agent 请求安装 %@，含关键级安全命中，需要你审阅。", review.source.url),
+                title: L("有个技能等你点头才装"),
+                detail: LF("会话里的 agent 想装 %@，但扫出了危险写法，得你看一眼再决定。", review.source.url),
                 digest: review.token
             ))
         }
@@ -39,7 +39,7 @@ enum InboxAssembler {
                 out.append(InboxItem(
                     kind: .securityCritical,
                     target: skill.directory,
-                    title: LF("“%@”有关键级安全命中", skill.name),
+                    title: LF("「%@」里有危险写法", skill.name),
                     detail: finding.beginnerNote,
                     digest: critical.map(\.beginnerNote).joined(),
                     skillName: skill.name
@@ -49,8 +49,8 @@ enum InboxAssembler {
                 out.append(InboxItem(
                     kind: .mount,
                     target: skill.directory,
-                    title: LF("“%@”的挂载出了问题", skill.name),
-                    detail: skill.problems.first ?? L("它与 AI 软件的连接需要确认。"),
+                    title: LF("「%@」装了但用不了", skill.name),
+                    detail: skill.problems.first ?? L("它和 AI 软件之间的连接断了。"),
                     digest: skill.problems.joined(),
                     skillName: skill.name
                 ))
@@ -58,39 +58,25 @@ enum InboxAssembler {
                 out.append(InboxItem(
                     kind: .mount,
                     target: skill.directory,
-                    title: LF("“%@”的挂载出了问题", skill.name),
-                    detail: L("它与 AI 软件的连接需要确认。"),
+                    title: LF("「%@」装了但用不了", skill.name),
+                    detail: L("它和 AI 软件之间的连接断了。"),
                     digest: "unknown",
                     skillName: skill.name
                 ))
             }
         }
 
-        // 每类都要有上限：143 个技能的库能产生上百条，一条队列排不完就等于没排
-        var warningBudget = 8
-        for skill in store.skills where !skill.disabled && !store.hasBlockingIssue(skill) {
-            guard warningBudget > 0 else { break }
-            let findings = store.advisoryFindings(for: skill)
-            guard let first = findings.first else { continue }
-            warningBudget -= 1
-            out.append(InboxItem(
-                kind: .securityWarning,
-                target: skill.directory,
-                title: LF("“%@”有需要看一眼的写法", skill.name),
-                detail: first.beginnerNote,
-                digest: findings.map(\.beginnerNote).joined(),
-                skillName: skill.name
-            ))
-        }
+        // 安全提示（warning 级）同理：本机 118 条，排队没有意义。
+        // 只有关键级（上面那段）才是必须逐条决定的待办。
 
         for hit in store.missHits {
             out.append(InboxItem(
                 kind: .miss,
                 target: hit.directory,
-                title: LF("“%@”该触发却没触发", hit.name),
+                title: LF("「%@」叫不动", hit.name),
                 detail: hit.userInvocableOnly
-                    ? LF("它在「仅用户可调」档。可以用 /%@ 调用，或在供给页升档。", hit.name)
-                    : LF("近 7 天有 %d 次任务它该接却没接到。开处方改写描述能提升命中。", hit.occurrences),
+                    ? LF("它被设成了「点名才用」。打 /%@ 就能用，或在技能库里改成「自动」。", hit.name)
+                    : LF("最近七天有 %d 次，你说的话它本该接住却没接。改改它的自我介绍会好一些。", hit.occurrences),
                 digest: "\(hit.occurrences)|\(hit.userInvocableOnly)",
                 skillName: hit.name
             ))
@@ -100,8 +86,8 @@ enum InboxAssembler {
             out.append(InboxItem(
                 kind: .update,
                 target: skill.directory,
-                title: LF("“%@”有新版本", skill.name),
-                detail: L("先看 diff 再更新；本地改动会走补丁保护。"),
+                title: LF("「%@」有新版本", skill.name),
+                detail: L("更新前能先看改了什么。你自己改过的地方会保住。"),
                 // digest 必须随版本变：写死常量会让「忽略一次」把这个技能
                 // 今后所有新版本都静音掉（core/Inbox.swift 的内容寻址契约）
                 digest: "update:\(skill.updatedAt)",
@@ -109,56 +95,9 @@ enum InboxAssembler {
             ))
         }
 
-        for pair in store.triggerOverlaps.prefix(8) {
-            out.append(InboxItem(
-                kind: .overlap,
-                target: pair.id,
-                title: LF("“%@”和“%@”会响应相似说法", pair.first.name, pair.second.name),
-                detail: L("不必卸载任何 Skill；在调用语里写出名字即可。"),
-                digest: pair.shared.joined()
-            ))
-        }
-
-        var seenDiscover = Set<String>()
-        let report = store.doctorReport
-        func addDiscover(_ skill: Skill, _ detail: String, digest: String) {
-            guard seenDiscover.insert(skill.directory).inserted, !skill.disabled else { return }
-            out.append(InboxItem(
-                kind: .overlong,
-                target: skill.directory,
-                title: LF("“%@”的介绍不好找", skill.name),
-                detail: detail,
-                digest: digest,
-                skillName: skill.name
-            ))
-        }
-        for entry in report.atRisk.prefix(6) {
-            addDiscover(entry.skill, L("当前技能清单较满，它的介绍可能排在可见范围之外。"), digest: "atrisk")
-        }
-        for entry in report.buried.prefix(6) {
-            addDiscover(entry.skill,
-                        LF("关键说法写得太靠后：%@", entry.phrases.prefix(3).joined(separator: L("、"))),
-                        digest: "buried:" + entry.phrases.joined())
-        }
-        for entry in report.overlong.prefix(6) {
-            addDiscover(entry.skill,
-                        LF("介绍有 %d 个字符，后半段可能不会进入技能清单。", entry.skill.description.count),
-                        digest: "overlong:\(entry.skill.description.count)")
-        }
-
-        for card in RxFollowup.due().prefix(5) {
-            let skill = store.skills.first { $0.directory == card.directory }
-            let sessions = store.usage[card.directory]?.total ?? 0
-            out.append(InboxItem(
-                kind: .rx,
-                target: card.directory,
-                title: LF("“%@”的描述改写该回访了", skill?.name ?? card.directory),
-                detail: LF("写回已 %d 天，现在 %d 次会话。看看命中有没有回升。", card.ageDays, sessions),
-                // 用写回时间戳而不是天数：天数每天都变，id 跟着变，忽略永远不生效
-                digest: "rx:\(card.writtenAt)",
-                skillName: skill?.name
-            ))
-        }
+        // 触发重叠、介绍埋太深、改写回访三类不再进队列（ROADMAP 2.2 §1）：
+        // 它们是技能自身的性质，不是「处理完就没了」的待办。数量大、无需逐条决定，
+        // 混进队列的结果是既清不完又看不懂。它们作为技能行上的标记继续存在。
 
         return Inbox.sorted(out.filter { !InboxState.decided($0.id) })
     }

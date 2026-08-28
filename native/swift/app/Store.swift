@@ -5,19 +5,20 @@ import SwiftUI
 import AtlasCore
 #endif
 
-/// v15 六项侧栏（DESIGN v15）：allCases 顺序即 ⌘1–⌘6，侧栏分组在 SidebarRail 手排。
+/// v16 四项侧栏（ROADMAP 2.2）：页面名就是用户的处境，不是我的架构名。
+///
+/// 六项两组是从引擎往外设计的结果——有 ContextDoctor 就长出「供给」，有 MissDetect
+/// 就长出「收件箱」。用户读不懂这些词。四项各自回答一个用人话问得出来的问题。
 enum NavPage: String, CaseIterable, Identifiable, Hashable {
-    case library, discover, supply, inbox, studio, settings
+    case library, add, check, settings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .library: return L("技能库")
-        case .discover: return L("发现")
-        case .supply: return L("供给")
-        case .inbox: return L("收件箱")
-        case .studio: return L("创作")
+        case .add: return L("添加技能")
+        case .check: return L("检查")
         case .settings: return L("设置")
         }
     }
@@ -25,22 +26,18 @@ enum NavPage: String, CaseIterable, Identifiable, Hashable {
     var symbol: String {
         switch self {
         case .library: return "books.vertical"
-        case .discover: return "sparkle.magnifyingglass"
-        case .supply: return "shippingbox"
-        case .inbox: return "tray"
-        case .studio: return "flask"
+        case .add: return "plus.circle"
+        case .check: return "checkmark.circle"
         case .settings: return "gearshape"
         }
     }
 
     var help: String {
         switch self {
-        case .library: return L("库存、状态与每技能的上下文成本（⌘1）")
-        case .discover: return L("找并装上新技能（⌘2）")
-        case .supply: return L("哪个 AI、哪个项目带哪些技能进场（⌘3）")
-        case .inbox: return L("要你裁决的运维事项（⌘4）")
-        case .studio: return L("把流程沉淀成技能（⌘5）")
-        case .settings: return L("外观和本库（⌘6）")
+        case .library: return L("我有哪些技能（⌘1）")
+        case .add: return L("装现成的，或自己做一个（⌘2）")
+        case .check: return L("有什么要我处理吗（⌘3）")
+        case .settings: return L("外观、软件目录和进阶（⌘4）")
         }
     }
 }
@@ -1290,7 +1287,7 @@ final class AppStore: InstallHost {
            let hit = inboxItems.first(where: { $0.target == skill.directory }) {
             Inbox.pendingFocusID = hit.id
         }
-        nav = .inbox
+        nav = .check
     }
 
     func hasCriticalSecurity(_ skill: Skill) -> Bool {
@@ -1379,6 +1376,8 @@ final class AppStore: InstallHost {
     }
 
     var hookConsentPresented = false
+    /// 新建技能 sheet（v16：原创作页降级）
+    var newSkillSheetPresented = false
     var missHits: [MissHit] = [] { didSet { inboxInputRevision &+= 1 } }
     var ignoredMisses: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "atlasIgnoredMisses") ?? [])
 
@@ -1473,15 +1472,11 @@ final class AppStore: InstallHost {
             return updates > 0
                 ? LF("%d 个技能 · %d 个可更新", summary.total, updates)
                 : LF("%d 个技能", summary.total)
-        case .discover:
-            return L("从市场找，或从链接与文件夹导入")
-        case .supply:
-            return L("谁带哪些技能进场")
-        case .inbox:
+        case .add:
+            return L("装现成的，或自己做一个")
+        case .check:
             let pending = inboxBadgeCount
-            return pending > 0 ? LF("%d 件事项待处理", pending) : L("一切安静")
-        case .studio:
-            return L("把流程沉淀成技能")
+            return pending > 0 ? LF("%d 件事要你处理", pending) : L("没有要处理的事")
         case .settings:
             if data.summary.migrated {
                 return LF("已迁入 %d 个技能", data.summary.atlasCount)

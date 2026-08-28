@@ -3,14 +3,19 @@ import SwiftUI
 import AtlasCore
 #endif
 
-// MARK: - 创作（v15 一级页，WP-D）
+// MARK: - 新建技能（v16：从一级页降为 sheet，ROADMAP 2.2）
+//
+// 四步向导占一个一级页是过度设计：自己做技能是低频动作，且四步里真正需要
+// 界面的只有第一步（起名建文件）。其余三步本质是「去会话里干活」的提示。
+
+// MARK: - 原创作页（v15 一级页，WP-D）
 //
 // 四步线：① 建骨架（SkillScaffold，与 atlas new 同一份 core 逻辑）→ ② 沙箱试跑
 //（复用 requestSandbox 确认流程与四条注意事项）→ ③ 触发验证（TriggerLab，
 // 目标是草稿排第一）→ ④ 命中回访（写回后收件箱出回访卡；处方双入口之一）。
 // 步进状态持久化（StudioStore），中途退出回来接着走。
 
-struct StudioPage: View {
+struct NewSkillSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var studio = StudioStore()
@@ -146,7 +151,7 @@ struct StudioPage: View {
                                 if draft.origin != .ccSwitch {
                                     linkButton(L("开处方")) { store.requestPrescription(draft) }
                                 }
-                                linkButton(L("打开收件箱")) { store.nav = .inbox }
+                                linkButton(L("打开收件箱")) { store.nav = .check }
                             }
                         }
                     } else {

@@ -15,7 +15,7 @@ struct LibraryBillLink: View {
         let computing = !store.skills.isEmpty && store.doctorReport.entries.isEmpty
         let over = tokens > 10_000
         Button {
-            store.nav = .supply
+            store.nav = .check
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "number")
@@ -41,9 +41,9 @@ struct SlimDraftSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s12) {
-            Text(L("瘦身草案"))
+            Text(L("挑出不用的技能"))
                 .font(Theme.Fonts.calloutEmphasis)
-            Text(L("按使用次数分档。完整挂载进自动清单；仅用户可调仍能 /名字 调用；不挂载会从清单拿掉。只对 Claude Code 生效。meta-skill 不会被排除。"))
+            Text(L("按你用过多少次排的。「自动」是 Claude 会自己想到用；「点名才用」是你打 /名字 才用，不占开场篇幅；「关掉」是完全不用。只对 Claude Code 生效。"))
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

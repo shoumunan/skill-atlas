@@ -35,6 +35,9 @@ struct RootView: View {
         .sheet(isPresented: $store.hookConsentPresented) {
             HookConsentSheet()
         }
+        .sheet(isPresented: $store.newSkillSheetPresented) {
+            NewSkillSheet()
+        }
         .sheet(item: $updates.session) { _ in
             AppUpdateSheet()
         }
@@ -386,16 +389,11 @@ struct SidebarRail: View {
                 .padding(.top, Theme.Space.s16)
                 .padding(.bottom, Theme.Space.s20)
 
-            // v15 两组六项：库（有什么 / 怎么获得）+ 运营（供给 / 裁决 / 沉淀），设置钉在底部
+            // v16 四项平铺（ROADMAP 2.2）：需要分组本身就说明项太多
             VStack(alignment: .leading, spacing: 2) {
-                railGroupLabel(L("库"))
                 RailItem(page: .library, namespace: navSpace)
-                RailItem(page: .discover, namespace: navSpace)
-                railGroupLabel(L("运营"))
-                    .padding(.top, Theme.Space.s12)
-                RailItem(page: .supply, namespace: navSpace)
-                RailItem(page: .inbox, namespace: navSpace)
-                RailItem(page: .studio, namespace: navSpace)
+                RailItem(page: .add, namespace: navSpace)
+                RailItem(page: .check, namespace: navSpace)
             }
             .padding(.horizontal, Theme.Space.s8)
 
@@ -539,7 +537,7 @@ private struct RailItem: View {
 
     private var badge: Int {
         // v15：徽标只挂收件箱，真源 = 聚合器同一口径（已裁决的不计）
-        page == .inbox ? store.inboxBadgeCount : 0
+        page == .check ? store.inboxBadgeCount : 0
     }
 }
 
@@ -554,14 +552,10 @@ private struct PageContainer: View {
                 switch store.nav {
                 case .library:
                     if store.skills.isEmpty { OnboardingView() } else { LibraryPage() }
-                case .discover:
-                    DiscoverPage()
-                case .supply:
-                    SupplyPage()
-                case .inbox:
-                    InboxPage()
-                case .studio:
-                    StudioPage()
+                case .add:
+                    AddPage()
+                case .check:
+                    CheckPage()
                 case .settings:
                     SettingsPage()
                 }

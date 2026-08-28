@@ -4,14 +4,12 @@ import SwiftUI
 import AtlasCore
 #endif
 
-// MARK: - 发现（v15 一级页，WP-M）
+// MARK: - 添加技能（v16 一级页，ROADMAP 2.2）
 //
-// 回答「我没有的能力，怎么找到并安全装上」。上导入区三合一（链接与文件夹 / 收编 /
-// CC Switch 迁移），下发现区（聚合搜索 + SkillHub 榜单）。GitHub 型结果进既有安装
-// 管线（装前扫描一道不少）；SkillHub 托管型先打开网页（zip 通道 = ADR-16 残项）。
-// 市场的评分与认证只作展示（ADR-15）。
+// 「我要多一个技能」在用户心里只有两条路：装个现成的，或者自己做一个。
+// 原来这是「发现」和「创作」两个一级页，各自一套词汇——其实是同一个瞬间。
 
-struct DiscoverPage: View {
+struct AddPage: View {
     @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var discover = DiscoverStore()
@@ -71,6 +69,13 @@ struct DiscoverPage: View {
                     } message: {
                         Text(store.adoptConfirmMessage(store.adoptableSkills))
                     }
+                }
+                ImportTile(
+                    symbol: "wand.and.stars",
+                    title: L("自己做一个…"),
+                    caption: L("起个名，我建好文件，剩下的交给会话里的 agent 写")
+                ) {
+                    store.newSkillSheetPresented = true
                 }
                 if store.canMigrate {
                     ImportTile(
