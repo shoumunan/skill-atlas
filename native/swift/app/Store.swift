@@ -1356,6 +1356,11 @@ final class AppStore: InstallHost {
         return parsed
     }
 
+    /// 开关一个平台 = 「我在用它」：既决定界面里出不出现，也决定新装技能默认勾不勾。
+    ///
+    /// 这两件事以前是设置页里相隔很远的两组开关（可见平台 / 我在用的软件），
+    /// 用户读起来就是同一个矩阵配了两遍。合并的前提是：安装 sheet 本来就会把你的
+    /// 实际勾选写回 preferredPlatforms，所以那一组本就不必单独陈列。
     func setVisible(_ platform: AgentPlatform, on: Bool) {
         var current = Set(visiblePlatforms.map(\.rawValue))
         if on { current.insert(platform.rawValue) } else { current.remove(platform.rawValue) }
@@ -1363,6 +1368,14 @@ final class AppStore: InstallHost {
         let ordered = AgentPlatform.allCases.map(\.rawValue).filter { current.contains($0) }
         visiblePlatformsRaw = ordered.joined(separator: ",")
         UserDefaults.standard.set(visiblePlatformsRaw, forKey: "atlasVisiblePlatforms")
+
+        // 不在用的软件不该继续吃新装的技能——否则 CLI 还会往一个界面上看不见的
+        // 目录里建软链，是典型的「关了却没真关」。
+        var preferred = preferredPlatforms
+        if on { preferred.insert(platform.rawValue) } else { preferred.remove(platform.rawValue) }
+        preferred.formIntersection(current)
+        if preferred.isEmpty { preferred = [ordered.first ?? AgentPlatform.claude.rawValue] }
+        if preferred != preferredPlatforms { preferredPlatforms = preferred }
     }
 
     var hookConsentPresented = false

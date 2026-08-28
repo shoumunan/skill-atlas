@@ -4,16 +4,16 @@ import SwiftUI
 import AtlasCore
 #endif
 
-// MARK: - 设置页（v7 重排：系统设置式分组，居中 640 列）
+// MARK: - 设置页（居中 640 列，系统设置式分组）
 //
-// 分组：外观（界面样式 / 菜单栏 / 语言）· 技能库（位置 / 扫描范围 / 重扫）
-//      · 维护（默认折叠：挂载、安全、闲置、重叠、介绍）
-//      · 多机同步 · 本地技能收编（散装 → 本库，所有用户）
-//      · 从 CC Switch 迁移（机制图 + 状态 + 动作，只对有 CC Switch 数据的用户显示）
-//      · 应用（版本 / 应用内自动更新）
-// 全部是真设置：界面样式立即生效并持久化，菜单栏开关直接撤下图标。
-// 「收进本库」有两条来路：散装收编（人人可用）与 CC Switch 迁移（存量用户），
-// 设置页两组分开陈列，谁的场景谁可见。
+// 分组：外观 · 通知 · 我在用的软件（平台开关 + 目录）· 技能库 · 发现来源
+//      · 收件箱入口 · 导入与迁移 · 应用 · 进阶（使用记录 / 多机同步）
+//
+// 这里只放长期配置。运维事项归收件箱、供给归供给页、收编与迁移归发现页，
+// 设置里只留一行指路——同一件事不给第二个入口（DESIGN v15）。
+//
+// 「我在用的软件」一格管两件事：界面里出不出现，以及新装技能默不默认勾选。
+// 它们曾是相隔很远的两组开关，读起来就是同一个矩阵配了两遍。
 
 struct SettingsPage: View {
     var body: some View {
@@ -21,7 +21,7 @@ struct SettingsPage: View {
             VStack(spacing: Theme.Space.s20) {
                 AppearanceGroup()
                 NotifyGroup()
-                VisiblePlatformsGroup()
+                PlatformsGroup()
                 LibraryGroup()
                 DiscoverySourcesGroup()
                 InboxLinkGroup()
@@ -174,6 +174,50 @@ private struct TelemetryGroup: View {
 // MARK: - 分组骨架
 
 /// 组标题在卡外（系统设置惯例），卡内行之间发丝分隔
+/// 平台行：品牌图标 + 名称 + 真实目录 + 目录改写 + 在用开关。
+/// 图标从原「我在用的软件」那一格搬上来——两处开关合并后，识别度不能丢。
+private struct PlatformSettingRow<Trailing: View>: View {
+    var platform: AgentPlatform
+    var subtitle: String
+    var divider: Bool
+    @ViewBuilder var trailing: Trailing
+
+    init(platform: AgentPlatform, subtitle: String, divider: Bool, @ViewBuilder trailing: () -> Trailing) {
+        self.platform = platform
+        self.subtitle = subtitle
+        self.divider = divider
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: Theme.Space.s12) {
+                PlatformLogo(platform: platform, size: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(platform.displayName)
+                        .font(Theme.Fonts.rowTitle)
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(subtitle)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: Theme.Space.s8)
+                trailing
+            }
+            .padding(.horizontal, Theme.Space.s16)
+            .padding(.vertical, Theme.Space.s12)
+            if divider {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.06))
+                    .frame(height: 1)
+                    .padding(.leading, Theme.Space.s16)
+            }
+        }
+    }
+}
+
 /// v15 WP-M：发现来源开关（护栏 §7-19：总闸 + 每源双控，关闸即零出网）
 private struct DiscoverySourcesGroup: View {
     @Environment(AppStore.self) private var store
@@ -439,15 +483,15 @@ private struct NotifyGroup: View {
     }
 }
 
-private struct VisiblePlatformsGroup: View {
+private struct PlatformsGroup: View {
     @Environment(AppStore.self) private var store
     @State private var rootRevision = 0
 
     var body: some View {
-        SettingsGroup(title: "可见平台") {
+        SettingsGroup(title: "我在用的软件") {
             ForEach(Array(AgentPlatform.allCases.enumerated()), id: \.element.id) { index, platform in
-                SettingsRow(
-                    title: platform.displayName,
+                PlatformSettingRow(
+                    platform: platform,
                     subtitle: subtitle(for: platform),
                     divider: index < AgentPlatform.allCases.count - 1
                 ) {
@@ -470,6 +514,7 @@ private struct VisiblePlatformsGroup: View {
                         .toggleStyle(.switch)
                         .controlSize(.small)
                         .labelsHidden()
+                        .help(L("关掉后它不在界面出现，新装的技能也不会默认装到这里。已有软链不动。"))
                     }
                 }
             }
@@ -645,21 +690,6 @@ private struct LibraryGroup: View {
 
     var body: some View {
         SettingsGroup(title: "技能库") {
-            VStack(alignment: .leading, spacing: Theme.Space.s8) {
-                Text(L("我在用的软件"))
-                    .font(Theme.Fonts.body)
-                    .foregroundStyle(Theme.textPrimary)
-                Text(L("以后新装的，会先开这些。"))
-                    .font(Theme.Fonts.secondary)
-                    .foregroundStyle(Theme.textTertiary)
-                PlatformPrefStrip()
-            }
-            .padding(.horizontal, Theme.Space.s16)
-            .padding(.vertical, Theme.Space.s12)
-            Rectangle()
-                .fill(Color.primary.opacity(0.06))
-                .frame(height: 1)
-                .padding(.leading, Theme.Space.s16)
             SettingsRow(
                 title: "库位置",
                 subtitle: "技能文件、备份都在这里。"

@@ -1035,3 +1035,4 @@
 "装前安全扫描的关键级发现。点开到收件箱看原文。" = "Critical findings from the pre-install security scan. Open the Inbox to read the source.";
 "新技能有可疑写法" = "New skill has suspicious code";
 "只在新出现时提醒一次，已知的留在收件箱里排队。默认开。" = "Notifies once when a finding is new; known ones queue in the Inbox. On by default.";
+"关掉后它不在界面出现，新装的技能也不会默认装到这里。已有软链不动。" = "When off, it disappears from the UI and new skills no longer default to it. Existing symlinks stay.";
