@@ -61,18 +61,24 @@ package struct InboxItem: Identifiable, Equatable {
     /// 内容寻址基材：源头状态一变，digest 变，id 随之变
     package var digest: String
     package var skillName: String?
+    /// 归并键：**同因**的条目共用一个 cause，检查页把它们合成一张卡、给一个
+    /// 一次修完的动作。别拿 detail 当归并键——detail 里常带技能名
+    /// （「打 /somd 就能用」），同一个原因会被名字打散成 N 条。
+    /// 空串表示「永不归并」（审批这类必须逐条看原文的）。
+    package var cause: String
 
     package var id: String { "\(kind.rawValue):\(target):\(Inbox.hash8(digest))" }
     package var deepLink: String { "skillatlas://inbox/\(id)" }
 
     package init(kind: InboxKind, target: String, title: String, detail: String,
-                 digest: String, skillName: String? = nil) {
+                 digest: String, skillName: String? = nil, cause: String = "") {
         self.kind = kind
         self.target = target
         self.title = title
         self.detail = detail
         self.digest = digest
         self.skillName = skillName
+        self.cause = cause
     }
 }
 

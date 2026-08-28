@@ -20,43 +20,38 @@ struct CheckPage: View {
     @State private var inbox = InboxStore()
 
     var body: some View {
-        let items = inbox.items(store: store)
+        let groups = InboxGroup.build(inbox.items(store: store))
+        let leadID = InboxGroup.leadID(groups)
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.s16) {
+                VStack(alignment: .leading, spacing: Theme.Space.s20) {
                     if let receipt = inbox.receipt {
                         ReceiptLine(text: receipt.text, failed: receipt.failed) {
                             inbox.receipt = nil
                         }
                         .receiptTransition(reduceMotion: reduceMotion)
                     }
-                    TokenCard()
-                    if items.isEmpty {
+
+                    if groups.isEmpty {
                         quietState
                     } else {
-                        PrimaryTaskCard(inbox: inbox, item: items[0])
-                            .id(items[0].id)
-                        if items.count > 1 {
-                            Text(L("还有这些"))
-                                .font(Theme.Fonts.secondaryEmphasis)
-                                .foregroundStyle(Theme.textSecondary)
-                                .padding(.leading, Theme.Space.s4)
-                            LazyVStack(spacing: 0) {
-                                ForEach(Array(items.dropFirst().enumerated()), id: \.element.id) { index, item in
-                                    if index > 0 {
-                                        Rectangle()
-                                            .fill(Color.primary.opacity(0.06))
-                                            .frame(height: 1)
-                                            .padding(.leading, Theme.Space.s12)
-                                    }
-                                    InboxRow(inbox: inbox, item: item)
-                                        .id(item.id)
+                        section(L("要你处理的")) {
+                            VStack(alignment: .leading, spacing: Theme.Space.s12) {
+                                ForEach(groups) { group in
+                                    // 全页只允许一个实心主按钮。六张卡各顶一个发光蓝按钮，
+                                    // 等于六个「先点我」——没有优先级就是没有引导；但一个都不给
+                                    // 又等于没有入口。给「一键能修掉最多条」的那张，
+                                    // 那里点一下收益最大。
+                                    GroupCard(inbox: inbox, group: group, lead: group.id == leadID)
+                                        .id(group.id)
                                 }
                             }
-                            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
-                            .quietControl(cornerRadius: Theme.Radius.tile)
                         }
                     }
+
+                    // 账单不是待办：它不会「处理完就没了」，是这个库长期的一条属性。
+                    // 所以它在待办下面、自己一节，标题也说清楚是「顺便」。
+                    section(L("顺便看一眼")) { TokenCard() }
                 }
                 .padding(Theme.Space.s20)
                 .animation(reduceMotion ? nil : Motion.standard, value: inbox.receipt)
@@ -71,6 +66,18 @@ struct CheckPage: View {
                     withAnimation(nil) { proxy.scrollTo(target, anchor: .center) }
                 }
             }
+        }
+    }
+
+    private func section<Content: View>(
+        _ title: String, @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s8) {
+            Text(title)
+                .font(Theme.Fonts.secondaryEmphasis)
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.leading, Theme.Space.s4)
+            content()
         }
     }
 
@@ -97,37 +104,204 @@ struct CheckPage: View {
     }
 }
 
-// MARK: - 主任务卡（v12 四要素）
+// MARK: - 按原因归并
+//
+// 队列上一版是「一个技能一条」。真机上跑出来是这样：6 个技能同时报
+// 「装了但用不了 / GrokBuild 挂载缺失」——那不是 6 件事，是 1 件事的 6 个症状
+// （Grok 那批软链集体没了）。用户被迫滚过 14 行，读到的全是同一句话。
+//
+// 归并键取 (类别, detail)：detail 就是原因本身——挂载类是「哪个平台出了什么问题」，
+// 安全类是「扫出来的是哪种写法」。同因的合成一张卡，给一个能一次修完的动作；
+// 独一份的照旧单独成卡，不套壳。
+struct InboxGroup: Identifiable {
+    var kind: InboxKind
+    /// 给人看的那句原因。归并键是 InboxItem.cause，这里存的是可读版本。
+    var reason: String
+    var items: [InboxItem]
 
-private struct PrimaryTaskCard: View {
+    var id: String { items.count == 1 ? items[0].id : "\(kind.rawValue):\(Inbox.hash8(reason))" }
+    var isSingle: Bool { items.count == 1 }
+    var skillNames: [String] { items.compactMap { $0.skillName ?? $0.title } }
+
+    /// 归并后的标题用「几个技能 + 原因」，不再重复技能名——名字进副文案
+    var title: String {
+        if let single = items.first, isSingle { return single.title }
+        switch kind {
+        case .mount: return LF("%d 个技能装了但用不了", items.count)
+        case .securityCritical, .securityWarning: return LF("%d 个技能里有危险写法", items.count)
+        case .update: return LF("%d 个技能有新版本", items.count)
+        case .miss: return LF("%d 个技能叫不动", items.count)
+        default: return LF("%d 件同类的事", items.count)
+        }
+    }
+
+    var detail: String {
+        guard !isSingle else { return items[0].detail }
+        let names = skillNames.prefix(3).joined(separator: L("、"))
+        let rest = items.count - min(3, skillNames.count)
+        let list = rest > 0 ? LF("%@ 等 %d 个", names, items.count) : names
+        return LF("%@。%@", reason, list)
+    }
+
+    /// 归并卡上给人看的原因。detail 里带技能名，合并后重复且啰嗦，这里给去名版本。
+    static func reason(for item: InboxItem) -> String {
+        switch item.cause {
+        case "miss-user-invocable": return L("它们被设成了「点名才用」，所以不进开场清单")
+        case "miss-not-triggering": return L("你说的话它们本该接住却没接")
+        case "update": return L("关联仓库有新提交")
+        case "mount-unknown": return L("和 AI 软件之间的连接断了")
+        default: return item.cause
+        }
+    }
+
+    /// 这一批里哪张卡该顶主按钮：优先给条数最多的**可批量修复**的那张
+    /// （挂载断了、被设成点名才用——这两类一键就能修完）；一张都没有就给队首。
+    static func leadID(_ groups: [InboxGroup]) -> String? {
+        let repairable = groups.filter {
+            $0.items.count > 1 && ($0.kind == .mount || $0.items.first?.cause == "miss-user-invocable")
+        }
+        if let best = repairable.max(by: { $0.items.count < $1.items.count }) { return best.id }
+        return groups.first?.id
+    }
+
+    static func build(_ items: [InboxItem]) -> [InboxGroup] {
+        var order: [String] = []
+        var buckets: [String: InboxGroup] = [:]
+        for item in items {
+            // cause 为空 = 永不合并（审批这类必须逐条看原文的）
+            let key = item.cause.isEmpty
+                ? "solo:\(item.id)"
+                : "\(item.kind.rawValue)|\(item.cause)"
+            if buckets[key] == nil {
+                order.append(key)
+                buckets[key] = InboxGroup(kind: item.kind, reason: Self.reason(for: item), items: [])
+            }
+            buckets[key]?.items.append(item)
+        }
+        return order.compactMap { buckets[$0] }
+    }
+}
+
+/// 队首用实心主按钮，其余用安静控件——同屏只允许一个「先点我」
+private struct BulkButtonSkin: ViewModifier {
+    var lead: Bool
+
+    func body(content: Content) -> some View {
+        if lead {
+            content.accentGlass(Capsule(style: .continuous))
+        } else {
+            content.quietControl(cornerRadius: 14, tint: Theme.accent)
+        }
+    }
+}
+
+private struct GroupCard: View {
     @Environment(AppStore.self) private var store
     @Bindable var inbox: InboxStore
-    var item: InboxItem
+    @State private var expanded = false
+    var group: InboxGroup
+    var lead: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s12) {
-            HStack(spacing: Theme.Space.s8) {
-                InboxKindBadge(kind: item.kind)
-                Text(L("先处理这一件"))
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textTertiary)
+            HStack(alignment: .top, spacing: Theme.Space.s12) {
+                InboxKindBadge(kind: group.kind)
+                VStack(alignment: .leading, spacing: Theme.Space.s4) {
+                    Text(group.title)
+                        .font(Theme.Fonts.rowTitle)
+                        .foregroundStyle(Theme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(group.detail)
+                        .font(Theme.Fonts.secondary)
+                        .lineSpacing(2)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
             }
-            Text(item.title)
-                .font(Theme.Fonts.panelTitle)
-                .foregroundStyle(Theme.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(item.detail)
-                .font(Theme.Fonts.body)
-                .lineSpacing(2)
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            InboxActions(inbox: inbox, item: item, emphasized: true)
+
+            if group.isSingle {
+                InboxActions(inbox: inbox, item: group.items[0], emphasized: lead)
+            } else {
+                HStack(spacing: Theme.Space.s12) {
+                    if let bulk = bulkAction {
+                        bulkButton(bulk.title, action: bulk.run)
+                    }
+                    Button(expanded ? L("收起") : LF("逐个看这 %d 个", group.items.count)) {
+                        expanded.toggle()
+                    }
+                    .buttonStyle(.plain)
+                    .font(Theme.Fonts.secondaryEmphasis)
+                    .foregroundStyle(Theme.accent)
+                }
+            }
+
+            if expanded, !group.isSingle {
+                VStack(spacing: 0) {
+                    ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
+                        if index > 0 {
+                            Rectangle()
+                                .fill(Color.primary.opacity(0.06))
+                                .frame(height: 1)
+                                .padding(.leading, Theme.Space.s12)
+                        }
+                        InboxRow(inbox: inbox, item: item)
+                            .id(item.id)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous))
+                .quietControl(cornerRadius: Theme.Radius.row)
+            }
         }
-        .padding(Theme.Space.s20)
+        .padding(Theme.Space.s16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // 底色不着语义色：严重度由 InboxKindBadge 单独承载。
-        // 同一条目「琥珀底 + 红徽标」是两个语义色描述一件事（DESIGN 色彩收敛）。
+        // 底色不着语义色：严重度由 InboxKindBadge 单独承载
         .quietControl(cornerRadius: Theme.Radius.tile)
+    }
+
+    /// 归并卡的批量动作：一次修掉那**一个**原因。没有能一次修完的动作就不给按钮，
+    /// 只留「逐个看」——给一个点了不知道会发生什么的批量键比不给更糟。
+    private var bulkAction: (title: String, run: () -> Void)? {
+        switch group.kind {
+        case .mount:
+            return (L("全部重新挂上"), repairAll)
+        case .miss where group.items.first?.cause == "miss-user-invocable":
+            return (L("全部改成自动"), makeAllAutomatic)
+        default:
+            return nil
+        }
+    }
+
+    @ViewBuilder
+    private func bulkButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(PressableButtonStyle())
+            .font(Theme.Fonts.calloutEmphasis)
+            .foregroundStyle(lead ? .white : Theme.accent)
+            .padding(.horizontal, Theme.Space.s12)
+            .frame(height: 28)
+            .contentShape(Capsule())
+            .modifier(BulkButtonSkin(lead: lead))
+    }
+
+    private func repairAll() {
+        let count = store.repairMounts(directories: group.items.map(\.target))
+        inbox.receipt = .init(
+            text: count > 0
+                ? LF("补挂了 %d 处。", count)
+                : L("没有能自动补的：占位的是普通目录，得你先看一眼。"),
+            failed: count == 0
+        )
+    }
+
+    private func makeAllAutomatic() {
+        var done = 0
+        for item in group.items {
+            guard let skill = inbox.skill(for: item, store: store) else { continue }
+            store.makeSkillAutomatic(skill)
+            done += 1
+        }
+        inbox.receipt = .init(text: LF("%d 个技能改回「自动」了。", done), failed: done == 0)
     }
 }
 
@@ -235,8 +409,8 @@ private struct InboxActions: View {
                 if let skill = inbox.skill(for: item, store: store), hit?.userInvocableOnly != true {
                     primary(L("开处方")) { store.requestPrescription(skill) }
                 }
-                if hit?.userInvocableOnly == true {
-                    secondary(L("去供给页升档")) { store.nav = .check }
+                if hit?.userInvocableOnly == true, let skill = inbox.skill(for: item, store: store) {
+                    primary(L("改成自动")) { store.makeSkillAutomatic(skill) }
                 }
                 ignoreButton
             case .update:

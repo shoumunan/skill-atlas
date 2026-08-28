@@ -123,8 +123,13 @@ final class AppStore: InstallHost {
     }
 
     /// 徽标与副文案口径：未裁决且严重度 ≤1（整理项只在页内排队，不进徽标）
+    /// 角标 = **要你做几个决定**，不是有几条症状。
+    ///
+    /// 同一个原因（比如某个平台的软链集体没了）会刷出一堆条目，检查页把它们
+    /// 归并成一张卡、给一个一次修完的动作。角标若还报条目数，就会出现
+    /// 「角标 14、页面只有 3 张卡」这种两个数字打架的局面。
     var inboxBadgeCount: Int {
-        inboxItems.filter { $0.kind.severity <= 1 }.count
+        InboxGroup.build(inboxItems.filter { $0.kind.severity <= 1 }).count
     }
     @ObservationIgnored private var doctorComputeTask: Task<Void, Never>?
     @ObservationIgnored private var deferredWork: Task<Void, Never>?
@@ -483,6 +488,63 @@ final class AppStore: InstallHost {
             invalidateSupply()
             Oplog.append(op: "profile-apply", target: request.profile.name, ok: true,
                          detail: "excluded \(applied.count)")
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    /// 批量补挂：catalog 说该挂、盘上却没有软链的，全部重建。
+    ///
+    /// 「装了但用不了」在队列里能刷出 6 条一模一样的行——同一个原因（某个平台的
+    /// 软链集体没了）被拆成每技能一条。用户看到的是 6 个问题，其实是 1 个。
+    /// 这个动作把那 1 个原因一次修掉。
+    ///
+    /// 返回补好的条数，供回执用。
+    @discardableResult
+    func repairMounts(directories: [String]? = nil) -> Int {
+        let targets = Set(directories ?? skills.map(\.directory))
+        var repaired = 0
+        pauseWatching()
+        for skill in skills where targets.contains(skill.directory) {
+            guard skill.origin == .atlas, !skill.managed, !skill.disabled else { continue }
+            for platform in AgentPlatform.allCases {
+                let mount = skill.mount(platform)
+                // 只补「说好要挂、却断了或没有」的；.directory（占位是真目录）
+                // 不碰——那要人来判断是不是旧拷贝，静默覆盖会吃掉用户的文件
+                guard mount.enabled, mount.status == .missing || mount.status == .broken else { continue }
+                do {
+                    try SkillActions.setPlatform(
+                        directory: skill.directory, platform: platform, enabled: true
+                    )
+                    Oplog.append(op: "remount", target: skill.directory, ok: true,
+                                 detail: platform.rawValue)
+                    repaired += 1
+                } catch {
+                    actionError = error.localizedDescription
+                }
+            }
+        }
+        resumeWatching()
+        for directory in targets { patchMounts(directory: directory) }
+        invalidateInbox()
+        return repaired
+    }
+
+    /// 把一个技能改回「自动」（Claude 会自己想到用它）。
+    ///
+    /// 「叫不动」这条待办里，如果原因就是它被设成了「点名才用」，那修复动作只有一个。
+    /// 以前这里给的按钮写「去供给页升档」，点了 `store.nav = .check`——你本来就站在
+    /// 检查页上，点完什么都没发生。待办条目的动作必须当场把事办了。
+    func makeSkillAutomatic(_ skill: Skill) {
+        do {
+            try SupplyWriter.write(
+                assignments: [skill.name: .core],
+                target: ProfileWriter.userSettingsURL
+            )
+            Oplog.append(op: "supply-tier", target: skill.directory, ok: true,
+                         detail: "\(skill.name) -> core")
+            invalidateSupply()
+            refreshMisses()
         } catch {
             actionError = error.localizedDescription
         }
@@ -1581,11 +1643,41 @@ final class AppStore: InstallHost {
             try SkillActions.setPlatform(directory: skill.directory, platform: platform, enabled: enabled)
             Oplog.append(op: enabled ? "enable" : "disable", target: skill.directory, ok: true,
                          detail: platform.rawValue)
+            patchMounts(directory: skill.directory)
         } catch {
             actionError = error.localizedDescription
+            // 只有失败才值得全量重扫：盘上到底成了什么样这时才是未知的
+            Task { await rescan(keepSelection: true) }
         }
         resumeWatching()
-        Task { await rescan(keepSelection: true) }
+    }
+
+    /// 挂/摘一条软链后就地更新这一个技能，不走 rescan()。
+    ///
+    /// 以前这里是 `await rescan()`，于是点一下平台图标要付：全平台根全量扫描
+    /// （147 技能 × 11 根）+ 触发词两两比对 + **147 个技能的安全全扫** + 用法索引重建
+    /// + 联网查更新。用户的原话是「转好久，卡的要死」。
+    ///
+    /// 但软链的挂摘不改技能内容：安全结论没变、用法没变、版本没变。真正变的只有
+    /// 这一个技能的 mounts/platforms/problems/health，以及汇总里的计数。
+    private func patchMounts(directory: String) {
+        guard var current = data,
+              let index = current.skills.firstIndex(where: { $0.directory == directory })
+        else { return }
+        let record = AtlasCatalog.load().skills[directory]
+        let enabled = Dictionary(uniqueKeysWithValues: AgentPlatform.allCases.map {
+            ($0, record?.isEnabled($0) ?? false)
+        })
+        current.skills[index] = SkillScanner.refreshMounts(skill: current.skills[index], enabled: enabled)
+        // 汇总的每平台计数是侧栏与设置页读的，跟着一起对齐，否则数字会停在旧值
+        for platform in AgentPlatform.allCases {
+            let label = platform.label
+            current.summary.enabled[label] = current.skills.filter { $0.platforms.contains(label) }.count
+            current.summary.verified[label] = current.skills.filter {
+                $0.mount(platform).status == .ok
+            }.count
+        }
+        data = current
     }
 
     /// 收编本地直装：拷入本库、原散装目录替换成指向库的软链。

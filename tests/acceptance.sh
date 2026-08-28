@@ -311,4 +311,8 @@ fi
 python3 "$ROOT/tests/assert_i18n.py" "$ROOT/native"
 echo "i18n acceptance OK"
 
+# --- 界面不许说旧黑话（i18n 闸只查翻译齐不齐，查不出「收件箱」这种没人懂的词）---
+python3 "$ROOT/tests/assert_plain_language.py"
+echo "文案 acceptance OK"
+
 echo "ALL acceptance OK"

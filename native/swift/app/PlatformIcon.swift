@@ -21,7 +21,14 @@ import AtlasCore
 //               → glyphScale 0.60 与其余标同墨量）
 //   OpenClaw  = openclaw.svg（自绘原创「三道爪痕」glyph，非官方商标——OpenClaw 的
 //               龙虾标带商标风险且官方无 press kit，用抽象爪痕规避；模板渲染反色）
-// UI 只展示这六个平台；OpenCode / Hermes 仅保留数据兼容，不再出现在界面上。
+//   Qwen      = qwen.svg（LobeHub 单色版。官方彩色版带 linearGradient，CoreSVG
+//               渲染不出渐变 defs，所以取单色版 + 品牌紫上色）
+//   Doubao    = doubao.svg（LobeHub 单色版，同上，品牌蓝上色）
+//   OpenCode  = opencode.svg（LobeHub，官方方中方标，本就是单色）
+//   Hermes    = hermes.svg（自绘原创「带翼信使杖」glyph。LobeHub 收的官方标是
+//               插画风人物头像，18pt 下糊成一团，也进不了这排几何标的体系）
+// 十一个平台全部有标，没有首字母灰块——一排图标里混两个字母块，
+// 用户看到的是「这两个没做完」。
 
 enum PlatformBrand {
     struct Spec {
@@ -59,11 +66,18 @@ enum PlatformBrand {
             tintedGlyph: true
         )
         case .openclaw: return Spec(file: "openclaw", template: true, tint: Color(hex: 0xE8503A), glyphScale: 0.66)
-        // 没有 logo 资源：file 留空走首字母兜底，但保留品牌色芯片，
-        // 免得一排彩色芯片里突然出现两个灰块。
-        case .qwenwork: return Spec(file: "", template: false, tint: Color(hex: 0x615CED))
-        case .doubao: return Spec(file: "", template: false, tint: Color(hex: 0x1664FF))
-        case .opencode, .hermes: return nil
+        case .qwenwork: return Spec(
+            file: "qwen", template: true, tint: Color(hex: 0x615CED),
+            glyphScale: 0.62, tintedGlyph: true
+        )
+        case .doubao: return Spec(
+            file: "doubao", template: true, tint: Color(hex: 0x1E37FC),
+            glyphScale: 0.60, tintedGlyph: true
+        )
+        // 方中方标墨量重，缩到 0.52 才和邻座同重
+        case .opencode: return Spec(file: "opencode", template: true, tint: Color(hex: 0x2F9E5F), glyphScale: 0.52)
+        // 自绘 glyph 没有「官方色」可对，色相取这一排里还空着的青铜位
+        case .hermes: return Spec(file: "hermes", template: true, tint: Color(hex: 0xC08A3E), glyphScale: 0.70)
         }
     }
 

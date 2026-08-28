@@ -67,7 +67,7 @@ enum AtlasNotify {
         // id 稳定：同一批发现重复投递会合并，不会在通知中心堆成一摞
         post(id: "security-\(fresh.sorted().joined(separator: ","))",
              title: title,
-             body: L("装前安全扫描的关键级发现。点开到收件箱看原文。"),
+             body: L("装之前扫出来的。点开到「检查」看原文。"),
              deepLink: "skillatlas://inbox")
     }
 

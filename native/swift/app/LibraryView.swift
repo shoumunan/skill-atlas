@@ -506,6 +506,7 @@ private func menuLabel(title: String, symbol: String, active: Bool) -> some View
 private struct FavoritesTabs: View {
     @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     @Namespace private var tabSpace
 
     var body: some View {
@@ -530,8 +531,8 @@ private struct FavoritesTabs: View {
                     if active {
                         // 同心圆角：外层 8 − 内缩 2 = 6
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(.background)
-                            .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
+                            .fill(Theme.raisedThumb)
+                            .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.08), radius: 2, y: 1)
                             .matchedGeometryEffect(id: "fav-thumb", in: tabSpace)
                     }
                 }
@@ -893,6 +894,7 @@ private struct DetailTierControl: View {
                 .foregroundStyle(Theme.textSecondary)
             TierSegment(tier: tier, accessibilityName: skill.name) { apply($0) }
             Text(L("只对 Claude Code 生效。"))
+                .help(L("只对 Claude Code 生效——只有它有「装着、但不进开场清单」这个开关。别的软件只有装或不装两种状态，没有中间档，场景在那边无从谈起。"))
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(Theme.textTertiary)
             Spacer(minLength: 0)
@@ -1375,7 +1377,7 @@ private struct BlockingRepairBanner: View {
                         } else {
                             Button(L("打开目录")) { store.openFolder(skill.sourcePath) }
                         }
-                        Button(L("去收件箱看这一条")) { store.openInbox(for: skill) }
+                        Button(L("去「检查」看这一条")) { store.openInbox(for: skill) }
                     }
                     .buttonStyle(.plain)
                     .font(Theme.Fonts.secondaryEmphasis)

@@ -42,7 +42,8 @@ enum InboxAssembler {
                     title: LF("「%@」里有危险写法", skill.name),
                     detail: finding.beginnerNote,
                     digest: critical.map(\.beginnerNote).joined(),
-                    skillName: skill.name
+                    skillName: skill.name,
+                    cause: finding.beginnerNote
                 ))
             }
             if !skill.problems.isEmpty {
@@ -52,7 +53,8 @@ enum InboxAssembler {
                     title: LF("「%@」装了但用不了", skill.name),
                     detail: skill.problems.first ?? L("它和 AI 软件之间的连接断了。"),
                     digest: skill.problems.joined(),
-                    skillName: skill.name
+                    skillName: skill.name,
+                    cause: skill.problems.first ?? "mount"
                 ))
             } else if critical.isEmpty {
                 out.append(InboxItem(
@@ -61,7 +63,8 @@ enum InboxAssembler {
                     title: LF("「%@」装了但用不了", skill.name),
                     detail: L("它和 AI 软件之间的连接断了。"),
                     digest: "unknown",
-                    skillName: skill.name
+                    skillName: skill.name,
+                    cause: "mount-unknown"
                 ))
             }
         }
@@ -78,7 +81,8 @@ enum InboxAssembler {
                     ? LF("它被设成了「点名才用」。打 /%@ 就能用，或在技能库里改成「自动」。", hit.name)
                     : LF("最近七天有 %d 次，你说的话它本该接住却没接。改改它的自我介绍会好一些。", hit.occurrences),
                 digest: "\(hit.occurrences)|\(hit.userInvocableOnly)",
-                skillName: hit.name
+                skillName: hit.name,
+                cause: hit.userInvocableOnly ? "miss-user-invocable" : "miss-not-triggering"
             ))
         }
 
@@ -91,7 +95,8 @@ enum InboxAssembler {
                 // digest 必须随版本变：写死常量会让「忽略一次」把这个技能
                 // 今后所有新版本都静音掉（core/Inbox.swift 的内容寻址契约）
                 digest: "update:\(skill.updatedAt)",
-                skillName: skill.name
+                skillName: skill.name,
+                cause: "update"
             ))
         }
 

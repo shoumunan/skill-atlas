@@ -537,6 +537,60 @@ package enum SkillScanner {
         return result
     }
 
+
+    /// 单技能挂载态重算：挂/摘一条软链后，只有这一个技能在这一个平台上的挂载态会变。
+    ///
+    /// 走的是和全量扫描**同一段**判定逻辑（下面的 for 循环与 scan() 里那段逐字对应），
+    /// 所以不会出现「就地更新算出来的健康度」和「重扫算出来的」两套结论。
+    /// 11 次 lstat，微秒级；相比之下 scan() 要走全部平台根 × 全部技能。
+    package static func refreshMounts(skill: Skill, enabled: [AgentPlatform: Bool]) -> Skill {
+        var updated = skill
+        let source = URL(fileURLWithPath: skill.sourcePath)
+        let home = AtlasPaths.home
+        let fileManager = FileManager.default
+
+        var problems: [String] = []
+        var severity = Health.healthy
+        var isFile: ObjCBool = false
+        let skillFileOK = fileManager.fileExists(atPath: skill.skillFile, isDirectory: &isFile) && !isFile.boolValue
+        if !skillFileOK {
+            problems.append("SKILL.md 缺失")
+            severity = .error
+        }
+
+        var platforms: [String] = []
+        var mounts: [AgentPlatform: Mount] = [:]
+        for platform in AgentPlatform.allCases {
+            let on = (enabled[platform] ?? false) && !skill.disabled
+            let mount = mountState(
+                root: platform.root(home: home),
+                directory: skill.directory,
+                enabled: on,
+                source: source
+            )
+            mounts[platform] = mount
+            if on { platforms.append(platform.label) }
+            guard !skill.disabled else { continue }
+            switch mount.status {
+            case .missing, .broken, .wrong:
+                let word = [MountStatus.missing: "缺失", .broken: "断链", .wrong: "目标错误"][mount.status]!
+                problems.append("\(platform.label) 挂载\(word)")
+                severity = .error
+            case .directory, .unexpected:
+                problems.append("\(platform.label) \(mount.status == .directory ? "是普通目录" : "存在未启用挂载")")
+                if severity != .error { severity = .warning }
+            case .ok, .disabled:
+                break
+            }
+        }
+
+        updated.mounts = mounts
+        updated.platforms = platforms
+        updated.problems = problems
+        updated.health = severity
+        return updated
+    }
+
     /// 校验单个平台的软连接状态（不跟随/跟随符号链接的语义与 Python 版一致）。
     package static func mountState(root: URL, directory: String, enabled: Bool, source: URL) -> Mount {
         let fileManager = FileManager.default

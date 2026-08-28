@@ -397,7 +397,13 @@ struct SidebarRail: View {
             }
             .padding(.horizontal, Theme.Space.s8)
 
-            Spacer()
+            // 三项导航撑不满一根满高的栏。但把检查页的数字搬过来填空是假充实——
+            // 那些数字在它们该在的地方已经有了。这里放的是**别处答不了的那个问题**：
+            // 「我这些技能，Claude 最近到底在用哪几个？」没有使用记录时整块不出现，
+            // 宁可空着也不摆一个空盒子。
+            RecentlyUsedBlock()
+
+            Spacer(minLength: Theme.Space.s16)
 
             VStack(spacing: 2) {
                 RailItem(page: .settings, namespace: navSpace)
@@ -405,21 +411,7 @@ struct SidebarRail: View {
             .padding(.horizontal, Theme.Space.s8)
             .padding(.bottom, Theme.Space.s8)
 
-            // 信任锚点按用户场景给：CC Switch 用户看「数据只读」承诺；
-            // 纯本地用户看「收编须确认」承诺——各自最关心的边界
-            HStack(spacing: Theme.Space.s8) {
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.healthy)
-                Text(hasCCSwitchTrace ? L("原来的文件不动") : L("先不改你已有的技能"))
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textTertiary)
-            }
-            .padding(.horizontal, Theme.Space.s16)
-            .padding(.bottom, Theme.Space.s16)
-            .help(hasCCSwitchTrace
-                ? L("CC Switch 里的原文件不会被改。随时可以撤回来。")
-                : L("已经装在软件里的技能，只有你点「收进本库」才会接管。"))
+            HomeFooter(hasCCSwitchTrace: hasCCSwitchTrace)
         }
         .frame(width: Theme.Layout.sidebar)
         .frame(maxHeight: .infinity)
@@ -464,6 +456,121 @@ private struct BrandRow: View {
             }
         }
         .help("Skill Atlas")
+    }
+}
+
+/// 侧栏「最近在用」：按最后一次触发时间排的前六个。
+///
+/// 点一条直接跳到那个技能。这是这根栏唯一放得下、又只有这里答得了的信息——
+/// 技能总数在库页标题上，待办数在导航角标上，开场长度在检查页顶，都不该在这儿重复一遍。
+private struct RecentlyUsedBlock: View {
+    @Environment(AppStore.self) private var store
+
+    private var recent: [(skill: Skill, at: Date)] {
+        var pairs: [(skill: Skill, at: Date)] = []
+        for skill in store.skills {
+            guard let at = store.usage[skill.directory]?.lastUsed else { continue }
+            pairs.append((skill: skill, at: at))
+        }
+        pairs.sort { $0.at > $1.at }
+        return Array(pairs.prefix(6))
+    }
+
+    var body: some View {
+        let rows = recent
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(L("最近在用"))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .padding(.horizontal, Theme.Space.s8 + 2)
+                    .padding(.top, Theme.Space.s16)
+                    .padding(.bottom, Theme.Space.s4)
+                ForEach(rows, id: \.skill.directory) { row in
+                    RecentRow(skill: row.skill, at: row.at)
+                }
+            }
+            .padding(.horizontal, Theme.Space.s8)
+        }
+    }
+}
+
+private struct RecentRow: View {
+    @Environment(AppStore.self) private var store
+    @State private var hovering = false
+    var skill: Skill
+    var at: Date
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+        Button {
+            store.nav = .library
+            store.select(skill.name)
+        } label: {
+            HStack(spacing: Theme.Space.s8) {
+                Text(skill.name)
+                    .font(Theme.Fonts.callout)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: Theme.Space.s4)
+                Text(Self.ago(at))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .monospacedDigit()
+                    .layoutPriority(1)
+            }
+            .padding(.horizontal, Theme.Space.s8 + 2)
+            .frame(height: 26)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background { if hovering { shape.fill(Color.primary.opacity(0.05)) } }
+            .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(LF("%@：最后一次是 %@。点击在技能库里打开。", skill.name, Self.ago(at)))
+    }
+
+    /// 「3 天前」这种粗粒度就够了：这里要的是新鲜度，不是时刻
+    static func ago(_ date: Date) -> String {
+        let seconds = Int(Date().timeIntervalSince(date))
+        if seconds < 3600 { return L("刚刚") }
+        if seconds < 86_400 { return LF("%d 小时前", seconds / 3600) }
+        let days = seconds / 86_400
+        if days < 30 { return LF("%d 天前", days) }
+        return LF("%d 个月前", max(1, days / 30))
+    }
+}
+
+/// 侧栏底部：一句能验证的事实 + 迁移用户额外的那句承诺。
+///
+/// 以前这里孤零零写「原来的文件不动」——没有上下文，谁的文件、什么时候动、
+/// 为什么要跟我说，用户一个都答不上来。现在第一行给可点开的实际位置
+/// （你的东西在哪，Finder 里能看见），CC Switch 的承诺降为它的补充说明。
+private struct HomeFooter: View {
+    var hasCCSwitchTrace: Bool
+
+    var body: some View {
+        Button {
+            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: AtlasPaths.libraryRoot.path)
+        } label: {
+            HStack(spacing: Theme.Space.s8) {
+                Image(systemName: "folder")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.textTertiary)
+                Text(L("技能存在这台电脑上"))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, Theme.Space.s16)
+            .padding(.bottom, Theme.Space.s16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(hasCCSwitchTrace
+            ? LF("点开看文件夹：%@。CC Switch 里的原文件不会被改，随时可以撤回来。", AtlasPaths.libraryRoot.path)
+            : LF("点开看文件夹：%@。已经装在别处的技能，只有你点「收进本库」才会接管。", AtlasPaths.libraryRoot.path))
     }
 }
 

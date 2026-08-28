@@ -351,7 +351,7 @@ struct ProfileSheet: View {
 
     private func actionRow(_ profile: AtlasProfile) -> some View {
         HStack(spacing: Theme.Space.s8) {
-            Text(L("只对 Claude Code 生效；其他平台没有等价机制。"))
+            Text(L("只对 Claude Code 生效——只有它有「装着、但不进开场清单」这个开关。别的软件只有装或不装两种状态，没有中间档，场景在那边无从谈起。"))
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(Theme.textTertiary)
             Spacer()

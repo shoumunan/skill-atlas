@@ -29,6 +29,15 @@ enum Theme {
             : .white
     }
     static let panelFill = Color(nsColor: panelNSColor)
+    /// 分段控件里「选中的那一格」。必须比所在面板**更亮**才读作凸起。
+    /// 别用 `.background`：那是窗口背景色，暗色下（约 0.12）比面板（0.16）更深，
+    /// 选中项会读成一个凹下去的黑洞，和亮色下白色凸起的语义正好相反。
+    static let raisedThumb = Color(nsColor: NSColor(name: nil) { appearance in
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return dark
+            ? NSColor(calibratedRed: 0.26, green: 0.26, blue: 0.28, alpha: 1)
+            : .white
+    })
     /// 和 AtlasBackdrop 同一色，窗口底露出来时不要另一层系统灰。
     static let backdropNSColor = NSColor(name: nil) { appearance in
         let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua

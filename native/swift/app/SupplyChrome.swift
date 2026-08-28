@@ -30,7 +30,7 @@ struct LibraryBillLink: View {
             .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
         }
         .buttonStyle(.plain)
-        .help(L("每个 Claude 会话开场读技能清单的估算 token。点击去供给页调整。"))
+        .help(L("每次跟 Claude 说话，它先读一遍所有技能的简介。这是那份简介的长度，点击去「检查」调。"))
     }
 }
 
@@ -43,7 +43,7 @@ struct SlimDraftSheet: View {
         VStack(alignment: .leading, spacing: Theme.Space.s12) {
             Text(L("挑出不用的技能"))
                 .font(Theme.Fonts.calloutEmphasis)
-            Text(L("按你用过多少次排的。「自动」是 Claude 会自己想到用；「点名才用」是你打 /名字 才用，不占开场篇幅；「关掉」是完全不用。只对 Claude Code 生效。"))
+            Text(L("按你用过多少次排的。「自动」是 Claude 会自己想到用；「点名才用」是你打 /名字 才用，不占开场篇幅；「关掉」是完全不用。只对 Claude Code 生效——只有它有「装着、但不进开场清单」这个开关。"))
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

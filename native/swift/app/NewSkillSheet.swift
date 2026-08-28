@@ -143,7 +143,7 @@ struct NewSkillSheet: View {
                 StepCard(index: 4, title: L("命中回访"), state: draft == nil ? .locked : .active) {
                     if let draft {
                         VStack(alignment: .leading, spacing: Theme.Space.s8) {
-                            Text(L("描述改写写回两周后，收件箱会出回访卡，对比前后触发次数。现在也能直接开处方调描述。"))
+                            Text(L("改完自我介绍，过阵子回来看看触发次数有没有变。现在也能直接开处方调描述。"))
                                 .font(Theme.Fonts.caption)
                                 .foregroundStyle(Theme.textTertiary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -151,7 +151,7 @@ struct NewSkillSheet: View {
                                 if draft.origin != .ccSwitch {
                                     linkButton(L("开处方")) { store.requestPrescription(draft) }
                                 }
-                                linkButton(L("打开收件箱")) { store.nav = .check }
+                                linkButton(L("去「检查」")) { store.nav = .check }
                             }
                         }
                     } else {

@@ -95,7 +95,7 @@ private struct ProfileEntryGroup: View {
                     Text(L("给不同项目配不同的技能"))
                         .font(Theme.Fonts.rowTitle)
                         .foregroundStyle(Theme.textPrimary)
-                    Text(L("比如写基金材料时不想看到编程技能。只对 Claude Code 生效。"))
+                    Text(L("比如写基金材料时不想看到编程技能。只对 Claude Code 生效——只有它有「装着、但不进开场清单」这个开关。别的软件只有装或不装两种状态，没有中间档，场景在那边无从谈起。"))
                         .font(Theme.Fonts.caption)
                         .foregroundStyle(Theme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -262,7 +262,7 @@ private struct DiscoverySourcesGroup: View {
         SettingsGroup(title: "发现来源") {
             sourceRow(
                 title: L("远程发现"),
-                caption: L("总闸。关掉后发现页与 atlas search --remote 全部零出网。"),
+                caption: L("总闸。关掉后「添加技能」与 atlas search --remote 全部零出网。"),
                 isOn: SourcePrefs.masterEnabled,
                 enabled: true
             ) { try SourcePrefs.setMaster($0) }
@@ -340,7 +340,7 @@ private struct LegacyImportGroup: View {
         SettingsGroup(title: "导入与迁移") {
             HStack(spacing: Theme.Space.s12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(L("收编与迁移都在发现页"))
+                    Text(L("收编与迁移都在「添加技能」"))
                         .font(Theme.Fonts.rowTitle)
                         .foregroundStyle(Theme.textPrimary)
                     Text(subtitle)
@@ -349,7 +349,7 @@ private struct LegacyImportGroup: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: Theme.Space.s8)
-                Button(L("去发现页")) { store.nav = .add }
+                Button(L("去「添加技能」")) { store.nav = .add }
                     .buttonStyle(.plain)
                     .font(Theme.Fonts.secondaryEmphasis)
                     .foregroundStyle(Theme.accent)
@@ -390,7 +390,7 @@ private struct LegacyImportGroup: View {
             return LF("现在有 %d 个散落技能可以收编。", adoptable)
         }
         return store.canMigrate
-            ? L("检测到 CC Switch 的技能，可以在发现页迁入。")
+            ? L("检测到 CC Switch 的技能，可以在「添加技能」里迁入。")
             : L("散落在平台目录里的技能、CC Switch 的旧库，都从那里进来。")
     }
 }
@@ -400,18 +400,18 @@ private struct InboxLinkGroup: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
-        SettingsGroup(title: "收件箱") {
+        SettingsGroup(title: "检查") {
             HStack(spacing: Theme.Space.s12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(L("运维事项都在收件箱"))
+                    Text(L("要你处理的事都在「检查」"))
                         .font(Theme.Fonts.rowTitle)
                         .foregroundStyle(Theme.textPrimary)
-                    Text(L("挂载失败、安全命中、miss、可更新在那里排队裁决"))
+                    Text(L("等你点头、有危险写法、装了用不了、叫不动——只有这四类会来找你"))
                         .font(Theme.Fonts.caption)
                         .foregroundStyle(Theme.textTertiary)
                 }
                 Spacer(minLength: Theme.Space.s8)
-                Button(L("打开收件箱")) { store.nav = .check }
+                Button(L("去「检查」")) { store.nav = .check }
                     .buttonStyle(.plain)
                     .font(Theme.Fonts.secondaryEmphasis)
                     .foregroundStyle(Theme.accent)
@@ -493,7 +493,7 @@ private struct NotifyGroup: View {
 
     var body: some View {
         SettingsGroup(title: "通知") {
-            SettingsRow(title: "新技能有可疑写法", subtitle: "只在新出现时提醒一次，已知的留在收件箱里排队。默认开。") {
+            SettingsRow(title: "新技能有可疑写法", subtitle: "只在新出现时提醒一次，已知的留在「检查」里排队。默认开。") {
                 Toggle("", isOn: $security)
                     .toggleStyle(.switch)
                     .controlSize(.small)
@@ -521,7 +521,7 @@ private struct PlatformsGroup: View {
     @State private var rootRevision = 0
 
     var body: some View {
-        SettingsGroup(title: "我在用的软件") {
+        SettingsGroup(title: "AI 软件") {
             ForEach(Array(AgentPlatform.allCases.enumerated()), id: \.element.id) { index, platform in
                 PlatformSettingRow(
                     platform: platform,

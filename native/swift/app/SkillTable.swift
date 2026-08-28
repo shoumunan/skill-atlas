@@ -750,7 +750,7 @@ private final class SkillRowCell: NSTableCellView {
                 button.alphaValue = halfLit ? 0.55 : (lit ? 1 : 0.5)
             }
             button.toolTip = halfLit
-                ? LF("%@：已挂载但不进自动清单（档位）。点击停止同步；改档去供给页。", platform.displayName)
+                ? LF("%@：装着，但不进开场清单。点击停止同步；要改去「检查」。", platform.displayName)
                 : platformHelp(platform, lit: lit, togglable: togglable, origin: row.origin)
         }
     }
