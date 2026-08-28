@@ -1,7 +1,7 @@
 {
-  "version": "2.1.2",
-  "notes": "v2.1.2：场景包补「部分应用」态（半生效不再显示为已生效）；审批界面显示是哪个会话发起的；六页导航与深链补上自动化回归用例。",
+  "version": "2.1.3",
+  "notes": "v2.1.3：安全通知只在新出现问题时提醒一次并点名技能，不再反复弹；设置里两组平台开关合并成一组，带品牌图标与真实目录。",
   "download": "https://github.com/shoumunan/skill-atlas/releases/latest",
-  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.1.2/Skill.Atlas-2.1.2.dmg",
-  "sha256": "8de416eef2c508ca260082fb0ec7c5e19e9403ddbc197fca2ff73927b973a732"
+  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.1.3/Skill.Atlas-2.1.3.dmg",
+  "sha256": "e228aa75d3ec820fff0dba55cd7b2ff8231d68474938e5b4be8127fd7585bd12"
 }
