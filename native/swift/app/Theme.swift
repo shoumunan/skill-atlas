@@ -463,20 +463,83 @@ struct StatusDot: View {
     }
 }
 
-/// 健康徽标（高密度小控件 → 圆角矩形，不用胶囊）
-struct HealthFlag: View {
-    var health: Health
+/// v15 写操作回执行：成功报数字变化，失败报原因（DESIGN.md v15）
+struct ReceiptLine: View {
+    var text: String
+    var failed: Bool = false
+    var onDismiss: (() -> Void)?
 
     var body: some View {
-        Text(health.label)
-            .font(Theme.Fonts.caption)
-            .foregroundStyle(health.tint)
-            .padding(.horizontal, Theme.Space.s8)
-            .frame(height: 20)
-            .background {
-                RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                    .fill(health.tint.opacity(0.12))
+        HStack(spacing: Theme.Space.s8) {
+            Image(systemName: failed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(failed ? Theme.warning : Theme.healthy)
+            Text(text)
+                .font(Theme.Fonts.secondary)
+                .monospacedDigit()
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            if let onDismiss {
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help(L("知道了"))
             }
+        }
+        .padding(.horizontal, Theme.Space.s12)
+        .padding(.vertical, Theme.Space.s8)
+        .quietControl(tint: failed ? Theme.warning : Theme.healthy)
+    }
+}
+
+/// v15 空态原语：图标 + 一句话 +（可选说明）+ 恰好一个动作（DESIGN.md v15）
+struct EmptyStateBlock: View {
+    var symbol: String
+    var title: String
+    var caption: String?
+    var actionTitle: String
+    var action: () -> Void
+
+    var body: some View {
+        VStack(spacing: Theme.Space.s12) {
+            Image(systemName: symbol)
+                .font(.system(size: 28, weight: .medium))
+                .foregroundStyle(Theme.textTertiary)
+            Text(title)
+                .font(Theme.Fonts.panelTitle)
+                .foregroundStyle(Theme.textPrimary)
+            if let caption {
+                Text(caption)
+                    .font(Theme.Fonts.body)
+                    .lineSpacing(2)
+                    .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 380)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button(action: action) {
+                Text(actionTitle)
+                    .font(Theme.Fonts.calloutEmphasis)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, Theme.Space.s20)
+                    .frame(height: 32)
+                    .background(Capsule(style: .continuous).fill(Theme.accent))
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(PressableButtonStyle())
+            .padding(.top, Theme.Space.s4)
+        }
+        .padding(Theme.Space.s32)
+        .frame(maxWidth: 460)
+        .contentSurface()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

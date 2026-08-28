@@ -20,7 +20,15 @@ enum AtlasNotify {
         UserDefaults.standard.bool(forKey: updatesKey)
     }
 
+    /// swift build 直跑的裸二进制没有 bundle 身份，UNUserNotificationCenter 会直接抛
+    /// NSInternalInconsistencyException（bundleProxyForCurrentProcess is nil）。
+    /// 探针与无头验收都走裸二进制，这里必须静默降级。
+    private static var canNotify: Bool {
+        Bundle.main.bundleIdentifier != nil
+    }
+
     static func requestAuthorization() {
+        guard canNotify else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
@@ -50,6 +58,7 @@ enum AtlasNotify {
     }
 
     private static func post(id: String, title: String, body: String) {
+        guard canNotify else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body

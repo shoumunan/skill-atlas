@@ -3,57 +3,19 @@ import SwiftUI
 import AtlasCore
 #endif
 
-/// 库页工具栏：场景切换 + 上下文账单。不新增一级页面。
+/// v15：场景切换与账单的家在供给页（SupplyView）。库页只留只读账单数字，
+/// 点击跳供给页；瘦身草案 sheet 与待审 chip 仍从这里提供。
 
-struct ProfileSwitcher: View {
+/// 库页工具栏的只读账单入口（点击去供给页，不在库页展开任何供给操作）
+struct LibraryBillLink: View {
     @Environment(AppStore.self) private var store
-
-    var body: some View {
-        let current = store.activeProfile?.name ?? L("全部技能")
-        Menu {
-            Button(L("全部技能")) {
-                store.revertDefaultProfile()
-            }
-            if !store.profiles.profiles.isEmpty { Divider() }
-            ForEach(store.profiles.profiles) { profile in
-                Button(profile.name) {
-                    store.requestProfileApply(profile, directory: nil)
-                }
-            }
-            Divider()
-            Button(L("管理场景…")) {
-                store.loadProfiles()
-                store.profileSheetPresented = true
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 10, weight: .semibold))
-                Text(current)
-                    .font(Theme.Fonts.caption)
-                    .lineLimit(1)
-            }
-            .foregroundStyle(Theme.textSecondary)
-            .padding(.horizontal, Theme.Space.s8)
-            .frame(height: 22)
-            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
-        }
-        .menuStyle(.borderlessButton)
-        .help(L("当前场景。只对 Claude Code 生效。"))
-        .onAppear { store.loadProfiles() }
-    }
-}
-
-struct ContextBillChip: View {
-    @Environment(AppStore.self) private var store
-    @State private var slimPresented = false
 
     var body: some View {
         let tokens = store.doctorReport.totalTokens
         let computing = !store.skills.isEmpty && store.doctorReport.entries.isEmpty
         let over = tokens > 10_000
         Button {
-            slimPresented = true
+            store.nav = .supply
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "number")
@@ -68,35 +30,7 @@ struct ContextBillChip: View {
             .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
         }
         .buttonStyle(.plain)
-        .help(L("当前每个 Claude 会话开场读技能清单的估算 token。点开看瘦身草案。"))
-        .sheet(isPresented: $slimPresented) {
-            SlimDraftSheet()
-        }
-    }
-}
-
-struct PendingReviewChip: View {
-    @Environment(AppStore.self) private var store
-    @State private var tokens: [String] = []
-
-    var body: some View {
-        Group {
-            if let token = tokens.first {
-                Button {
-                    store.openPendingReview(token: token)
-                } label: {
-                    Text(LF("待审 %d", tokens.count))
-                        .font(Theme.Fonts.caption)
-                        .foregroundStyle(Theme.warning)
-                        .padding(.horizontal, Theme.Space.s8)
-                        .frame(height: 22)
-                        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .help(L("来自会话的安装审阅"))
-            }
-        }
-        .onAppear { tokens = PendingReviews.list().map(\.token) }
+        .help(L("每个 Claude 会话开场读技能清单的估算 token。点击去供给页调整。"))
     }
 }
 

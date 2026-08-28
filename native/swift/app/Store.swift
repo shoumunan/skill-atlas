@@ -5,14 +5,19 @@ import SwiftUI
 import AtlasCore
 #endif
 
+/// v15 六项侧栏（DESIGN v15）：allCases 顺序即 ⌘1–⌘6，侧栏分组在 SidebarRail 手排。
 enum NavPage: String, CaseIterable, Identifiable, Hashable {
-    case library, settings
+    case library, discover, supply, inbox, studio, settings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .library: return L("我的技能")
+        case .library: return L("技能库")
+        case .discover: return L("发现")
+        case .supply: return L("供给")
+        case .inbox: return L("收件箱")
+        case .studio: return L("创作")
         case .settings: return L("设置")
         }
     }
@@ -20,14 +25,22 @@ enum NavPage: String, CaseIterable, Identifiable, Hashable {
     var symbol: String {
         switch self {
         case .library: return "books.vertical"
+        case .discover: return "sparkle.magnifyingglass"
+        case .supply: return "shippingbox"
+        case .inbox: return "tray"
+        case .studio: return "flask"
         case .settings: return "gearshape"
         }
     }
 
     var help: String {
         switch self {
-        case .library: return L("找技能、看用途、复制调用语（⌘1）")
-        case .settings: return L("外观和本库（⌘2）")
+        case .library: return L("库存、状态与每技能的上下文成本（⌘1）")
+        case .discover: return L("找并装上新技能（⌘2）")
+        case .supply: return L("哪个 AI、哪个项目带哪些技能进场（⌘3）")
+        case .inbox: return L("要你裁决的运维事项（⌘4）")
+        case .studio: return L("把流程沉淀成技能（⌘5）")
+        case .settings: return L("外观和本库（⌘6）")
         }
     }
 }
@@ -86,8 +99,6 @@ final class AppStore: InstallHost {
     var nav: NavPage = .library
     var selectedName: String?
     /// 从技能详情跳到设置「维护」时展开该组，并尽量把这一条顶到前面。
-    var revealMaintenance = false
-    var maintenanceFocusSkillName: String?
     var search = "" { didSet { scheduleSearchDebounce() } }
     /// 过滤用的防抖搜索词：输入即时回显，过滤延迟 200ms——每击键全量过滤 + 整表 reloadData 会发肉
     private(set) var debouncedSearch = ""
@@ -687,9 +698,24 @@ final class AppStore: InstallHost {
                 select(skill.name)
                 readerSkill = skill
             }
+            // 已知限制：无头启动（后台 shell 直跑二进制）下本探针的高亮与详情栏不重绘，
+            // 2.0.0 同症；选中状态本身已置位（-atlasAction 探针可证）。交互态正常。详见 PLAN §9。
             if let name = LaunchArgs.value("atlasSelect") ?? UserDefaults.standard.string(forKey: "atlasSelect"),
                result.skills.contains(where: { $0.name == name }) {
                 select(name)
+            }
+            // 调试钩子：-atlasSelectMany a,b,c 启动即多选（批量条截图用）。
+            // 表控制器在库页首帧才创建，延后半秒再写多选集合。
+            if let many = LaunchArgs.value("atlasSelectMany") ?? UserDefaults.standard.string(forKey: "atlasSelectMany") {
+                let names = Set(many.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+                    .filter { name in result.skills.contains { $0.name == name } }
+                if !names.isEmpty {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                        guard let self else { return }
+                        self.skillTable?.multi.names = names
+                        self.skillTable?.refreshVisible()
+                    }
+                }
             }
             // 旧「检查 / 怎么用」页已撤；同名调试参数改为选中该技能并停在技能库。
             if let name = LaunchArgs.value("atlasGuideSkill")
@@ -1195,11 +1221,10 @@ final class AppStore: InstallHost {
         nav = .library
     }
 
-    /// 打开设置里的维护组。可带上当前 Skill，避免跳转后还要再找。
-    func openMaintenance(for skill: Skill? = nil) {
-        maintenanceFocusSkillName = skill?.name
-        revealMaintenance = true
-        nav = .settings
+    /// 跳到收件箱（v15：维护组已解散进收件箱；挡住使用的条目天然排在队首）
+    func openInbox(for skill: Skill? = nil) {
+        _ = skill
+        nav = .inbox
     }
 
     func hasCriticalSecurity(_ skill: Skill) -> Bool {
@@ -1369,6 +1394,15 @@ final class AppStore: InstallHost {
             return updates > 0
                 ? LF("%d 个技能 · %d 个可更新", summary.total, updates)
                 : LF("%d 个技能", summary.total)
+        case .discover:
+            return L("从市场找，或从链接与文件夹导入")
+        case .supply:
+            return L("谁带哪些技能进场")
+        case .inbox:
+            let pending = inboxUndecidedCount(store: self)
+            return pending > 0 ? LF("%d 件事项待处理", pending) : L("一切安静")
+        case .studio:
+            return L("把流程沉淀成技能")
         case .settings:
             if data.summary.migrated {
                 return LF("已迁入 %d 个技能", data.summary.atlasCount)

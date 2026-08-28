@@ -213,7 +213,7 @@ struct ToolbarStrip: View {
 
             Spacer()
 
-            // 搜索、安装、刷新只服务「我的技能」主任务。别的页面不重复放主操作，
+            // 搜索、安装、刷新只服务「技能库」主任务。别的页面不重复放主操作，
             // 避免每一屏都像控制台。
             if store.nav == .library {
                 SearchCapsule(searchFocused: searchFocused)
@@ -371,14 +371,26 @@ struct SidebarRail: View {
                 .padding(.top, Theme.Space.s16)
                 .padding(.bottom, Theme.Space.s20)
 
-            VStack(spacing: 2) {
-                ForEach(NavPage.allCases) { page in
-                    RailItem(page: page, namespace: navSpace)
-                }
+            // v15 两组六项：库（有什么 / 怎么获得）+ 运营（供给 / 裁决 / 沉淀），设置钉在底部
+            VStack(alignment: .leading, spacing: 2) {
+                railGroupLabel(L("库"))
+                RailItem(page: .library, namespace: navSpace)
+                RailItem(page: .discover, namespace: navSpace)
+                railGroupLabel(L("运营"))
+                    .padding(.top, Theme.Space.s12)
+                RailItem(page: .supply, namespace: navSpace)
+                RailItem(page: .inbox, namespace: navSpace)
+                RailItem(page: .studio, namespace: navSpace)
             }
             .padding(.horizontal, Theme.Space.s8)
 
             Spacer()
+
+            VStack(spacing: 2) {
+                RailItem(page: .settings, namespace: navSpace)
+            }
+            .padding(.horizontal, Theme.Space.s8)
+            .padding(.bottom, Theme.Space.s8)
 
             // 信任锚点按用户场景给：CC Switch 用户看「数据只读」承诺；
             // 纯本地用户看「收编须确认」承诺——各自最关心的边界
@@ -399,6 +411,15 @@ struct SidebarRail: View {
         .frame(width: Theme.Layout.sidebar)
         .frame(maxHeight: .infinity)
         .glassChrome(RoundedRectangle(cornerRadius: Theme.Radius.rail, style: .continuous))
+    }
+
+    private func railGroupLabel(_ text: String) -> some View {
+        Text(text)
+            .font(Theme.Fonts.caption)
+            .foregroundStyle(Theme.textTertiary)
+            .padding(.horizontal, Theme.Space.s8 + 2)
+            .padding(.bottom, 2)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -500,7 +521,8 @@ private struct RailItem: View {
     }
 
     private var badge: Int {
-        page == .library ? store.updatableSkills.count : 0
+        // v15：徽标只挂收件箱，真源 = 聚合器同一口径（已裁决的不计）
+        page == .inbox ? inboxUndecidedCount(store: store) : 0
     }
 }
 
@@ -511,10 +533,21 @@ private struct PageContainer: View {
         Group {
             if store.data == nil {
                 SkeletonPage()
-            } else if store.nav == .library {
-                if store.skills.isEmpty { OnboardingView() } else { LibraryPage() }
             } else {
-                SettingsPage()
+                switch store.nav {
+                case .library:
+                    if store.skills.isEmpty { OnboardingView() } else { LibraryPage() }
+                case .discover:
+                    DiscoverPage()
+                case .supply:
+                    SupplyPage()
+                case .inbox:
+                    InboxPage()
+                case .studio:
+                    StudioPage()
+                case .settings:
+                    SettingsPage()
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

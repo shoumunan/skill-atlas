@@ -18,8 +18,10 @@ struct SkillRowSnapshot: Equatable {
     var disabled: Bool
     var updateAvailable: Bool
     var origin: SkillOrigin
+    /// v15 TierDots：挂在 Claude 但被档位排除出自动清单 → 半亮（口径 = 体检 listing 集合）
+    var claudeListed: Bool
 
-    init(_ skill: Skill) {
+    init(_ skill: Skill, claudeListed: Bool) {
         name = skill.name
         category = skill.category
         blurb = SkillRowBlurb.make(skill.description)
@@ -27,6 +29,7 @@ struct SkillRowSnapshot: Equatable {
         disabled = skill.disabled
         updateAvailable = skill.updateAvailable
         origin = skill.origin
+        self.claudeListed = claudeListed
     }
 }
 
@@ -45,11 +48,11 @@ enum SkillTableItem {
         switch self {
         case .header(let title, let count): return "h:\(title):\(count)"
         case .skill(let row):
-            return "s:\(row.name)|\(row.category)|\(row.platforms.joined(separator: ","))|\(row.disabled)|\(row.updateAvailable)"
+            return "s:\(row.name)|\(row.category)|\(row.platforms.joined(separator: ","))|\(row.disabled)|\(row.updateAvailable)|\(row.claudeListed)"
         }
     }
 
-    static func flatten(_ groups: [(String, [Skill])]) -> [SkillTableItem] {
+    static func flatten(_ groups: [(String, [Skill])], claudeListed: Set<String>) -> [SkillTableItem] {
         var items: [SkillTableItem] = []
         items.reserveCapacity(groups.reduce(0) { $0 + $1.1.count + ($1.0.isEmpty ? 0 : 1) })
         for (name, skills) in groups {
@@ -57,7 +60,7 @@ enum SkillTableItem {
                 items.append(.header(title: name, count: skills.count))
             }
             for skill in skills {
-                items.append(.skill(SkillRowSnapshot(skill)))
+                items.append(.skill(SkillRowSnapshot(skill, claudeListed: claudeListed.contains(skill.directory))))
             }
         }
         return items
@@ -129,15 +132,32 @@ final class SkillTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private var lastSelected: String?
     private var lastFavorites: Set<String> = []
 
+    /// 多选集合（⌘点按累积）。独立小模型：SwiftUI 的批量操作条要观察它，
+    /// 而控制器本身不进 Observation（ADR-14：库页状态不进 AppStore）。
+    let multi = TableSelectionModel()
+
     func reloadFromStore() {
         apply(
-            items: SkillTableItem.flatten(store.groupedSkills(store.filteredSkills)),
+            items: SkillTableItem.flatten(
+                store.groupedSkills(store.filteredSkills),
+                claudeListed: Set(store.doctorReport.entries.map { $0.skill.directory })
+            ),
             selectedName: store.selectedName,
             favorites: store.favorites
         )
     }
 
     func apply(items: [SkillTableItem], selectedName: String?, favorites: Set<String>) {
+        // 筛选/删除后，多选集合里已经不在列表上的名字要剪掉
+        if !multi.names.isEmpty {
+            let visible = Set(items.compactMap { item -> String? in
+                if case .skill(let row) = item { return row.name }
+                return nil
+            })
+            if !multi.names.isSubset(of: visible) {
+                multi.names.formIntersection(visible)
+            }
+        }
         let ids = items.map(\.id)
         let stamps = items.map(\.dataStamp)
         let structureChanged = ids != self.ids
@@ -185,7 +205,7 @@ final class SkillTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                 (table.view(atColumn: 0, row: row, makeIfNecessary: false) as? SkillRowCell)?
                     .apply(
                         row: rowItem,
-                        selected: rowItem.name == store.selectedName,
+                        selected: rowItem.name == store.selectedName || multi.names.contains(rowItem.name),
                         favorite: store.favorites.contains(rowItem.name),
                         hovering: row == table.hoveredRow,
                         platforms: store.visiblePlatforms
@@ -236,7 +256,7 @@ final class SkillTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             cell.coordinator = self
             cell.apply(
                 row: rowItem,
-                selected: rowItem.name == store.selectedName,
+                selected: rowItem.name == store.selectedName || multi.names.contains(rowItem.name),
                 favorite: store.favorites.contains(rowItem.name),
                 hovering: row == table.hoveredRow,
                 platforms: store.visiblePlatforms
@@ -257,8 +277,32 @@ final class SkillTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
 
-    func toggleSelect(_ name: String) {
-        store.selectedName = store.selectedName == name ? nil : name
+    func toggleSelect(_ name: String, command: Bool = false) {
+        if command {
+            // ⌘点按进入/扩展多选；锚点自动并入，取消到只剩一个时保持多选态由用户清
+            var set = multi.names
+            if set.isEmpty, let anchor = store.selectedName, anchor != name {
+                set.insert(anchor)
+            }
+            if set.contains(name) { set.remove(name) } else { set.insert(name) }
+            multi.names = set
+            if store.selectedName == nil { store.selectedName = name }
+            refreshVisible()
+        } else {
+            if !multi.names.isEmpty {
+                multi.names = []
+                store.selectedName = name
+                refreshVisible()
+            } else {
+                store.selectedName = store.selectedName == name ? nil : name
+            }
+        }
+    }
+
+    func clearMultiSelection() {
+        guard !multi.names.isEmpty else { return }
+        multi.names = []
+        refreshVisible()
     }
 
     func skill(named name: String) -> Skill? {
@@ -412,7 +456,7 @@ final class HoverTable: NSTableView {
                     super.mouseDown(with: event)
                     return
                 }
-                cell.handleBackgroundClick()
+                cell.handleBackgroundClick(command: event.modifierFlags.contains(.command))
                 return
             }
             super.mouseDown(with: event)
@@ -589,6 +633,7 @@ private final class SkillRowCell: NSTableCellView {
             || self.row?.platforms != row.platforms
             || self.row?.disabled != row.disabled
             || self.row?.origin != row.origin
+            || self.row?.claudeListed != row.claudeListed
             || self.platforms != platforms
         self.row = row
         self.selected = selected
@@ -682,6 +727,8 @@ private final class SkillRowCell: NSTableCellView {
             guard index < platformButtons.count else { continue }
             let button = platformButtons[index]
             let lit = row.platforms.contains(platform.label)
+            // v15 TierDots 半亮：Claude 挂着但被档位排除出自动清单（仅 /名字 可调或 off）
+            let halfLit = lit && platform == .claude && !row.claudeListed && !row.disabled
             let togglable = row.origin == .atlas && !row.disabled
             button.isEnabled = togglable
             button.image = PlatformChipImage.image(for: platform, lit: lit)
@@ -700,9 +747,11 @@ private final class SkillRowCell: NSTableCellView {
                         ? (lit ? NSColor.labelColor.withAlphaComponent(0.85) : NSColor.tertiaryLabelColor)
                         : nil
                 }
-                button.alphaValue = lit ? 1 : 0.5
+                button.alphaValue = halfLit ? 0.55 : (lit ? 1 : 0.5)
             }
-            button.toolTip = platformHelp(platform, lit: lit, togglable: togglable, origin: row.origin)
+            button.toolTip = halfLit
+                ? LF("%@：已挂载但不进自动清单（档位）。点击停止同步；改档去供给页。", platform.displayName)
+                : platformHelp(platform, lit: lit, togglable: togglable, origin: row.origin)
         }
     }
 
@@ -785,10 +834,10 @@ private final class SkillRowCell: NSTableCellView {
         return platformBox.frame.contains(point)
     }
 
-    func handleBackgroundClick() {
+    func handleBackgroundClick(command: Bool = false) {
         guard let name = row?.name else { return }
         MainActor.assumeIsolated {
-            coordinator?.toggleSelect(name)
+            coordinator?.toggleSelect(name, command: command)
         }
     }
 
@@ -888,6 +937,7 @@ private enum SkillRowMenu {
             store.toggleFavorite(skill.name)
         }
         add(menu, L("在访达中显示")) { store.openFolder(skill.sourcePath) }
+        add(menu, L("档位与供给…")) { store.nav = .supply }
         if skill.origin != .ccSwitch {
             menu.addItem(.separator())
             add(menu, skill.disabled ? L("恢复") : L("停用")) {
@@ -922,4 +972,11 @@ private final class MenuTrampoline: NSObject {
     @objc func run(_ sender: NSMenuItem) {
         (sender.representedObject as? ClosureBox)?.handler()
     }
+}
+
+/// 多选集合的可观察载体：SwiftUI 批量操作条读它，控制器写它
+@MainActor
+@Observable
+final class TableSelectionModel {
+    var names: Set<String> = []
 }

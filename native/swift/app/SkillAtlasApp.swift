@@ -6,6 +6,8 @@ import AtlasCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 离线验收探针：命中即解包并退出，不进入正常启动
+        ZipChannel.runProbeIfRequested()
         NSApp.activate(ignoringOtherApps: true)
         // 设置页的语言与外观选择在窗口出现前先生效
         AppLanguage.applyStored()
@@ -92,6 +94,14 @@ func handleDeepLink(_ url: URL, store: AppStore) {
         if let profile = store.profiles.profiles.first(where: { $0.name == name || $0.id == name }) {
             store.requestProfileApply(profile, directory: nil)
         }
+    } else if host == "discover" {
+        store.nav = .discover
+    } else if host == "supply" {
+        // WP-S：supply/<scope> 定位具体范围；先落页
+        store.nav = .supply
+    } else if host == "inbox" {
+        if let id = rest.first { Inbox.pendingFocusID = id }
+        store.nav = .inbox
     }
 }
 

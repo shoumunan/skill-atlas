@@ -23,7 +23,8 @@ struct SettingsPage: View {
                 NotifyGroup()
                 VisiblePlatformsGroup()
                 LibraryGroup()
-                MaintenanceGroup()
+                DiscoverySourcesGroup()
+                InboxLinkGroup()
                 AdoptGroup()
                 MigrationGroup()
                 AppGroup()
@@ -310,6 +311,91 @@ private struct AdoptGroup: View {
 // MARK: - 分组骨架
 
 /// 组标题在卡外（系统设置惯例），卡内行之间发丝分隔
+/// v15 WP-M：发现来源开关（护栏 §7-19：总闸 + 每源双控，关闸即零出网）
+private struct DiscoverySourcesGroup: View {
+    @AppStorage("atlasRegistryEnabled") private var master = true
+    @AppStorage("atlasSourceSkillsSh") private var skillssh = true
+    @AppStorage("atlasSourceSkillHub") private var skillhub = true
+
+    var body: some View {
+        SettingsGroup(title: "发现来源") {
+            sourceRow(
+                title: L("远程发现"),
+                caption: L("总闸。关掉后发现页与 atlas search --remote 全部零出网。"),
+                isOn: $master, enabled: true
+            )
+            divider
+            sourceRow(
+                title: "skills.sh",
+                caption: L("Vercel 全球索引，结果指向 GitHub 仓库，走既有安装管线。"),
+                isOn: $skillssh, enabled: master
+            )
+            divider
+            sourceRow(
+                title: "SkillHub",
+                caption: L("腾讯技能市场（skillhub.cn）。榜单与认证仅供参考，安装照样过扫描。"),
+                isOn: $skillhub, enabled: master
+            )
+        }
+    }
+
+    private var divider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.05))
+            .frame(height: 1)
+            .padding(.leading, Theme.Space.s12)
+    }
+
+    private func sourceRow(title: String, caption: String, isOn: Binding<Bool>, enabled: Bool) -> some View {
+        HStack(spacing: Theme.Space.s12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(Theme.Fonts.rowTitle)
+                    .foregroundStyle(enabled ? Theme.textPrimary : Theme.textTertiary)
+                Text(caption)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: Theme.Space.s8)
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .disabled(!enabled)
+        }
+        .padding(.horizontal, Theme.Space.s12)
+        .padding(.vertical, Theme.Space.s8 + 2)
+    }
+}
+
+/// v15：维护组解散进收件箱（WP-I），设置只留一个入口行
+private struct InboxLinkGroup: View {
+    @Environment(AppStore.self) private var store
+
+    var body: some View {
+        SettingsGroup(title: "收件箱") {
+            HStack(spacing: Theme.Space.s12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("运维事项都在收件箱"))
+                        .font(Theme.Fonts.rowTitle)
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(L("挂载失败、安全命中、miss、可更新在那里排队裁决"))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                Spacer(minLength: Theme.Space.s8)
+                Button(L("打开收件箱")) { store.nav = .inbox }
+                    .buttonStyle(.plain)
+                    .font(Theme.Fonts.secondaryEmphasis)
+                    .foregroundStyle(Theme.accent)
+            }
+            .padding(.horizontal, Theme.Space.s12)
+            .frame(height: 52)
+        }
+    }
+}
+
 private struct SettingsGroup<Content: View>: View {
     var title: String
     @ViewBuilder var content: Content
@@ -833,8 +919,37 @@ private struct AppGroup: View {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.3.1"
     }
 
+    /// 打包副本优先（与仓库 docs/handbook.md 同一份，构建脚本负责拷入）；
+    /// swift build 裸二进制没有资源，退到 GitHub 原文。
+    private func openHandbook() {
+        if let bundled = Bundle.main.url(forResource: "handbook", withExtension: "md") {
+            NSWorkspace.shared.open(bundled)
+        } else if let remote = URL(string: "https://github.com/shoumunan/skill-atlas/blob/main/docs/handbook.md") {
+            NSWorkspace.shared.open(remote)
+        }
+    }
+
     var body: some View {
         SettingsGroup(title: "应用") {
+            SettingsRow(
+                title: L("使用手册"),
+                subtitle: L("四条工作流与边界都在这一份里。agent 不用读，元技能已教会它。"),
+                divider: true
+            ) {
+                Button {
+                    openHandbook()
+                } label: {
+                    Text(L("打开"))
+                        .font(Theme.Fonts.calloutEmphasis)
+                        .foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, Theme.Space.s12)
+                        .frame(height: 28)
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(PressableButtonStyle())
+                .glassChrome(Capsule(style: .continuous), interactive: true)
+                .help(L("与仓库 docs/handbook.md 是同一份"))
+            }
             SettingsRow(
                 title: "Skill Atlas \(version)",
                 subtitle: updates.available.map { LF("发现新版本 %@，点右侧按钮应用内自动更新（下载、校验、换装、重启一条龙）。", $0.version) }

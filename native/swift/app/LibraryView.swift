@@ -247,14 +247,10 @@ private struct LibraryFilterBar: View {
     var body: some View {
         @Bindable var store = store
         VStack(spacing: 0) {
-            UpdatesBanner()
-
             HStack(spacing: Theme.Space.s12) {
                 FavoritesTabs()
                 Spacer()
-                ProfileSwitcher()
-                ContextBillChip()
-                PendingReviewChip()
+                LibraryBillLink()
                 HStack(spacing: Theme.Space.s4) {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 9, weight: .semibold))
@@ -279,12 +275,76 @@ private struct LibraryFilterBar: View {
                     .padding(.bottom, Theme.Space.s12)
             }
 
+            let multi = SkillTableController.shared(for: store).multi
+            if !multi.names.isEmpty {
+                BatchBar(names: multi.names)
+                    .padding(.horizontal, Theme.Space.s16)
+                    .padding(.bottom, Theme.Space.s12)
+            }
+
             Rectangle()
                 .fill(Color.primary.opacity(0.06))
                 .frame(height: 1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.panelFill)
+    }
+}
+
+/// 多选批量操作条（WP-L 残项）：⌘点按行进入多选。只做收藏与启停，
+/// 批量卸载不做（破坏性上限纪律，卸载走单个确认流程）。
+private struct BatchBar: View {
+    @Environment(AppStore.self) private var store
+    var names: Set<String>
+    @State private var confirmDisable = false
+
+    var body: some View {
+        let targets = store.skills.filter { names.contains($0.name) }
+        let disableTargets = targets.filter { $0.origin != .ccSwitch && !$0.managed && !$0.disabled }
+        let restoreTargets = targets.filter { $0.disabled }
+        let unfavorited = targets.filter { !store.favorites.contains($0.name) }
+        HStack(spacing: Theme.Space.s12) {
+            Text(LF("已选 %d 个", names.count))
+                .font(Theme.Fonts.calloutEmphasis)
+                .monospacedDigit()
+                .foregroundStyle(Theme.accent)
+            batchAction(L("全部收藏"), enabled: !unfavorited.isEmpty) {
+                unfavorited.forEach { store.toggleFavorite($0.name) }
+            }
+            batchAction(L("停用…"), enabled: !disableTargets.isEmpty) {
+                confirmDisable = true
+            }
+            .confirmationDialog(
+                LF("停用 %d 个技能？", disableTargets.count),
+                isPresented: $confirmDisable,
+                titleVisibility: .visible
+            ) {
+                Button(L("停用这些"), role: .destructive) {
+                    disableTargets.forEach { store.setSkillDisabled($0, disabled: true) }
+                }
+                Button(L("取消"), role: .cancel) {}
+            } message: {
+                Text(L("只会先停用，文件仍然保留，需要时可以恢复。"))
+            }
+            batchAction(L("恢复"), enabled: !restoreTargets.isEmpty) {
+                restoreTargets.forEach { store.setSkillDisabled($0, disabled: false) }
+            }
+            Spacer(minLength: 0)
+            batchAction(L("清除选择"), enabled: true) {
+                store.skillTable?.clearMultiSelection()
+            }
+        }
+        .padding(.horizontal, Theme.Space.s12)
+        .frame(height: 36)
+        .quietControl(tint: Theme.accent)
+    }
+
+    private func batchAction(_ title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.plain)
+            .font(Theme.Fonts.secondaryEmphasis)
+            .foregroundStyle(enabled ? Theme.accent : Theme.textTertiary)
+            .disabled(!enabled)
     }
 }
 
@@ -443,171 +503,6 @@ private func menuLabel(title: String, symbol: String, active: Bool) -> some View
     .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
 }
 
-/// 列表顶部更新条（更新页并入技能库后的主入口，参考 CC Switch）：
-/// 有可更新技能时出现；点文字筛出可更新，右侧「全部更新」一键快进合并。
-private struct UpdatesBanner: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        let updatable = store.updatableSkills
-        // 只有「有可更新」或用户手动点了检查才出现；后台自动检查完全静默
-        if !updatable.isEmpty || store.checkingInteractive {
-            VStack(spacing: 0) {
-                HStack(spacing: Theme.Space.s8) {
-                    if store.checkingInteractive {
-                        ProgressView().controlSize(.mini)
-                        Text(L("正在对照上游仓库…"))
-                            .font(Theme.Fonts.calloutEmphasis)
-                            .foregroundStyle(Theme.textSecondary)
-                    } else {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.accent)
-                        Button {
-                            store.jumpToUpdatable()
-                        } label: {
-                            Text(LF("%lld 个技能有新版本", updatable.count))
-                                .font(Theme.Fonts.calloutEmphasis)
-                                .foregroundStyle(Theme.textPrimary)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help(L("只看可更新的技能"))
-                        Text(L("会先给你看改了什么"))
-                            .font(Theme.Fonts.caption)
-                            .foregroundStyle(Theme.textTertiary)
-                    }
-                    Spacer()
-                    if !store.checkingInteractive {
-                        Button {
-                            Task { await store.checkSkillUpdates(interactive: true) }
-                        } label: {
-                            Text(L("重新检查"))
-                                .font(Theme.Fonts.calloutEmphasis)
-                                .foregroundStyle(Theme.textSecondary)
-                                .padding(.horizontal, Theme.Space.s8 + 2)
-                                .frame(height: 24)
-                                .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
-                        }
-                        .buttonStyle(PressableButtonStyle())
-                        .quietControl()
-                        .disabled(store.checkingSkillUpdates)
-                        .help(L("再查一次有没有新版本（⌘U）"))
-                        Button {
-                            store.requestUpdateAll()
-                        } label: {
-                            HStack(spacing: Theme.Space.s4) {
-                                if store.updatingDirectories.isEmpty {
-                                    Image(systemName: "arrow.down.circle")
-                                        .font(.system(size: 10, weight: .semibold))
-                                } else {
-                                    ProgressView().controlSize(.mini).tint(.white)
-                                }
-                                Text(store.updatingDirectories.isEmpty ? L("更新…") : L("更新中…"))
-                                    .font(Theme.Fonts.calloutEmphasis)
-                            }
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, Theme.Space.s12)
-                            .frame(height: 24)
-                            .contentShape(Capsule())
-                        }
-                        .buttonStyle(PressableButtonStyle())
-                        .accentGlass(Capsule(style: .continuous))
-                        .disabled(!store.updatingDirectories.isEmpty)
-                        .help(L("先看改了什么再更新。本地改过的会先跳过。"))
-                    }
-                }
-                .padding(.horizontal, Theme.Space.s16)
-                .frame(height: 40)
-                .background(Theme.accent.opacity(0.07))
-                Rectangle()
-                    .fill(Theme.accent.opacity(0.12))
-                    .frame(height: 1)
-            }
-            .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
-        }
-    }
-}
-
-/// 列表顶部收编条（参照 UpdatesBanner）：发现散装的本地直装技能时出现。
-/// 点文字筛出本地安装；右侧「全部收编」批量拷入本库并接管挂载（确认后执行）。
-private struct AdoptBanner: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var confirming = false
-
-    var body: some View {
-        let adoptable = store.adoptableSkills
-        if !adoptable.isEmpty {
-            VStack(spacing: 0) {
-                HStack(spacing: Theme.Space.s8) {
-                    Image(systemName: "square.and.arrow.down.on.square.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Theme.accent)
-                    Button {
-                        store.jumpToLocalSkills()
-                    } label: {
-                        Text(LF("%lld 个本地技能可收进本库", adoptable.count))
-                            .font(Theme.Fonts.calloutEmphasis)
-                            .foregroundStyle(Theme.textPrimary)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(L("只看本地安装的技能"))
-                    Text(L("收进来之后可以在这里开关"))
-                        .font(Theme.Fonts.caption)
-                        .foregroundStyle(Theme.textTertiary)
-                    Spacer()
-                    Button {
-                        confirming = true
-                    } label: {
-                        HStack(spacing: Theme.Space.s4) {
-                            Image(systemName: "square.and.arrow.down.on.square")
-                                .font(.system(size: 10, weight: .semibold))
-                            Text(L("全部收编"))
-                                .font(Theme.Fonts.calloutEmphasis)
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, Theme.Space.s12)
-                        .frame(height: 24)
-                        .contentShape(Capsule())
-                    }
-                    .buttonStyle(PressableButtonStyle())
-                    .accentGlass(Capsule(style: .continuous))
-                    .help(L("全部收进本库，之后可以在这里开关"))
-                    .confirmationDialog(
-                        LF("把 %lld 个本地技能收进 Skill Atlas 库？", adoptable.count),
-                        isPresented: $confirming,
-                        titleVisibility: .visible
-                    ) {
-                        Button(L("收编")) { store.adoptAllLocalSkills() }
-                        Button(L("取消"), role: .cancel) {}
-                    } message: {
-                        Text(confirmMessage(adoptable))
-                    }
-                }
-                .padding(.horizontal, Theme.Space.s16)
-                .frame(height: 40)
-                .background(Theme.accent.opacity(0.07))
-                Rectangle()
-                    .fill(Theme.accent.opacity(0.12))
-                    .frame(height: 1)
-            }
-            .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
-        }
-    }
-
-    private func confirmMessage(_ adoptable: [Skill]) -> String {
-        var text = L("拷进本库，原来的位置改成指向这里。之后在本应用里开关。")
-        let external = adoptable.filter { SkillActions.isExternalSource($0) }.count
-        if external > 0 {
-            text += LF("其中 %lld 个的实体在平台目录之外，收编后编辑原目录不再生效。", external)
-        }
-        return text
-    }
-}
-
 private struct FavoritesTabs: View {
     @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -643,331 +538,6 @@ private struct FavoritesTabs: View {
                 .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
-    }
-}
-
-private struct FilterRow: View {
-    @Environment(AppStore.self) private var store
-    /// 当前筛选后的条数——计数是筛选的结果，跟筛选放同一行才对得上
-    var resultCount: Int
-
-    var body: some View {
-        @Bindable var store = store
-        // 排布逻辑：具体 → 抽象 → 结果。
-        // 平台是最好认的（品牌标 + 名称）放最左；发丝把「一组开关」和「一组菜单」
-        // 两种交互分开；右端是清除与结果计数。
-        // 菜单与右端标 layoutPriority(1)：它们先拿到宽度，平台组拿到的才是真实剩余，
-        // ViewThatFits 据此决定带不带名称——否则窄窗口下会把菜单挤没。
-        let origins = Array(Set(store.skills.map(\.origin.label))).sorted()
-        HStack(spacing: Theme.Space.s8 + 2) {
-            PlatformFilterStrip()
-
-            Rectangle()
-                .fill(Color.primary.opacity(0.08))
-                .frame(width: 1, height: 16)
-                .layoutPriority(1)
-
-            HStack(spacing: Theme.Space.s4) {
-                FilterMenu(label: "类别", selection: $store.category, options: ["全部"] + store.categories)
-                // 健康状态不在列表里标注；挡住使用的问题写在详情顶部
-                FilterMenu(
-                    label: "状态",
-                    selection: $store.stateFilter,
-                    options: ["全部", "可更新"]
-                        + (store.skills.contains(where: \.disabled) ? ["已停用"] : [])
-                )
-                // 只有两种来源并存时才需要来源筛选
-                if origins.count > 1 {
-                    FilterMenu(label: "来源", selection: $store.sourceFilter,
-                               options: ["全部"] + origins)
-                }
-            }
-            .layoutPriority(1)
-
-            Spacer(minLength: Theme.Space.s8)
-
-            HStack(spacing: Theme.Space.s8 + 2) {
-                if store.hasActiveFilters {
-                    Button {
-                        store.clearFilters()
-                    } label: {
-                        HStack(spacing: Theme.Space.s4) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 10))
-                            Text("清除")
-                                .font(Theme.Fonts.calloutEmphasis)
-                        }
-                        .foregroundStyle(Theme.accent)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(L("清除全部筛选条件"))
-                }
-                Text(LF("%lld 个", resultCount))
-                    .font(Theme.Fonts.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.textTertiary)
-            }
-            .layoutPriority(1)
-        }
-    }
-}
-
-struct FilterMenu: View {
-    var label: String
-    @Binding var selection: String
-    var options: [String]
-    var display: (String) -> String = { $0 }
-    var defaultOption = "全部"
-
-    var body: some View {
-        let active = selection != defaultOption
-        Menu {
-            ForEach(options, id: \.self) { option in
-                Button {
-                    selection = option
-                } label: {
-                    if option == selection {
-                        Label(L(display(option)), systemImage: "checkmark")
-                    } else {
-                        Text(L(display(option)))
-                    }
-                }
-            }
-        } label: {
-            // 未筛选只显示标签（默认值「全部」不带信息，纯占宽）；
-            // 一旦筛选，标签让位给选中值并点亮，一眼看出「哪几条在起作用」
-            HStack(spacing: Theme.Space.s4) {
-                Text(active ? L(display(selection)) : L(label))
-                    .font(active ? Theme.Fonts.calloutEmphasis : Theme.Fonts.callout)
-                    .foregroundStyle(active ? Theme.accent : Theme.textSecondary)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(active ? Theme.accent.opacity(0.7) : Theme.textTertiary)
-            }
-            .padding(.horizontal, active ? Theme.Space.s8 + 2 : Theme.Space.s8)
-            .frame(height: 28)
-            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .background {
-            if active {
-                RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                    .fill(Theme.accent.opacity(0.12))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                            .strokeBorder(Theme.accent.opacity(0.24), lineWidth: 0.5)
-                    }
-            }
-        }
-        .help(L(label))
-    }
-}
-
-/// 视图控件（排序 / 分组）：图标打头 + 当前值，和「文字打头」的筛选控件区分开。
-/// 它们永远在起作用，所以永远显示当前值。
-struct ViewMenu: View {
-    var symbol: String
-    var label: String
-    @Binding var selection: String
-    var options: [String]
-    var defaultOption: String
-
-    var body: some View {
-        let active = selection != defaultOption
-        Menu {
-            ForEach(options, id: \.self) { option in
-                Button {
-                    selection = option
-                } label: {
-                    if option == selection {
-                        Label(L(option), systemImage: "checkmark")
-                    } else {
-                        Text(L(option))
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: Theme.Space.s4 + 1) {
-                Image(systemName: symbol)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(active ? Theme.accent : Theme.textTertiary)
-                Text(L(selection))
-                    .font(Theme.Fonts.callout)
-                    .foregroundStyle(active ? Theme.accent : Theme.textSecondary)
-            }
-            .padding(.horizontal, Theme.Space.s8 + 2)
-            .frame(height: 28)
-            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .quietControl(tint: active ? Theme.accent : nil)
-        .help(L(label))
-    }
-}
-
-struct SkillRowView: View {
-    @Environment(AppStore.self) private var store
-    @State private var hovering = false
-    var skill: Skill
-
-    var body: some View {
-        let selected = store.selectedName == skill.name
-        let favorite = store.favorites.contains(skill.name)
-        let shape = RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
-
-        HStack(spacing: Theme.Space.s12) {
-            CategoryIcon(category: skill.category, size: 28, style: .quiet)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(skill.name)
-                    .font(Theme.Fonts.rowTitle)
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-                Text(shortDescription)
-                    .font(Theme.Fonts.secondary)
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: Theme.Space.s4)
-            if hovering || selected {
-                CopyIconButton(text: AppStore.callPhrase(for: skill), help: L("复制调用语"))
-            }
-            if hovering || favorite || selected {
-                Button {
-                    store.toggleFavorite(skill.name)
-                } label: {
-                    Image(systemName: favorite ? "star.fill" : "star")
-                        .font(.system(size: 12))
-                        .foregroundStyle(favorite ? Theme.accent : Theme.textTertiary)
-                        .symbolEffect(.bounce, value: favorite)
-                        .frame(width: 24, height: 24)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .help(favorite ? L("取消收藏") : L("收藏"))
-            }
-            Text(availabilityText)
-                .font(Theme.Fonts.caption)
-                .foregroundStyle(Theme.textTertiary)
-                .help(availabilityHelp)
-            // 健康状态不在列表标注；挡住使用的问题写在详情顶部
-            if skill.disabled {
-                Text(L("已停用"))
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textTertiary)
-            } else if skill.updateAvailable {
-                Image(systemName: "arrow.down.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.accent)
-                    .help(L("有新版本，右键或详情页更新"))
-            }
-        }
-        .padding(.horizontal, Theme.Space.s12)
-        .padding(.vertical, Theme.Space.s8)
-        .contentShape(shape)
-        .background {
-            shape.fill(
-                selected
-                    ? Theme.accent.opacity(0.12)
-                    : hovering ? Color.primary.opacity(0.04) : Color.clear
-            )
-        }
-        .overlay {
-            if selected {
-                shape.strokeBorder(Theme.accent.opacity(0.20), lineWidth: 0.5)
-            }
-        }
-        .opacity(skill.disabled ? 0.55 : 1)
-        .onHover { hovering = $0 }
-        // 点击选中并展开详情；再点一次收起
-        .onTapGesture {
-            store.selectedName = selected ? nil : skill.name
-        }
-    }
-
-    private var shortDescription: String {
-        var clean = skill.description.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-        for prefix in ["Use this skill", "Use when", "当任务", "用于"] where clean.lowercased().hasPrefix(prefix.lowercased()) {
-            clean = String(clean.dropFirst(prefix.count))
-            break
-        }
-        clean = clean.trimmingCharacters(in: .whitespaces)
-        return clean.count > 60 ? String(clean.prefix(60)) + "…" : clean
-    }
-
-    private var enabledPlatforms: [AgentPlatform] {
-        store.visiblePlatforms.filter { skill.platforms.contains($0.label) }
-    }
-
-    private var availabilityText: String {
-        if enabledPlatforms.isEmpty { return L("未连接软件") }
-        if enabledPlatforms.count == 1 { return enabledPlatforms[0].displayName }
-        return LF("%d 个软件", enabledPlatforms.count)
-    }
-
-    private var availabilityHelp: String {
-        let names = enabledPlatforms.map(\.displayName)
-        return names.isEmpty
-            ? L("还没有在任何软件里启用")
-            : LF("可在这些软件里使用：%@", names.joined(separator: L("、")))
-    }
-}
-
-/// 右键菜单：高频操作全部 ≤2 次点击（DESIGN.md §10.2）
-struct SkillContextMenu: View {
-    @Environment(AppStore.self) private var store
-    var skill: Skill
-
-    var body: some View {
-        Button(L("复制调用语")) { store.copyToPasteboard(AppStore.callPhrase(for: skill)) }
-        Button(L("查看说明")) {
-            store.select(skill.name)
-            store.readerSkill = skill
-        }
-        Divider()
-        if skill.origin == .atlas && !skill.disabled {
-            Menu("平台") {
-                ForEach(store.visiblePlatforms) { platform in
-                    let enabled = skill.platforms.contains(platform.label)
-                    Button {
-                        store.setPlatform(skill, platform: platform, enabled: !enabled)
-                    } label: {
-                        if enabled {
-                            Label(platform.label, systemImage: "checkmark")
-                        } else {
-                            Text(platform.label)
-                        }
-                    }
-                }
-            }
-        }
-        if skill.origin == .local && !skill.disabled {
-            Button(L("收进本库")) { store.adoptLocalSkill(skill) }
-        }
-        if skill.origin == .atlas && skill.updateAvailable {
-            Button(L("有新版本…")) { store.requestUpdate(skill) }
-        }
-        Button(store.favorites.contains(skill.name) ? L("取消收藏") : L("收藏")) {
-            store.toggleFavorite(skill.name)
-        }
-        Button(L("在访达中显示")) { store.openFolder(skill.sourcePath) }
-        if skill.origin != .ccSwitch {
-            Divider()
-            Button(skill.disabled ? L("恢复") : L("停用")) {
-                if skill.disabled {
-                    store.setSkillDisabled(skill, disabled: false)
-                } else {
-                    store.requestDisable(skill)
-                }
-            }
-            Button(L("卸载…"), role: .destructive) { store.requestUninstall(skill) }
-        }
     }
 }
 
@@ -1013,6 +583,7 @@ struct EmptyListView: View {
 
 struct InspectorPanel: View {
     @Environment(AppStore.self) private var store
+    @State private var showUseHelp = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1022,6 +593,7 @@ struct InspectorPanel: View {
                     .fill(Color.primary.opacity(0.06))
                     .frame(height: 1)
                 ScrollView {
+                    // v15 首屏顺序：横幅 → 用途/何时 → 使用与成本 → 示例 → 调用（降级）→ 更多设置
                     VStack(alignment: .leading, spacing: Theme.Space.s20) {
                         if store.hasBlockingIssue(skill) {
                             BlockingRepairBanner(skill: skill)
@@ -1042,6 +614,8 @@ struct InspectorPanel: View {
                                     .textSelection(.enabled)
                             }
                         }
+                        UsageTrendSection(skill: skill)
+                        ContextCostSection(skill: skill)
                         if !skill.examplePrompts.isEmpty {
                             DetailSection(title: "示例说法") {
                                 VStack(spacing: Theme.Space.s8) {
@@ -1051,14 +625,28 @@ struct InspectorPanel: View {
                                 }
                             }
                         }
+                        // v13 的核心桥降为次级动作（v15）：agent 时代复制调用语是人类快捷通道
+                        DetailSection(title: "调用", hint: "复制调用语，或直接打开软件") {
+                            VStack(alignment: .leading, spacing: Theme.Space.s8) {
+                                HStack(spacing: Theme.Space.s8) {
+                                    CopyCallButton(skill: skill) { showUseHelp = true }
+                                    OpenHostButtons(
+                                        platforms: hostPlatforms(for: skill),
+                                        phrase: AppStore.callPhrase(for: skill),
+                                        onCopied: { showUseHelp = true }
+                                    )
+                                    Spacer(minLength: 0)
+                                }
+                                if showUseHelp {
+                                    UseMissHelp(skill: skill)
+                                }
+                            }
+                        }
                         DisclosureGroup {
                             VStack(alignment: .leading, spacing: Theme.Space.s20) {
                                 ManageSection(skill: skill)
                                 AdvisorySecuritySection(skill: skill)
-                                UsageSection(skill: skill)
-                                TrendMiniSection(skill: skill)
                                 TriggerTrySection(skill: skill)
-                                ContextCostSection(skill: skill)
                                 DetailSection(title: "安装位置") {
                                     Text(skill.sourcePath)
                                         .font(Theme.Fonts.mono)
@@ -1114,12 +702,19 @@ struct InspectorPanel: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentSurface()
+        .onChange(of: store.selectedName) { _, _ in showUseHelp = false }
+    }
+
+    private func hostPlatforms(for skill: Skill) -> [AgentPlatform] {
+        let lit = store.visiblePlatforms.filter { skill.platforms.contains($0.label) }
+        let preferred = lit.filter { store.preferredPlatforms.contains($0.rawValue) }
+        let pool = preferred.isEmpty ? lit : preferred
+        return pool.filter { HostLauncher.canOpen($0) }
     }
 }
 
 private struct InspectorHead: View {
     @Environment(AppStore.self) private var store
-    @State private var showUseHelp = false
     var skill: Skill
 
     var body: some View {
@@ -1190,30 +785,15 @@ private struct InspectorHead: View {
                 } else {
                     PlatformToggleRow(skill: skill)
                 }
-            }
-            HStack(spacing: Theme.Space.s8) {
-                Spacer()
-                CopyCallButton(skill: skill) { showUseHelp = true }
-                OpenHostButtons(
-                    platforms: hostPlatforms(for: skill),
-                    phrase: AppStore.callPhrase(for: skill),
-                    onCopied: { showUseHelp = true }
-                )
-            }
-            if showUseHelp {
-                UseMissHelp(skill: skill)
+                // v15：档位与挂载是首屏主控件（Claude 三档，写走供给单写者）
+                if !skill.managed, skill.origin == .atlas, !skill.disabled,
+                   skill.platforms.contains(AgentPlatform.claude.label) {
+                    DetailTierControl(skill: skill)
+                }
             }
         }
         .padding(.horizontal, Theme.Space.s20)
         .padding(.vertical, Theme.Space.s16)
-        .onChange(of: skill.name) { _, _ in showUseHelp = false }
-    }
-
-    private func hostPlatforms(for skill: Skill) -> [AgentPlatform] {
-        let lit = store.visiblePlatforms.filter { skill.platforms.contains($0.label) }
-        let preferred = lit.filter { store.preferredPlatforms.contains($0.rawValue) }
-        let pool = preferred.isEmpty ? lit : preferred
-        return pool.filter { HostLauncher.canOpen($0) }
     }
 
     private var platformHint: String {
@@ -1227,37 +807,58 @@ private struct InspectorHead: View {
 }
 
 /// 详情页「使用情况」块：调用会话数 / 最近使用 / 平台分布（来自本机会话日志索引）
-private struct UsageSection: View {
+/// v15 合并区：使用统计 + 触发趋势一个屋檐（WP-L）。hook 是 Claude 主源，
+/// 回扫补历史（mergeHookStats 已按此合并）；来源在 hint 里如实标注。
+private struct UsageTrendSection: View {
     @Environment(AppStore.self) private var store
     @Environment(UsageIndexState.self) private var usageIndex
     var skill: Skill
 
     var body: some View {
-        DetailSection(title: "使用情况", hint: "来自本机会话日志") {
-            if usageIndex.indexing {
-                HStack(spacing: Theme.Space.s8) {
-                    ProgressView().controlSize(.small)
-                    Text(LF("正在索引使用记录… %d%%", Int(usageIndex.progress * 100)))
+        let hookOn = HookTelemetry.installed()
+        let counts = HookTelemetry.weeklyCounts(directory: skill.directory, skillName: skill.name)
+        DetailSection(title: "使用", hint: hookOn ? "实时记录，回扫补历史" : "来自本机会话日志回扫") {
+            VStack(alignment: .leading, spacing: Theme.Space.s12) {
+                if usageIndex.indexing {
+                    HStack(spacing: Theme.Space.s8) {
+                        ProgressView().controlSize(.small)
+                        Text(LF("正在索引使用记录… %d%%", Int(usageIndex.progress * 100)))
+                            .font(Theme.Fonts.secondary)
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                } else if let record = store.usage[skill.directory] {
+                    HStack(alignment: .top, spacing: Theme.Space.s24) {
+                        usageStat(value: "\(record.total)", label: "调用会话")
+                        usageStat(
+                            value: record.lastUsed.map { Format.day.string(from: $0) } ?? L("未知"),
+                            label: "最近使用"
+                        )
+                        usageStat(
+                            value: "Claude \(record.claudeSessions) · Codex \(record.codexSessions)",
+                            label: "平台分布"
+                        )
+                    }
+                } else {
+                    Text(L("未发现使用记录"))
                         .font(Theme.Fonts.secondary)
-                        .monospacedDigit()
                         .foregroundStyle(Theme.textSecondary)
                 }
-            } else if let record = store.usage[skill.directory] {
-                HStack(alignment: .top, spacing: Theme.Space.s24) {
-                    usageStat(value: "\(record.total)", label: "调用会话")
-                    usageStat(
-                        value: record.lastUsed.map { Format.day.string(from: $0) } ?? L("未知"),
-                        label: "最近使用"
-                    )
-                    usageStat(
-                        value: "Claude \(record.claudeSessions) · Codex \(record.codexSessions)",
-                        label: "平台分布"
-                    )
+                if hookOn, counts.filter({ $0 > 0 }).count >= 2 {
+                    Chart(Array(counts.enumerated()), id: \.offset) { item in
+                        BarMark(
+                            x: .value(L("周"), item.offset),
+                            y: .value(L("次"), item.element)
+                        )
+                        .foregroundStyle(Theme.accent)
+                    }
+                    .chartXAxis(.hidden)
+                    .frame(height: 56)
+                } else if !hookOn {
+                    Text(L("接入使用记录后，这里会显示每周调用次数。"))
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.textTertiary)
                 }
-            } else {
-                Text(L("未发现使用记录"))
-                    .font(Theme.Fonts.secondary)
-                    .foregroundStyle(Theme.textSecondary)
             }
         }
         .help(store.usageIndexInfo)
@@ -1276,32 +877,65 @@ private struct UsageSection: View {
     }
 }
 
-private struct TrendMiniSection: View {
+/// 详情页 Claude 档位控件（v15 TierSegment 的详情宿主；写走供给单写者 ADR-11）
+private struct DetailTierControl: View {
+    @Environment(AppStore.self) private var store
     var skill: Skill
+    @State private var tier: SlimTier = .core
 
     var body: some View {
-        let installed = HookTelemetry.installed()
-        let counts = HookTelemetry.weeklyCounts(directory: skill.directory, skillName: skill.name)
-        DetailSection(title: "触发趋势", hint: L("按周")) {
-            if !installed {
-                Text(L("接入使用记录后，这里会显示每周调用次数。"))
-                    .font(Theme.Fonts.secondary)
-                    .foregroundStyle(Theme.textSecondary)
-            } else if counts.filter({ $0 > 0 }).count < 2 {
-                Text(L("数据不足，至少两周有调用才会画图。"))
-                    .font(Theme.Fonts.secondary)
-                    .foregroundStyle(Theme.textSecondary)
-            } else {
-                Chart(Array(counts.enumerated()), id: \.offset) { item in
-                    BarMark(
-                        x: .value(L("周"), item.offset),
-                        y: .value(L("次"), item.element)
-                    )
-                    .foregroundStyle(Theme.accent)
+        HStack(spacing: Theme.Space.s8) {
+            Text(L("Claude 档位"))
+                .font(Theme.Fonts.secondaryEmphasis)
+                .foregroundStyle(Theme.textSecondary)
+            Picker("", selection: Binding(
+                get: { tier },
+                set: { apply($0) }
+            )) {
+                ForEach(SlimTier.allCases, id: \.self) { option in
+                    Text(option.title).tag(option)
                 }
-                .chartXAxis(.hidden)
-                .frame(height: 56)
             }
+            .labelsHidden()
+            .fixedSize()
+            Text(L("只对 Claude Code 生效。"))
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.textTertiary)
+            Spacer(minLength: 0)
+        }
+        .onAppear(perform: reload)
+        .onChange(of: skill.name) { _, _ in reload() }
+    }
+
+    private func reload() {
+        let settings = (try? ProfileWriter.readSettings(at: ProfileWriter.userSettingsURL)) ?? [:]
+        let raw = (settings["skillOverrides"] as? [String: Any])?[skill.name] as? String
+        switch raw {
+        case ProfileExclusion.userInvocableOnly.rawValue: tier = .userInvocable
+        case ProfileExclusion.off.rawValue: tier = .off
+        default: tier = .core
+        }
+    }
+
+    private func apply(_ new: SlimTier) {
+        guard new != tier else { return }
+        let assignment: SupplyAssignment
+        switch new {
+        case .core: assignment = .core
+        case .userInvocable: assignment = .userInvocable
+        case .off: assignment = .off
+        }
+        do {
+            try SupplyWriter.write(
+                assignments: [skill.name: assignment],
+                target: ProfileWriter.userSettingsURL
+            )
+            Oplog.append(op: "supply-tier", target: skill.directory, ok: true,
+                         detail: "\(skill.name) -> \(new.rawValue)")
+            tier = new
+            Task { await store.rescan() }
+        } catch {
+            store.actionError = error.localizedDescription
         }
     }
 }
@@ -1630,28 +1264,6 @@ private struct CopyCallButton: View {
     }
 }
 
-private struct CategoryChip: View {
-    @Environment(AppStore.self) private var store
-    var category: String
-
-    var body: some View {
-        // 色彩收敛：分类色只保留在头部图标上，chip 用中性安静样式
-        Button {
-            store.jumpToCategory(category)
-        } label: {
-            Text(L(category))
-                .font(Theme.Fonts.caption)
-                .foregroundStyle(Theme.textSecondary)
-                .padding(.horizontal, Theme.Space.s8)
-                .frame(height: 20)
-                .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .quietControl()
-        .help(L("查看该分类的全部技能"))
-    }
-}
-
 private struct DetailSection<Content: View>: View {
     var title: String
     var hint: String?
@@ -1769,7 +1381,7 @@ private struct BlockingRepairBanner: View {
                         } else {
                             Button(L("打开目录")) { store.openFolder(skill.sourcePath) }
                         }
-                        Button(L("去维护里看这一条")) { store.openMaintenance(for: skill) }
+                        Button(L("去收件箱看这一条")) { store.openInbox(for: skill) }
                     }
                     .buttonStyle(.plain)
                     .font(Theme.Fonts.secondaryEmphasis)
@@ -1808,7 +1420,7 @@ private struct UseMissHelp: View {
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(L("去维护里看这一条")) { store.openMaintenance(for: skill) }
+            Button(L("去收件箱看这一条")) { store.openInbox(for: skill) }
                 .buttonStyle(.plain)
                 .font(Theme.Fonts.secondaryEmphasis)
                 .foregroundStyle(Theme.accent)
@@ -1844,8 +1456,6 @@ private struct AdvisorySecuritySection: View {
         }
     }
 }
-
-
 
 // MARK: - 更新 diff 预览（三期 1：技能文本变更 = 行为变更，先看再更）
 

@@ -162,6 +162,13 @@ struct InstallSheet: View {
         .background(.regularMaterial)
         .onAppear {
             model.selectedPlatforms = store.preferredPlatforms
+            // zip 直装的溯源交接（ADR-16）：先于预填消费
+            if let provenance = InstallerModel.pendingProvenance {
+                InstallerModel.pendingProvenance = nil
+                model.provenanceKind = provenance.kind
+                model.provenanceVersion = provenance.version
+                model.provenanceDigest = provenance.digest
+            }
             // 空库示例 / 调试钩子：预填链接并开装
             let pending = store.pendingInstallURL
             store.pendingInstallURL = nil
