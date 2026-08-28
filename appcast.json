@@ -1,7 +1,7 @@
 {
-  "version": "2.4.0",
-  "notes": "v2.4.0：场景不再只对 Claude Code 生效。勾上别的软件后，没勾的技能会在那边把软链先摘下来，撤场景时原样挂回——目录表里的意图位一个字节不动，你自己关掉的不会被替你打开。落地页主图重拍。",
+  "version": "2.5.0",
+  "notes": "v2.5.0：侧栏放场景。「全部技能」永远在第一位，生效的那条打点，一眼看得出现在压着哪一套，一键退回。场景以前埋在设置→进阶→场景包→管理场景…四层底下。撤掉了上一版那个没什么用的「最近在用」。",
   "download": "https://github.com/shoumunan/skill-atlas/releases/latest",
-  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.4.0/Skill.Atlas-2.4.0.dmg",
-  "sha256": "70d8396782c083f8ee20af06247893458f17b1ce6662739f022ae5ac56886b32"
+  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.5.0/Skill.Atlas-2.5.0.dmg",
+  "sha256": "806872252ab188a57f116c679bf1f0ff21a3cc3e6c64f364030acdeca427733c"
 }
