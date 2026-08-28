@@ -1029,3 +1029,9 @@
 "会话" = "Session";
 "这次安装由终端会话里的 agent 发起，不是你在窗口里点的" = "This install was requested by an agent in a terminal session, not by you in this window";
 "发起于 %@" = "Requested %@";
+"「%@」有需要你看一眼的写法" = "“%@” contains a pattern worth a look";
+"%@ 有需要你看一眼的写法" = "%@ contain patterns worth a look";
+"%@ 等 %d 个技能有需要你看一眼的写法" = "%@ and %d other skills contain patterns worth a look";
+"装前安全扫描的关键级发现。点开到收件箱看原文。" = "Critical findings from the pre-install security scan. Open the Inbox to read the source.";
+"新技能有可疑写法" = "New skill has suspicious code";
+"只在新出现时提醒一次，已知的留在收件箱里排队。默认开。" = "Notifies once when a finding is new; known ones queue in the Inbox. On by default.";

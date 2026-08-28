@@ -1887,9 +1887,11 @@ final class AppStore: InstallHost {
             }
             if self.securityFindings != visible { self.securityFindings = visible }
             let criticalDirs = visible.filter { _, findings in findings.contains { $0.severity == .critical } }
-            if !criticalDirs.isEmpty {
-                AtlasNotify.securityHit(count: criticalDirs.count)
-            }
+            // 通知要能说出是哪个技能，「有 4 个技能」既看不懂也没法行动
+            let nameByDir = Dictionary(uniqueKeysWithValues: self.skills.map { ($0.directory, $0.name) })
+            AtlasNotify.securityHit(critical: criticalDirs.keys.map {
+                (directory: $0, name: nameByDir[$0] ?? $0)
+            })
         }
     }
 

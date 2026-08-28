@@ -416,7 +416,7 @@ private struct NotifyGroup: View {
 
     var body: some View {
         SettingsGroup(title: "通知") {
-            SettingsRow(title: "安全命中", subtitle: "复扫发现关键级时提醒。默认开。") {
+            SettingsRow(title: "新技能有可疑写法", subtitle: "只在新出现时提醒一次，已知的留在收件箱里排队。默认开。") {
                 Toggle("", isOn: $security)
                     .toggleStyle(.switch)
                     .controlSize(.small)

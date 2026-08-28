@@ -32,11 +32,42 @@ enum AtlasNotify {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    static func securityHit(count: Int) {
-        guard securityEnabled, count > 0 else { return }
-        post(id: "security-\(count)-\(Int(Date().timeIntervalSince1970))",
-             title: L("安全复扫命中"),
-             body: LF("有 %d 个技能出现关键级发现。打开 Skill Atlas 查看。", count),
+    /// 已经告知过的关键级技能。通知说的是「刚发生了什么」，不是「现在有几个」——
+    /// 没有这层记账，每次复扫（装技能、改档位、目录被 touch 都会触发）都会把同一批
+    /// 陈年发现重播一遍，而它们其实一直安静地躺在收件箱队首。
+    private static let notifiedCriticalKey = "atlasNotifiedCriticalDirs"
+
+    /// 只为**新出现**的关键级发现打扰用户。已知的那些留在收件箱里（severity 0、
+    /// 不可忽略、永远排在队首），不靠反复弹窗刷存在感。
+    static func securityHit(critical: [(directory: String, name: String)]) {
+        let defaults = UserDefaults.standard
+        let current = Set(critical.map(\.directory))
+
+        // 首次建立基线：现存发现早就在收件箱排队了，不为它们补一次弹窗
+        guard defaults.object(forKey: notifiedCriticalKey) != nil else {
+            defaults.set(current.sorted(), forKey: notifiedCriticalKey)
+            return
+        }
+
+        let known = Set(defaults.stringArray(forKey: notifiedCriticalKey) ?? [])
+        let fresh = current.subtracting(known)
+        // 被修掉或卸载的要退出记账，将来重新出现仍算新事件
+        defaults.set(current.sorted(), forKey: notifiedCriticalKey)
+
+        guard securityEnabled, !fresh.isEmpty else { return }
+        let names = critical.filter { fresh.contains($0.directory) }.map(\.name).sorted()
+        let title: String
+        if names.count == 1 {
+            title = LF("「%@」有需要你看一眼的写法", names[0])
+        } else if names.count <= 3 {
+            title = LF("%@ 有需要你看一眼的写法", names.joined(separator: "、"))
+        } else {
+            title = LF("%@ 等 %d 个技能有需要你看一眼的写法", names[0], names.count)
+        }
+        // id 稳定：同一批发现重复投递会合并，不会在通知中心堆成一摞
+        post(id: "security-\(fresh.sorted().joined(separator: ","))",
+             title: title,
+             body: L("装前安全扫描的关键级发现。点开到收件箱看原文。"),
              deepLink: "skillatlas://inbox")
     }
 
