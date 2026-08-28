@@ -1,7 +1,7 @@
 {
-  "version": "2.1.1",
-  "notes": "v2.1.1：接入千问办公与豆包（平台目录可改）；修掉改档位后账单不刷新、同屏两个数字打架等问题；侧栏徽标不再每帧全量聚合，滚动更跟手。",
+  "version": "2.1.2",
+  "notes": "v2.1.2：场景包补「部分应用」态（半生效不再显示为已生效）；审批界面显示是哪个会话发起的；六页导航与深链补上自动化回归用例。",
   "download": "https://github.com/shoumunan/skill-atlas/releases/latest",
-  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.1.1/Skill.Atlas-2.1.1.dmg",
-  "sha256": "9b1e3e8df11702302ff2f5aa7b27c4a8af3f922e5104b522914f16a07bf7cc5a"
+  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.1.2/Skill.Atlas-2.1.2.dmg",
+  "sha256": "8de416eef2c508ca260082fb0ec7c5e19e9403ddbc197fca2ff73927b973a732"
 }
