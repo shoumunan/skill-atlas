@@ -463,6 +463,95 @@ struct StatusDot: View {
     }
 }
 
+/// v15 `TierSegment`：Claude 三档控件的唯一实现。
+///
+/// 用房规菜单样式而不是原生 Picker：原生弹出按钮是全 App 唯一带系统 chrome 的
+/// 控件，79 行排下来像另一个程序。非 Claude 平台传 applicable=false 显示「不适用」。
+struct TierSegment: View {
+    var tier: SlimTier
+    var applicable: Bool = true
+    var accessibilityName: String?
+    var onChange: (SlimTier) -> Void
+
+    var body: some View {
+        Group {
+            if applicable {
+                Menu {
+                    ForEach(SlimTier.allCases, id: \.self) { option in
+                        Button {
+                            onChange(option)
+                        } label: {
+                            if option == tier {
+                                Label(option.title, systemImage: "checkmark")
+                            } else {
+                                Text(option.title)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: Theme.Space.s4) {
+                        Text(tier.title)
+                            .font(Theme.Fonts.callout)
+                            .foregroundStyle(tier == .core ? Theme.textSecondary : Theme.accent)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                    .padding(.horizontal, Theme.Space.s8 + 2)
+                    .frame(height: 26)
+                    .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .quietControl(tint: tier == .core ? nil : Theme.accent)
+            } else {
+                Text(L("不适用"))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .padding(.horizontal, Theme.Space.s8)
+                    .frame(height: 26)
+            }
+        }
+        .help(L("改档立即写入，会先备份原配置"))
+        .accessibilityLabel(accessibilityName.map { LF("%@ 的档位", $0) } ?? L("档位"))
+    }
+}
+
+/// 列表行 hover 高亮（DESIGN ⑦）。四个新页原先零动效——鼠标划过毫无反馈，
+/// 和库页表格、侧栏的手感对不上。Reduce Motion 下只保留即时底色，不做动画。
+struct RowHover: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovering = false
+    var cornerRadius: CGFloat = Theme.Radius.control
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(hovering ? Color.primary.opacity(0.04) : Color.clear)
+            }
+            .animation(reduceMotion ? nil : Motion.control, value: hovering)
+            .onHover { hovering = $0 }
+    }
+}
+
+extension View {
+    func rowHover(cornerRadius: CGFloat = Theme.Radius.control) -> some View {
+        modifier(RowHover(cornerRadius: cornerRadius))
+    }
+
+    /// 回执行的出现/消失：不给过渡会让整页内容突然跳一格
+    func receiptTransition(reduceMotion: Bool) -> some View {
+        transition(
+            reduceMotion
+                ? .opacity
+                : .opacity.combined(with: .move(edge: .top))
+        )
+    }
+}
+
 /// 强调主按钮（一屏一个，DESIGN 铁律）。
 ///
 /// label 必须整个建在 Button 里：padding/frame 挂在 Button **外面**时，

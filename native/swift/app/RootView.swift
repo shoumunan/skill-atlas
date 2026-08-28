@@ -144,6 +144,21 @@ struct RootView: View {
                 Text(SkillSandbox.plan(for: skill).caveats.joined(separator: "\n"))
             }
         }
+        .confirmationDialog(
+            LF("把「%@」收进本库？", store.adoptTarget?.name ?? ""),
+            isPresented: Binding(
+                get: { store.adoptTarget != nil },
+                set: { if !$0 { store.adoptTarget = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(L("收编")) { store.confirmAdopt() }
+            Button(L("取消"), role: .cancel) { store.adoptTarget = nil }
+        } message: {
+            if let skill = store.adoptTarget {
+                Text(store.adoptConfirmMessage([skill]))
+            }
+        }
         .task {
             applyLaunchPage()
             AtlasCatalog.migrateLegacyIfNeeded()
@@ -483,6 +498,8 @@ private struct RailItem: View {
                         .frame(minWidth: 17)
                         .frame(height: 16)
                         .background(Capsule().fill(Theme.accent))
+                        // 光看数字听不出是什么（DESIGN v15 无障碍条款）
+                        .accessibilityLabel(LF("%d 件待裁决", count))
                 }
             }
             .foregroundStyle(active ? Theme.accent : Theme.textSecondary)

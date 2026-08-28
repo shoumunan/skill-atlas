@@ -928,7 +928,7 @@ private enum SkillRowMenu {
             menu.addItem(parent)
         }
         if skill.origin == .local && !skill.disabled {
-            add(menu, L("收进本库")) { store.adoptLocalSkill(skill) }
+            add(menu, L("收进本库…")) { store.requestAdopt(skill) }
         }
         if skill.origin == .atlas && skill.updateAvailable {
             add(menu, L("有新版本…")) { store.requestUpdate(skill) }

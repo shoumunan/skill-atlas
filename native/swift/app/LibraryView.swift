@@ -642,10 +642,13 @@ struct InspectorPanel: View {
                                 }
                             }
                         }
+                        // 动作区不进折叠组（DESIGN v15：折叠组只许藏解释，
+                        // 不许藏动作）。沙箱试跑 / 停用 / 卸载 / 收编原先要展开
+                        // 「更多设置」才够得着，深度 3，违反 ≤2 次点击铁律。
+                        ManageSection(skill: skill)
+                        AdvisorySecuritySection(skill: skill)
                         DisclosureGroup {
                             VStack(alignment: .leading, spacing: Theme.Space.s20) {
-                                ManageSection(skill: skill)
-                                AdvisorySecuritySection(skill: skill)
                                 TriggerTrySection(skill: skill)
                                 DetailSection(title: "安装位置") {
                                     Text(skill.sourcePath)
@@ -673,7 +676,7 @@ struct InspectorPanel: View {
                             }
                             .padding(.top, Theme.Space.s12)
                         } label: {
-                            Text(L("更多设置"))
+                            Text(L("更多信息"))
                                 .font(Theme.Fonts.secondaryEmphasis)
                                 .foregroundStyle(Theme.textSecondary)
                         }
@@ -888,16 +891,7 @@ private struct DetailTierControl: View {
             Text(L("Claude 档位"))
                 .font(Theme.Fonts.secondaryEmphasis)
                 .foregroundStyle(Theme.textSecondary)
-            Picker("", selection: Binding(
-                get: { tier },
-                set: { apply($0) }
-            )) {
-                ForEach(SlimTier.allCases, id: \.self) { option in
-                    Text(option.title).tag(option)
-                }
-            }
-            .labelsHidden()
-            .fixedSize()
+            TierSegment(tier: tier, accessibilityName: skill.name) { apply($0) }
             Text(L("只对 Claude Code 生效。"))
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(Theme.textTertiary)
@@ -1420,10 +1414,16 @@ private struct UseMissHelp: View {
                 .font(Theme.Fonts.secondary)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(L("去收件箱看这一条")) { store.openInbox(for: skill) }
-                .buttonStyle(.plain)
-                .font(Theme.Fonts.secondaryEmphasis)
-                .foregroundStyle(Theme.accent)
+            // 这里原来挂着「去收件箱看这一条」——复制调用语根本不产生任何
+            // 收件箱条目，点过去只会是一屏不相干的事项。改成真正能帮上忙的：
+            // 用一句话验证它会不会被唤到。
+            Button(L("试一句话，看它会不会被唤到")) {
+                store.simulatePhrase = AppStore.callPhrase(for: skill)
+                store.nav = .studio
+            }
+            .buttonStyle(.plain)
+            .font(Theme.Fonts.secondaryEmphasis)
+            .foregroundStyle(Theme.accent)
         }
         .padding(.top, Theme.Space.s4)
         .frame(maxWidth: .infinity, alignment: .leading)

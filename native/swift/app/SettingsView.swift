@@ -290,7 +290,7 @@ private struct AdoptGroup: View {
                             Button(L("收编")) { store.adoptAllLocalSkills() }
                             Button(L("取消"), role: .cancel) {}
                         } message: {
-                            Text(adoptConfirmMessage(adoptable))
+                            Text(store.adoptConfirmMessage(adoptable))
                         }
                     }
                 }
@@ -298,14 +298,6 @@ private struct AdoptGroup: View {
         }
     }
 
-    private func adoptConfirmMessage(_ adoptable: [Skill]) -> String {
-        var text = L("拷进本库，原来的位置改成指向这里。之后在本应用里开关。")
-        let external = adoptable.filter { SkillActions.isExternalSource($0) }.count
-        if external > 0 {
-            text += LF("其中 %lld 个的实体在平台目录之外，收编后编辑原目录不再生效。", external)
-        }
-        return text
-    }
 }
 
 // MARK: - 分组骨架

@@ -12,6 +12,7 @@ import AtlasCore
 
 struct StudioPage: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var studio = StudioStore()
 
     var body: some View {
@@ -20,6 +21,7 @@ struct StudioPage: View {
             VStack(alignment: .leading, spacing: Theme.Space.s12) {
                 if let error = studio.error {
                     ReceiptLine(text: error, failed: true) { studio.error = nil }
+                        .receiptTransition(reduceMotion: reduceMotion)
                 }
                 StepCard(index: 1, title: L("建骨架"), state: draft == nil ? .active : .done) {
                     if let draft {
@@ -53,7 +55,7 @@ struct StudioPage: View {
                                 .quietControl()
                                 AtlasPrimaryButton(
                                     title: L("建骨架"),
-                                    enabled: studio.draftName.trimmingCharacters(in: .whitespaces).count >= 2
+                                    enabled: SkillScaffold.sanitize(studio.draftName).count >= 2
                                 ) { studio.create(appStore: store) }
                             }
                             Toggle(isOn: Binding(
@@ -70,7 +72,7 @@ struct StudioPage: View {
                     }
                 }
 
-                StepCard(index: 2, title: L("沙箱试跑"), state: draft == nil ? .locked : .active) {
+                StepCard(index: 2, title: L("沙箱试跑"), state: stepTwoState(draft)) {
                     if let draft {
                         VStack(alignment: .leading, spacing: Theme.Space.s8) {
                             ForEach(SkillSandbox.plan(for: draft).caveats, id: \.self) { caveat in
@@ -153,12 +155,27 @@ struct StudioPage: View {
                 }
             }
             .padding(Theme.Space.s20)
+            .animation(reduceMotion ? nil : Motion.standard, value: studio.error)
             .frame(maxWidth: 720, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .top)
         }
         .panelScroll()
         .contentSurface()
-        .onAppear { studio.validateDraft(appStore: store) }
+        .onAppear {
+            studio.validateDraft(appStore: store)
+            store.refreshSandboxCount()
+            if let phrase = store.simulatePhrase {
+                store.simulatePhrase = nil
+                studio.simulateText = phrase
+                studio.runSimulate(appStore: store)
+            }
+        }
+    }
+
+    /// 试跑过（本次会话建了沙箱目录）就算走完这一步
+    private func stepTwoState(_ draft: Skill?) -> StudioStepState {
+        guard draft != nil else { return .locked }
+        return store.sandboxCount > 0 ? .done : .active
     }
 
     private func stepThreeState(_ draft: Skill?) -> StudioStepState {

@@ -85,9 +85,9 @@ final class StudioStore {
             usage: appStore.usage,
             atRiskNames: atRisk
         )
-        if let first = candidates.first, first.skill.directory == draftDir {
-            setRankedFirst(true)
-        }
+        // 无条件按本次结果重置：只在成功时置 true 会让绿勾黏住——
+        // 之后把描述改坏、草稿掉到第 3 名，界面还在说「这句话能唤到它」。
+        setRankedFirst(candidates.first?.skill.directory == draftDir)
     }
 
     func setRankedFirst(_ value: Bool) {

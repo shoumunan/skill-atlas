@@ -13,7 +13,9 @@ import AtlasCore
 
 struct DiscoverPage: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var discover = DiscoverStore()
+    @State private var confirmAdopt = false
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -23,12 +25,14 @@ struct DiscoverPage: View {
                 discoverSection
             }
             .padding(Theme.Space.s20)
+            .animation(reduceMotion ? nil : Motion.standard, value: discover.installError)
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .top)
         }
         .panelScroll()
         .contentSurface()
         .onAppear { discover.syncEnabledSources(); discover.loadFeaturedIfNeeded() }
+        .onChange(of: store.discoverSearchFocus) { _, _ in searchFocused = true }
     }
 
     // MARK: 导入区（三合一）
@@ -52,7 +56,20 @@ struct DiscoverPage: View {
                         title: LF("收编 %d 个本地技能", store.adoptableSkills.count),
                         caption: L("把散装在平台目录里的技能收进本库")
                     ) {
-                        store.jumpToLocalSkills()
+                        // 标题说收编就要真收编。以前这里只是跳去库页筛选，
+                        // 真正的批量动作还留在设置里。
+                        confirmAdopt = true
+                    }
+                    .confirmationDialog(
+                        LF("把 %lld 个本地技能收进 Skill Atlas 库？", store.adoptableSkills.count),
+                        isPresented: $confirmAdopt,
+                        titleVisibility: .visible
+                    ) {
+                        Button(L("收编")) { store.adoptAllLocalSkills() }
+                        Button(L("先看看是哪些")) { store.jumpToLocalSkills() }
+                        Button(L("取消"), role: .cancel) {}
+                    } message: {
+                        Text(store.adoptConfirmMessage(store.adoptableSkills))
                     }
                 }
                 if store.canMigrate {
@@ -87,10 +104,22 @@ struct DiscoverPage: View {
                     ReceiptLine(text: installError, failed: true) {
                         discover.installError = nil
                     }
+                    .receiptTransition(reduceMotion: reduceMotion)
                 }
                 let trimmed = discover.query.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.count >= 2 {
-                    resultList(discover.hits, emptyText: discover.searching ? L("搜索中…") : L("没搜到。换个说法，或直接粘贴 GitHub 链接。"))
+                    if discover.hits.isEmpty && !discover.searching {
+                        EmptyStateBlock(
+                            symbol: "magnifyingglass",
+                            title: L("没搜到"),
+                            caption: L("换个说法试试，比如「甘特图」「周报」「PPT」。或者直接粘 GitHub 链接。"),
+                            actionTitle: L("从链接或文件夹…")
+                        ) {
+                            store.installSheetPresented = true
+                        }
+                    } else {
+                        resultList(discover.hits, emptyText: L("搜索中…"))
+                    }
                 } else {
                     officialShelf
                     HStack(spacing: Theme.Space.s8) {
@@ -301,6 +330,7 @@ private struct SourceHitRow: View {
         }
         .padding(.horizontal, Theme.Space.s12)
         .padding(.vertical, Theme.Space.s8 + 2)
+        .rowHover()
     }
 }
 

@@ -1277,9 +1277,19 @@ final class AppStore: InstallHost {
         nav = .library
     }
 
-    /// 跳到收件箱（v15：维护组已解散进收件箱；挡住使用的条目天然排在队首）
+    /// 从别处带到创作页触发验证的预填句（消费后置 nil）
+    var simulatePhrase: String?
+
+    /// ⌘N：切到发现页并聚焦搜索框（计数器，每次 +1 触发一次聚焦）
+    var discoverSearchFocus = 0
+
+    /// 跳到收件箱，并尽量定位到这个技能的那一条。
+    /// 按钮文字承诺「看这一条」，只切页不定位就是说谎。
     func openInbox(for skill: Skill? = nil) {
-        _ = skill
+        if let skill,
+           let hit = inboxItems.first(where: { $0.target == skill.directory }) {
+            Inbox.pendingFocusID = hit.id
+        }
         nav = .inbox
     }
 
@@ -1572,6 +1582,20 @@ final class AppStore: InstallHost {
 
     /// 收编本地直装：拷入本库、原散装目录替换成指向库的软链。
     /// 重扫后 origin 变 atlas，详情页原地解锁平台 logo 开关。
+    /// 右键「收进本库…」的待确认目标（nil = 无）。
+    /// 收编会改动原目录的所有权归属，不该有任何一条路径静默执行。
+    var adoptTarget: Skill?
+
+    func requestAdopt(_ skill: Skill) {
+        adoptTarget = skill
+    }
+
+    func confirmAdopt() {
+        guard let skill = adoptTarget else { return }
+        adoptTarget = nil
+        adoptLocalSkill(skill)
+    }
+
     func adoptLocalSkill(_ skill: Skill) {
         guard skill.origin == .local, !skill.disabled else { return }
         pauseWatching()
@@ -1598,6 +1622,18 @@ final class AppStore: InstallHost {
 
     /// 一键收编全部本地直装（收编条入口）。逐个执行，全部完成只重扫一次；
     /// 失败的（同名冲突等）聚合报错，不中断其余。
+    /// 收编前必须交代的事：外部实体收编后编辑原目录不再生效。
+    /// 三个入口（发现页、设置、右键）共用这一句，否则同一个动作在不同路径下
+    /// 知情程度不同——右键那条以前是静默执行的。
+    func adoptConfirmMessage(_ targets: [Skill]) -> String {
+        var text = L("拷进本库，原来的位置改成指向这里。之后在本应用里开关。")
+        let external = targets.filter { SkillActions.isExternalSource($0) }.count
+        if external > 0 {
+            text += LF("其中 %lld 个的实体在平台目录之外，收编后编辑原目录不再生效。", external)
+        }
+        return text
+    }
+
     func adoptAllLocalSkills() {
         let targets = adoptableSkills
         guard !targets.isEmpty else { return }

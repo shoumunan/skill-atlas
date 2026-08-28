@@ -143,8 +143,13 @@ struct SkillAtlasApp: App {
                 Button(L("检查更新…")) { UpdateChecker.shared.checkFromMenu() }
             }
             CommandGroup(replacing: .newItem) {
-                Button(L("安装技能…")) { store.installSheetPresented = true }
-                    .keyboardShortcut("n", modifiers: .command)
+                // ⌘N 落到发现页（DESIGN v15 入口表），不再直接弹旧安装 sheet：
+                // 发现页才是「找并装上一个新技能」这条工作流的入口。
+                Button(L("找并装技能…")) {
+                    store.nav = .discover
+                    store.discoverSearchFocus += 1
+                }
+                .keyboardShortcut("n", modifiers: .command)
                 Button(L("导出技能清单…")) { store.exportSkillList() }
                     .keyboardShortcut("e", modifiers: .command)
                     .disabled(store.skills.isEmpty)

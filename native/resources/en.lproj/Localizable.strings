@@ -994,3 +994,19 @@
 "%@（豆包读的是你在它里面指定的文件夹，不一致就点「目录…」改）" = "%@ (Doubao reads the folder you designate inside it; if it differs, change it via “Folder…”)";
 "选定" = "Choose";
 "选择 %@ 实际读取技能的目录" = "Choose the folder %@ actually reads skills from";
+
+/* 2.1.1 · 逻辑修复文案 */
+"试一句话，看它会不会被唤到" = "Try a sentence and see if it fires";
+"先看看是哪些" = "Show me which ones";
+"收进本库…" = "Adopt into library…";
+"把「%@」收进本库？" = "Adopt “%@” into the library?";
+"找并装技能…" = "Find and install skills…";
+"更多信息" = "More info";
+"本来就没有技能被排除，自动清单没有变化。" = "Nothing was excluded; the auto list is unchanged.";
+"已恢复默认：%d 个技能重新进入自动清单。" = "Restored: %d skills are back in the auto list.";
+"SkillHub 已在设置里关闭。打开后再安装。" = "SkillHub is turned off in Settings. Enable it before installing.";
+"%d 件待裁决" = "%d items awaiting decision";
+"不适用" = "N/A";
+"再查一遍" = "Check again";
+"没搜到" = "No results";
+"换个说法试试，比如「甘特图」「周报」「PPT」。或者直接粘 GitHub 链接。" = "Try different words — “gantt”, “weekly report”, “deck”. Or paste a GitHub URL.";

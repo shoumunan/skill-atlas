@@ -12,6 +12,7 @@ import AtlasCore
 
 struct SupplyPage: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var supply = SupplyStore()
 
     var body: some View {
@@ -23,6 +24,7 @@ struct SupplyPage: View {
                         ReceiptLine(text: receipt.text, failed: receipt.failed) {
                             supply.receipt = nil
                         }
+                        .receiptTransition(reduceMotion: reduceMotion)
                     }
                     switch supply.scope {
                     case .platform(let platform):
@@ -36,6 +38,7 @@ struct SupplyPage: View {
                     }
                 }
                 .padding(Theme.Space.s20)
+                .animation(reduceMotion ? nil : Motion.standard, value: supply.receipt)
                 // 可读宽度上限：宽窗不拉成仪表盘（DESIGN ⑤），
                 // 否则档位选择器会被甩到离技能名一千多点远
                 .frame(maxWidth: 760, alignment: .leading)
@@ -205,6 +208,7 @@ private struct ScopeRail: View {
 
 private struct ClaudeScopeView: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var supply: SupplyStore
 
     var body: some View {
@@ -237,6 +241,8 @@ private struct ClaudeScopeView: View {
                     Text(LF("%d tok", store.doctorReport.totalTokens))
                         .font(Theme.Fonts.panelTitle)
                         .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .animation(reduceMotion ? nil : Motion.standard, value: store.doctorReport.totalTokens)
                         .foregroundStyle(store.doctorReport.totalTokens > 10_000 ? Theme.warning : Theme.textPrimary)
                     Text(L("估算"))
                         .font(Theme.Fonts.caption)
@@ -395,21 +401,15 @@ private struct TierRow: View {
                 .foregroundStyle(Theme.textTertiary)
                 .help(L("由本应用生成并挂到所有平台，不能单独停用。"))
             } else {
-                Picker("", selection: Binding(
-                    get: { supply.tier(for: skill) },
-                    set: { supply.applyTier($0, to: skill, appStore: store) }
-                )) {
-                    ForEach(SlimTier.allCases, id: \.self) { tier in
-                        Text(tier.title).tag(tier)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 132)
-                .help(L("改档立即写入，会先备份原配置"))
+                TierSegment(
+                    tier: supply.tier(for: skill),
+                    accessibilityName: skill.name
+                ) { supply.applyTier($0, to: skill, appStore: store) }
             }
         }
         .padding(.horizontal, Theme.Space.s12)
         .frame(height: 44)
+        .rowHover()
     }
 }
 
@@ -498,6 +498,10 @@ private struct MountRow: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.mini)
+                .help(enabled
+                    ? LF("停止同步到 %@", platform.displayName)
+                    : LF("同步到 %@", platform.displayName))
+                .accessibilityLabel(LF("把 %@ 挂到 %@", skill.name, platform.displayName))
             } else {
                 HStack(spacing: Theme.Space.s4) {
                     Image(systemName: "lock.fill")
@@ -510,6 +514,7 @@ private struct MountRow: View {
         }
         .padding(.horizontal, Theme.Space.s12)
         .frame(height: 44)
+        .rowHover()
     }
 }
 
@@ -546,6 +551,7 @@ private struct ProjectScopeView: View {
                         Text(LF("已绑定「%@」：%d 个技能不进该目录会话的自动清单", boundProfile.name, binding.appliedKeys.count))
                             .font(Theme.Fonts.secondary)
                             .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 } else {
                     Text(L("未绑定场景包。该目录的会话用全局默认清单。"))
@@ -613,6 +619,7 @@ private struct ProjectScopeView: View {
             Text(L("项目供给写在 <目录>/.claude/settings.local.json，App 关掉照样生效。"))
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

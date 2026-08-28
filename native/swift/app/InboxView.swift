@@ -11,6 +11,7 @@ import AtlasCore
 
 struct InboxPage: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var inbox = InboxStore()
 
     var body: some View {
@@ -22,6 +23,7 @@ struct InboxPage: View {
                         ReceiptLine(text: receipt.text, failed: receipt.failed) {
                             inbox.receipt = nil
                         }
+                        .receiptTransition(reduceMotion: reduceMotion)
                     }
                     if items.isEmpty {
                         quietState
@@ -51,6 +53,7 @@ struct InboxPage: View {
                     }
                 }
                 .padding(Theme.Space.s20)
+                .animation(reduceMotion ? nil : Motion.standard, value: inbox.receipt)
                 .frame(maxWidth: 720, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .top)
             }
@@ -66,19 +69,14 @@ struct InboxPage: View {
     }
 
     private var quietState: some View {
-        VStack(spacing: Theme.Space.s12) {
-            Image(systemName: "tray")
-                .font(.system(size: 28, weight: .medium))
-                .foregroundStyle(Theme.healthy)
-            Text(L("一切安静"))
-                .font(Theme.Fonts.panelTitle)
-                .foregroundStyle(Theme.textPrimary)
-            Text(lastClearedText)
-                .font(Theme.Fonts.caption)
-                .foregroundStyle(Theme.textTertiary)
+        EmptyStateBlock(
+            symbol: "checkmark.circle",
+            title: L("一切安静"),
+            caption: lastClearedText,
+            actionTitle: L("再查一遍")
+        ) {
+            Task { await store.rescan() }
         }
-        .padding(Theme.Space.s32)
-        .frame(maxWidth: .infinity)
     }
 
     private var lastClearedText: String {
@@ -153,6 +151,7 @@ private struct InboxRow: View {
         }
         .padding(.horizontal, Theme.Space.s12)
         .padding(.vertical, Theme.Space.s8 + 2)
+        .rowHover()
     }
 }
 
@@ -297,5 +296,6 @@ private struct InboxActions: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(title)
     }
 }
