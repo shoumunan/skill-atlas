@@ -18,6 +18,6 @@ package func LF(_ key: String, _ args: CVarArg...) -> String {
 
 /// 与 Info.plist CFBundleShortVersionString 对齐。发版改这一处 + plist。
 package enum AtlasVersion {
-    package static let string = "2.0.0"
-    package static let build = "200"
+    package static let string = "2.1.0"
+    package static let build = "210"
 }
