@@ -1,7 +1,7 @@
 {
-  "version": "2.5.1",
-  "notes": "v2.5.1 安全修复：一批调试探针读的是持久化偏好设置，其中管场景应用的那个读到值就直接写盘、绕过确认框——任何进程写过一次 defaults，下次启动就会静默改写你的 ~/.claude/settings.json。现在会改文件的探针只认启动参数。装了 2.5.0 建议尽快更新。",
+  "version": "3.0.0",
+  "notes": "v3.0.0 侧栏改成技能 / 添加 / 软件 / 更新 / 设置。添加页装技能，软件页管同步和项目，更新页只谈新版本。标签、批量同步和文件预览也在。旧检查队列不再单独占一页。",
   "download": "https://github.com/shoumunan/skill-atlas/releases/latest",
-  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v2.5.1/Skill.Atlas-2.5.1.dmg",
-  "sha256": "6a14cd34e3d9811dafc726dec77de9d767defe4435f55a3ec0379e1c4eaaacf1"
+  "dmg": "https://github.com/shoumunan/skill-atlas/releases/download/v3.0.0/Skill.Atlas-3.0.0.dmg",
+  "sha256": "633d504ed7af5173985f9e461bdb24bbf9771cfcac4aea0715f3b09dbb46fb71"
 }
