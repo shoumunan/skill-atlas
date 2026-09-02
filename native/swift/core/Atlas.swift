@@ -95,6 +95,18 @@ package enum AgentPlatform: String, CaseIterable, Identifiable, Codable, Hashabl
     /// 该平台的默认路径是否只是约定、需要用户确认（豆包）
     package var rootNeedsConfirmation: Bool { self == .doubao }
 
+    /// 项目级 skills 目录（相对项目根）。nil = 这个软件不支持项目同步。
+    package var projectSkillsRel: String? {
+        switch self {
+        case .claude: return ".claude/skills"
+        case .cursor, .codex, .gemini, .opencode: return ".agents/skills"
+        case .openclaw: return "skills"
+        case .qwenwork: return ".qwenworkcn/skills"
+        case .doubao: return ".doubao/skills"
+        case .hermes, .grokbuild, .workbuddy: return nil
+        }
+    }
+
     /// 写软链的真实目录：根本身是软链时（~/.claude/skills → ~/.mirasim/skills）先 resolve
     package func resolvedRoot(home: URL) -> URL {
         let raw = root(home: home)
@@ -144,6 +156,11 @@ package enum AtlasPaths {
 
     package static var securityIndexURL: URL {
         root.appendingPathComponent("security-index.json")
+    }
+
+    /// 技能快照索盘（skills-hub 的 SQLite store）：UI / 二次扫描先读这里，不再每次重读全部 SKILL.md。
+    package static var skillIndexURL: URL {
+        root.appendingPathComponent("skill-index.db")
     }
 
     package static var legacySupportDir: URL {
@@ -688,6 +705,68 @@ package enum SkillActions {
         record.enabled[platform.rawValue] = enabled
         catalog.skills[directory] = record
         try AtlasCatalog.save(catalog)
+        try applyProjectLinks(directory: directory)
+    }
+
+    /// 自定义工具：和平台开关同一套软链语义，enabled 键用工具 id。
+    package static func setExtraTool(directory: String, toolID: String, enabled: Bool) throws {
+        var catalog = AtlasCatalog.load()
+        guard var record = catalog.skills[directory] else { throw NotFound(directory) }
+        guard let tool = CustomTools.load().tools.first(where: { $0.id == toolID }) else {
+            throw AtlasError(LF("找不到软件「%@」", toolID))
+        }
+        let source = activeSource(directory: directory)
+        let root = tool.root
+        let link = root.appendingPathComponent(directory)
+        if enabled {
+            if !LinkTool.isSymlink(link), FileManager.default.fileExists(atPath: link.path) {
+                throw Conflict(LF("%@ 的技能目录里已有同名普通目录「%@」，不会覆盖。", tool.label, directory))
+            }
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try LinkTool.replaceSymlink(at: link, pointingTo: source)
+        } else {
+            try LinkTool.removeOurSymlink(at: link)
+        }
+        record.enabled[toolID] = enabled
+        catalog.skills[directory] = record
+        try AtlasCatalog.save(catalog)
+    }
+
+    package static func applyProjectLinks(directory: String) throws {
+        let source = activeSource(directory: directory)
+        let record = AtlasCatalog.load().skills[directory]
+        let projects = ProjectSync.projects(for: directory)
+        let fileManager = FileManager.default
+        for project in ProjectSync.load().projects {
+            let wanted = projects.contains(where: { $0.id == project.id })
+            for platform in AgentPlatform.allCases {
+                guard let rel = platform.projectSkillsRel else { continue }
+                let root = project.url.appendingPathComponent(rel)
+                let link = root.appendingPathComponent(directory)
+                if wanted, record?.isEnabled(platform) == true {
+                    try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+                    if !fileManager.fileExists(atPath: link.path) || LinkTool.isSymlink(link) {
+                        try LinkTool.replaceSymlink(at: link, pointingTo: source)
+                    }
+                } else {
+                    try LinkTool.removeOurSymlink(at: link)
+                }
+            }
+        }
+    }
+
+    package static func removeExtraLinks(directory: String) {
+        for tool in CustomTools.load().tools {
+            let link = tool.root.appendingPathComponent(directory)
+            try? LinkTool.removeOurSymlink(at: link)
+        }
+        for project in ProjectSync.load().projects {
+            for platform in AgentPlatform.allCases {
+                guard let rel = platform.projectSkillsRel else { continue }
+                let link = project.url.appendingPathComponent(rel).appendingPathComponent(directory)
+                try? LinkTool.removeOurSymlink(at: link)
+            }
+        }
     }
 
     /// CLI 退出码 7：目标不在库里
@@ -726,6 +805,14 @@ package enum SkillActions {
                 try LinkTool.removeOurSymlink(at: link)
             } else if record?.isEnabled(platform) == true {
                 try LinkTool.replaceSymlink(at: link, pointingTo: to)
+            }
+        }
+        if disabled {
+            removeExtraLinks(directory: directory)
+        } else {
+            try? applyProjectLinks(directory: directory)
+            for tool in CustomTools.active() where record?.enabled[tool.id] == true {
+                try? setExtraTool(directory: directory, toolID: tool.id, enabled: true)
             }
         }
     }
@@ -843,6 +930,7 @@ package enum SkillActions {
                 }
             }
         }
+        removeExtraLinks(directory: skill.directory)
 
         if skill.origin == .atlas {
             var catalog = AtlasCatalog.load()

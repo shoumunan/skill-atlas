@@ -15,7 +15,7 @@ struct LibraryBillLink: View {
         let computing = !store.skills.isEmpty && store.doctorReport.entries.isEmpty
         let over = tokens > 10_000
         Button {
-            store.nav = .check
+            store.nav = .updates
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "number")
@@ -30,7 +30,7 @@ struct LibraryBillLink: View {
             .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
         }
         .buttonStyle(.plain)
-        .help(L("每次跟 Claude 说话，它先读一遍所有技能的简介。这是那份简介的长度，点击去「检查」调。"))
+        .help(L("每次跟 Claude 说话，它先读一遍所有技能的简介。这是那份简介的长度，点击去「更新」调。"))
     }
 }
 

@@ -167,11 +167,13 @@ func handleDeepLink(_ url: URL, store: AppStore) {
         }
     } else if host == "discover" {
         store.nav = .add
-    } else if host == "supply" || host == "check" {
-        store.nav = .check
+    } else if host == "tools" {
+        store.nav = .tools
+    } else if host == "supply" || host == "check" || host == "updates" {
+        store.nav = .updates
     } else if host == "inbox" {
         if let id = rest.first { Inbox.pendingFocusID = id }
-        store.nav = .check
+        store.nav = .updates
     }
 }
 
@@ -265,7 +267,7 @@ struct SkillAtlasApp: App {
         } label: {
             // 有待裁决事项时图标带点：App 的存在感来自「有事找你」，
             // 不是「等你来逛」（DESIGN v15 Ambient surface）
-            Image(nsImage: store.inboxBadgeCount > 0 ? MenuBarIcon.alert : MenuBarIcon.template)
+            Image(nsImage: store.updatableSkills.count > 0 ? MenuBarIcon.alert : MenuBarIcon.template)
         }
         .menuBarExtraStyle(.window)
     }

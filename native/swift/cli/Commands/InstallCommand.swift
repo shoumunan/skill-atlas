@@ -140,5 +140,5 @@ final class CLIInstallHost: InstallHost {
     func pauseWatching() {}
     func resumeWatching() {}
     func select(_ name: String) {}
-    func rescan(keepSelection: Bool) async {}
+    func rescan(keepSelection: Bool, discoverLocals: Bool) async {}
 }

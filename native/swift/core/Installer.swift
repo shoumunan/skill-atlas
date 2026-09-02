@@ -57,7 +57,13 @@ package protocol InstallHost: AnyObject {
     func pauseWatching()
     func resumeWatching()
     func select(_ name: String)
-    func rescan(keepSelection: Bool) async
+    func rescan(keepSelection: Bool, discoverLocals: Bool) async
+}
+
+extension InstallHost {
+    func rescan(keepSelection: Bool) async {
+        await rescan(keepSelection: keepSelection, discoverLocals: true)
+    }
 }
 
 @MainActor
@@ -81,6 +87,10 @@ package final class InstallerModel {
     package var errorText: String?
     package var candidates: [InstallCandidate] = []
     package var selectedPlatforms: Set<String> = PreferredPlatforms.current
+    /// 装前选定的标签名、项目 id（skills-hub：Install 后再选标签/范围/工具）
+    package var pendingTagNames: [String] = []
+    package var pendingProjectIDs: [String] = []
+    package var selectedExtraTools: Set<String> = []
     package var results: [InstallResult] = []
 
     private var cloneDir: URL?
@@ -370,6 +380,20 @@ package final class InstallerModel {
                     }
                     try fileManager.createSymbolicLink(at: link, withDestinationURL: target)
                     linked.append(platform.label)
+                }
+                for toolID in selectedExtraTools {
+                    try? SkillActions.setExtraTool(directory: candidate.directory, toolID: toolID, enabled: true)
+                }
+                if !pendingTagNames.isEmpty {
+                    var ids: [String] = []
+                    for name in pendingTagNames {
+                        if let tag = try? SkillTags.ensure(name) { ids.append(tag.id) }
+                    }
+                    try? SkillTags.set(directory: candidate.directory, tagIDs: ids)
+                }
+                if !pendingProjectIDs.isEmpty {
+                    try? ProjectSync.set(directory: candidate.directory, projectIDs: pendingProjectIDs)
+                    try? SkillActions.applyProjectLinks(directory: candidate.directory)
                 }
                 let note = linked.isEmpty
                     ? L("已装进本库")

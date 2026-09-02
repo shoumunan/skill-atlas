@@ -36,6 +36,10 @@ private struct LibraryPin: Equatable {
     var checkingInteractive: Bool
     var updating: Bool
     var empty: Bool
+    var hubRevision: Int
+    var tagFilter: Set<String>
+    var includeUntagged: Bool
+    var scopeFilter: String
 
     init(_ store: AppStore) {
         epoch = store.libraryEpoch
@@ -52,6 +56,10 @@ private struct LibraryPin: Equatable {
         checkingInteractive = store.checkingInteractive
         updating = !store.updatingDirectories.isEmpty
         empty = store.filteredSkills.isEmpty
+        hubRevision = store.hubRevision
+        tagFilter = store.tagFilter
+        includeUntagged = store.includeUntagged
+        scopeFilter = store.scopeFilter
     }
 }
 
@@ -250,7 +258,6 @@ private struct LibraryFilterBar: View {
             HStack(spacing: Theme.Space.s12) {
                 FavoritesTabs()
                 Spacer()
-                LibraryBillLink()
                 HStack(spacing: Theme.Space.s4) {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 9, weight: .semibold))
@@ -268,6 +275,12 @@ private struct LibraryFilterBar: View {
             }
             .padding(.horizontal, Theme.Space.s16)
             .padding(.vertical, Theme.Space.s12)
+
+            if store.adoptableSkills.count > 0 {
+                DiscoveryBanner()
+                    .padding(.horizontal, Theme.Space.s16)
+                    .padding(.bottom, Theme.Space.s12)
+            }
 
             if store.hasFacetFilters {
                 LibraryFilterSummary()
@@ -329,6 +342,15 @@ private struct BatchBar: View {
             batchAction(L("恢复"), enabled: !restoreTargets.isEmpty) {
                 restoreTargets.forEach { store.setSkillDisabled($0, disabled: false) }
             }
+            batchAction(L("标签…"), enabled: !targets.isEmpty) {
+                if let first = targets.first { store.tagEditorDirectory = first.directory }
+            }
+            batchAction(L("同步软件…"), enabled: !targets.filter { $0.origin == .atlas }.isEmpty) {
+                store.bulkToolsTargets = targets.filter { $0.origin == .atlas }
+            }
+            batchAction(L("移入废纸篓…"), enabled: !targets.filter { $0.origin != .ccSwitch }.isEmpty) {
+                store.requestBulkUninstall(targets)
+            }
             Spacer(minLength: 0)
             batchAction(L("清除选择"), enabled: true) {
                 store.skillTable?.clearMultiSelection()
@@ -358,6 +380,36 @@ private struct LibraryFilterMenu: View {
         let origins = Array(Set(store.skills.map(\.origin.label))).sorted()
         let active = store.hasFacetFilters
         Menu {
+            Menu(L("范围")) {
+                ForEach(["全部", "本机", "项目"], id: \.self) { option in
+                    filterButton(title: L(option), value: option, selection: $store.scopeFilter)
+                }
+            }
+            Menu(L("标签")) {
+                Button {
+                    store.includeUntagged.toggle()
+                } label: {
+                    if store.includeUntagged { Label(L("未打标签"), systemImage: "checkmark") }
+                    else { Text(L("未打标签")) }
+                }
+                let rows = SkillTags.withCounts()
+                if !rows.isEmpty { Divider() }
+                ForEach(rows, id: \.tag.id) { row in
+                    Button {
+                        if store.tagFilter.contains(row.tag.id) {
+                            store.tagFilter.remove(row.tag.id)
+                        } else {
+                            store.tagFilter.insert(row.tag.id)
+                        }
+                    } label: {
+                        if store.tagFilter.contains(row.tag.id) {
+                            Label(row.tag.name, systemImage: "checkmark")
+                        } else {
+                            Text(row.tag.name)
+                        }
+                    }
+                }
+            }
             Menu(L("软件")) {
                 filterButton(title: L("全部"), value: "全部", selection: $store.platform)
                 Divider()
@@ -404,7 +456,7 @@ private struct LibraryFilterMenu: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .quietControl(tint: active ? Theme.accent : nil)
-        .help(L("按软件、类别、状态或来源筛选"))
+        .help(L("按范围、标签、软件、类别、状态或来源筛选"))
     }
 
     private func filterButton(
@@ -647,6 +699,42 @@ struct InspectorPanel: View {
                         // 不许藏动作）。沙箱试跑 / 停用 / 卸载 / 收编原先要展开
                         // 「更多设置」才够得着，深度 3，违反 ≤2 次点击铁律。
                         ManageSection(skill: skill)
+                        if skill.origin == .atlas {
+                            DetailSection(title: "标签") {
+                                VStack(alignment: .leading, spacing: Theme.Space.s8) {
+                                    TagChipRow(names: SkillTags.names(for: skill.directory))
+                                        .id(store.hubRevision)
+                                    Button(L("改标签…")) { store.tagEditorDirectory = skill.directory }
+                                        .buttonStyle(.plain)
+                                        .font(Theme.Fonts.secondaryEmphasis)
+                                        .foregroundStyle(Theme.accent)
+                                }
+                            }
+                            DetailSection(title: "项目") {
+                                VStack(alignment: .leading, spacing: Theme.Space.s8) {
+                                    let projects = ProjectSync.projects(for: skill.directory)
+                                    if projects.isEmpty {
+                                        Text(L("只在本机。勾上项目后会在那边建软链。"))
+                                            .font(Theme.Fonts.secondary)
+                                            .foregroundStyle(Theme.textTertiary)
+                                    } else {
+                                        ForEach(projects) { project in
+                                            Text(project.displayName)
+                                                .font(Theme.Fonts.callout)
+                                                .foregroundStyle(Theme.textPrimary)
+                                        }
+                                    }
+                                    Button(L("同步到项目…")) { store.projectEditorDirectory = skill.directory }
+                                        .buttonStyle(.plain)
+                                        .font(Theme.Fonts.secondaryEmphasis)
+                                        .foregroundStyle(Theme.accent)
+                                }
+                            }
+                            ExtraToolsToggles(skill: skill)
+                        }
+                        DetailSection(title: "文件") {
+                            SkillFileTree(skill: skill)
+                        }
                         AdvisorySecuritySection(skill: skill)
                         DisclosureGroup {
                             VStack(alignment: .leading, spacing: Theme.Space.s20) {
@@ -1377,7 +1465,6 @@ private struct BlockingRepairBanner: View {
                         } else {
                             Button(L("打开目录")) { store.openFolder(skill.sourcePath) }
                         }
-                        Button(L("去「检查」看这一条")) { store.openInbox(for: skill) }
                     }
                     .buttonStyle(.plain)
                     .font(Theme.Fonts.secondaryEmphasis)

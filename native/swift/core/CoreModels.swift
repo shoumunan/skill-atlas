@@ -6,7 +6,7 @@ import Foundation
 // 颜色 / SF Symbol 等 UI 元数据在 app/ModelsUI.swift（对本文件类型做 extension）。
 // 病根：原先整文件依赖 SwiftUI（颜色类型），CLI 与核心层无法共享。
 
-package enum Health: String, CaseIterable {
+package enum Health: String, CaseIterable, Codable {
     case healthy, warning, error
 
     package var label: String {
@@ -18,7 +18,7 @@ package enum Health: String, CaseIterable {
     }
 }
 
-package enum MountStatus: String {
+package enum MountStatus: String, Codable {
     case ok, disabled, missing, broken, wrong, directory, unexpected
 
     package var label: String {
@@ -34,7 +34,7 @@ package enum MountStatus: String {
     }
 }
 
-package struct Mount: Equatable {
+package struct Mount: Equatable, Codable {
     package var enabled: Bool
     package var status: MountStatus
     package var path: String
@@ -51,7 +51,7 @@ package struct Mount: Equatable {
 }
 
 /// 技能来源：CC Switch 管理 or 用户直接装在 ~/.claude/skills、~/.codex/skills 的本地技能
-package enum SkillOrigin: String, CaseIterable, Equatable {
+package enum SkillOrigin: String, CaseIterable, Equatable, Codable {
     case atlas, ccSwitch, local
 
     package var label: String {
@@ -63,7 +63,7 @@ package enum SkillOrigin: String, CaseIterable, Equatable {
     }
 }
 
-package struct Skill: Identifiable, Equatable {
+package struct Skill: Identifiable, Equatable, Codable {
     package var id: String { name }
     package var dbId: Int
     package var name: String
@@ -85,6 +85,8 @@ package struct Skill: Identifiable, Equatable {
     package var problems: [String]
     /// 各平台挂载态。缺省平台视为未启用。
     package var mounts: [AgentPlatform: Mount]
+    /// 自定义工具挂载（key = custom tool id）
+    package var extraMounts: [String: Mount] = [:]
     package var origin: SkillOrigin
     /// 已停用（本地技能被移入 .disabled/）：灰显、不计入健康统计与可用数
     package var disabled: Bool = false
@@ -102,7 +104,7 @@ package struct Skill: Identifiable, Equatable {
     package var mountCodex: Mount { mount(.codex) }
 }
 
-package struct Summary {
+package struct Summary: Codable {
     package var total: Int
     /// 平台 label → 启用数（跨来源）
     package var enabled: [String: Int]
@@ -130,7 +132,7 @@ package struct Summary {
     package var scannedAt: Date
 }
 
-package struct AtlasData {
+package struct AtlasData: Codable {
     package var skills: [Skill]
     package var summary: Summary
 }

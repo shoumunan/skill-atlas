@@ -17,7 +17,7 @@ struct RootView: View {
             if let message = store.fatalError {
                 FatalView(message: message)
             } else {
-                shell
+                shell.hubOverlays()
             }
         }
         .background(AtlasBackdrop())
@@ -184,13 +184,8 @@ struct RootView: View {
     private func applyLaunchPage() {
         let page = LaunchArgs.value("atlasPage") ?? UserDefaults.standard.string(forKey: "atlasPage")
         guard let page else { return }
-        switch page {
-        case "overview", "library", "updates", "health", "doctor", "guide", "howto":
-            store.nav = .library
-        case "settings":
-            store.nav = .settings
-        default:
-            if let target = NavPage(rawValue: page) { store.nav = target }
+        if let target = AppStore.resolvedLaunchPage(page) {
+            store.nav = target
         }
     }
 
@@ -207,6 +202,55 @@ struct RootView: View {
         // 窗口：盖住标题栏，和交通灯同一条中线。全屏：尊重安全区，标题贴在菜单栏下，不再垫一条空灰边。
         .ignoresSafeArea(edges: isFullscreen ? [] : .top)
         .background(FullscreenTopInset(isFullscreen: $isFullscreen))
+    }
+}
+
+private extension View {
+    func hubOverlays() -> some View {
+        modifier(HubOverlayModifier())
+    }
+}
+
+private struct HubOverlayModifier: ViewModifier {
+    @Environment(AppStore.self) private var store
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(isPresented: Binding(
+                get: { store.tagEditorDirectory != nil },
+                set: { if !$0 { store.tagEditorDirectory = nil } }
+            )) {
+                if let directory = store.tagEditorDirectory {
+                    TagEditorSheet(directory: directory)
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { store.projectEditorDirectory != nil },
+                set: { if !$0 { store.projectEditorDirectory = nil } }
+            )) {
+                if let directory = store.projectEditorDirectory {
+                    ProjectEditorSheet(directory: directory)
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { !store.bulkToolsTargets.isEmpty },
+                set: { if !$0 { store.bulkToolsTargets = [] } }
+            )) {
+                BulkToolsSheet(skills: store.bulkToolsTargets)
+            }
+            .confirmationDialog(
+                LF("把 %d 个技能移入废纸篓？", store.confirmBulkUninstall.count),
+                isPresented: Binding(
+                    get: { !store.confirmBulkUninstall.isEmpty },
+                    set: { if !$0 { store.confirmBulkUninstall = [] } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button(L("移入废纸篓"), role: .destructive) { store.confirmBulkUninstallNow() }
+                Button(L("取消"), role: .cancel) { store.confirmBulkUninstall = [] }
+            } message: {
+                Text(L("软件里会看不到它们。文件进废纸篓，需要时可以还原。"))
+            }
     }
 }
 
@@ -389,24 +433,13 @@ struct SidebarRail: View {
                 .padding(.top, Theme.Space.s16)
                 .padding(.bottom, Theme.Space.s20)
 
-            // v16 四项平铺（ROADMAP 2.2）：需要分组本身就说明项太多
             VStack(alignment: .leading, spacing: 2) {
                 RailItem(page: .library, namespace: navSpace)
                 RailItem(page: .add, namespace: navSpace)
-                RailItem(page: .check, namespace: navSpace)
+                RailItem(page: .tools, namespace: navSpace)
+                RailItem(page: .updates, namespace: navSpace)
             }
             .padding(.horizontal, Theme.Space.s8)
-
-            // 侧栏放的是「你要切换的东西」，不是日志。
-            //
-            // 上一版这里摆过「最近在用」，是填充物：最近用过什么你自己清楚，
-            // 在这儿再看一遍没有任何决定可做。场景才是这个位置该有的形状——
-            // 一组具名的上下文，选一个生效，而且它是全局状态（切了之后所有 AI
-            // 看到的技能清单都不一样），本来就该常驻在 chrome 里。
-            //
-            // 它以前埋在 设置 → 进阶 → 场景包 → 管理场景… 四层底下，
-            // 你根本看不出现在生效的是哪一套。
-            ScenarioRail()
 
             Spacer(minLength: Theme.Space.s16)
 
@@ -644,7 +677,7 @@ private struct RailItem: View {
                         .frame(height: 16)
                         .background(Capsule().fill(Theme.accent))
                         // 光看数字听不出是什么（DESIGN v15 无障碍条款）
-                        .accessibilityLabel(LF("%d 件待裁决", count))
+                        .accessibilityLabel(LF("%d 个可更新", count))
                 }
             }
             .foregroundStyle(active ? Theme.accent : Theme.textSecondary)
@@ -684,7 +717,7 @@ private struct RailItem: View {
 
     private var badge: Int {
         // v15：徽标只挂收件箱，真源 = 聚合器同一口径（已裁决的不计）
-        page == .check ? store.inboxBadgeCount : 0
+        page == .updates ? store.updatableSkills.count : 0
     }
 }
 
@@ -701,8 +734,10 @@ private struct PageContainer: View {
                     if store.skills.isEmpty { OnboardingView() } else { LibraryPage() }
                 case .add:
                     AddPage()
-                case .check:
-                    CheckPage()
+                case .tools:
+                    ToolsPage()
+                case .updates:
+                    UpdatesPage()
                 case .settings:
                     SettingsPage()
                 }

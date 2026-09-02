@@ -5,20 +5,18 @@ import SwiftUI
 import AtlasCore
 #endif
 
-/// v16 四项侧栏（ROADMAP 2.2）：页面名就是用户的处境，不是我的架构名。
-///
-/// 六项两组是从引擎往外设计的结果——有 ContextDoctor 就长出「供给」，有 MissDetect
-/// 就长出「收件箱」。用户读不懂这些词。四项各自回答一个用人话问得出来的问题。
+/// 五项侧栏：技能 / 添加 / 软件 / 更新 / 设置。
 enum NavPage: String, CaseIterable, Identifiable, Hashable {
-    case library, add, check, settings
+    case library, add, tools, updates, settings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .library: return L("技能库")
-        case .add: return L("添加技能")
-        case .check: return L("检查")
+        case .library: return L("技能")
+        case .add: return L("添加")
+        case .tools: return L("软件")
+        case .updates: return L("更新")
         case .settings: return L("设置")
         }
     }
@@ -27,7 +25,8 @@ enum NavPage: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .library: return "books.vertical"
         case .add: return "plus.circle"
-        case .check: return "checkmark.circle"
+        case .tools: return "laptopcomputer"
+        case .updates: return "arrow.triangle.2.circlepath"
         case .settings: return "gearshape"
         }
     }
@@ -35,9 +34,10 @@ enum NavPage: String, CaseIterable, Identifiable, Hashable {
     var help: String {
         switch self {
         case .library: return L("我有哪些技能（⌘1）")
-        case .add: return L("装现成的，或自己做一个（⌘2）")
-        case .check: return L("有什么要我处理吗（⌘3）")
-        case .settings: return L("外观、软件目录和进阶（⌘4）")
+        case .add: return L("装一个，或自己做一个（⌘2）")
+        case .tools: return L("同步到哪些软件（⌘3）")
+        case .updates: return L("有新版本吗（⌘4）")
+        case .settings: return L("外观和进阶（⌘5）")
         }
     }
 }
@@ -149,7 +149,18 @@ final class AppStore: InstallHost {
     /// 状态筛选：全部 / 可更新 / 已停用（挂载/安全问题写在详情顶部；整理建议在设置 → 维护）
     var stateFilter = "全部"
     var sourceFilter = "全部"
+    /// 标签筛选：空 = 不按标签筛；选中的 id 命中任一即留下
+    var tagFilter: Set<String> = []
+    var includeUntagged = false
+    /// 全部 / 本机 / 项目
+    var scopeFilter = "全部"
     var favoritesOnly = false
+    var hubRevision = 0
+    var lastUpdateRun = UpdateRunLog.load()
+    var tagEditorDirectory: String?
+    var projectEditorDirectory: String?
+    var confirmBulkUninstall: [Skill] = []
+    var bulkToolsTargets: [Skill] = []
     var favorites: Set<String>
 
     /// 触发词重叠（每次扫描后计算一次，不计入健康统计）
@@ -351,6 +362,15 @@ final class AppStore: InstallHost {
             }
             if !failures.isEmpty { lines.append(L("未完成：") + "\n" + failures.joined(separator: "\n")) }
             if !lines.isEmpty { updateNotice = lines.joined(separator: "\n\n") }
+            let run = UpdateRun(
+                at: Int(Date().timeIntervalSince1970),
+                checked: targets.count,
+                updated: updated,
+                skipped: unreplayed.count,
+                failures: failures.map { UpdateFailure(name: $0, reason: $0) }
+            )
+            UpdateRunLog.save(run)
+            lastUpdateRun = run
             await rescan(keepSelection: true)
             await checkSkillUpdates(interactive: false)
         }
@@ -726,14 +746,7 @@ final class AppStore: InstallHost {
         if lastCheck > 0 { lastSkillUpdateCheck = Date(timeIntervalSince1970: lastCheck) }
         let page = LaunchArgs.value("atlasPage") ?? UserDefaults.standard.string(forKey: "atlasPage")
         if let page {
-            switch page {
-            case "overview", "library", "updates", "health", "doctor", "guide", "howto":
-                nav = .library
-            case "settings":
-                nav = .settings
-            default:
-                if let target = NavPage(rawValue: page) { nav = target }
-            }
+            nav = Self.resolvedLaunchPage(page) ?? nav
         }
         // 调试钩子：-atlasInstallURL <url> 自动打开安装 sheet 并预填（验收用）
         if LaunchArgs.value("atlasInstallURL") != nil {
@@ -747,6 +760,10 @@ final class AppStore: InstallHost {
         if LaunchArgs.flag("atlasProfileSheet") {
             loadProfiles()
             profileSheetPresented = true
+        }
+        // 首帧先画上一轮快照，对账在 .task 里跑。skills-hub 也是 UI 读 store、不挡在全盘扫描后面。
+        if let cached = SkillIndex.hydrate() {
+            data = cached
         }
     }
 
@@ -784,18 +801,16 @@ final class AppStore: InstallHost {
 
     // MARK: - 数据加载
 
-    func rescan(keepSelection: Bool = true) async {
+    func rescan(keepSelection: Bool = true, discoverLocals: Bool = true) async {
         guard !scanning else { return }
         scanning = true
         defer { scanning = false }
         do {
+            let options = SkillIndex.ScanOptions(discoverLocals: discoverLocals)
             let scanned = try await Task.detached(priority: .userInitiated) {
-                let data = try SkillScanner.scan()
-                let overlaps = AppStore.computeTriggerOverlaps(data.skills)
-                return (data, overlaps)
+                try SkillScanner.scan(options: options)
             }.value
-            var result = scanned.0
-            let overlaps = scanned.1
+            var result = scanned
             // 扫描结果里 updateAvailable 默认 false；把上一轮检查的标记带过来，
             // 否则每次重扫都会丢「有新版本」状态（检查有 30 分钟节流，不会马上补回）
             let previousFlags = Dictionary(
@@ -813,9 +828,16 @@ final class AppStore: InstallHost {
                 $0.summary.hasCCSwitch != result.summary.hasCCSwitch
                     || $0.summary.migrated != result.summary.migrated
             } ?? true
+            let changed = summaryFlagsChanged || data?.skills != result.skills
             // 先标「正在索引」，再发布 data：否则空 usage + 未开始索引会被当成「全部吃灰」
-            scheduleBackgroundWork(skills: result.skills)
-            if summaryFlagsChanged || data?.skills != result.skills {
+            // 监听抖动且技能没变时不要重开安全复扫 / 用法索引，那是卡顿的第二刀。
+            if changed || firstLaunchDeferred {
+                scheduleBackgroundWork(skills: result.skills)
+            }
+            if changed {
+                let overlaps = await Task.detached(priority: .utility) {
+                    AppStore.computeTriggerOverlaps(result.skills)
+                }.value
                 data = result
                 triggerOverlaps = overlaps
             }
@@ -1187,6 +1209,10 @@ final class AppStore: InstallHost {
         var favoritesOnly: Bool
         var favorites: Set<String>
         var sortOrder: String
+        var tagFilter: Set<String>
+        var includeUntagged: Bool
+        var scopeFilter: String
+        var hubRevision: Int
     }
 
     @ObservationIgnored private var filteredSkillsCache: (stamp: FilterStamp, result: [Skill])?
@@ -1215,7 +1241,11 @@ final class AppStore: InstallHost {
             sourceFilter: sourceFilter,
             favoritesOnly: favoritesOnly,
             favorites: favorites,
-            sortOrder: sortOrder
+            sortOrder: sortOrder,
+            tagFilter: tagFilter,
+            includeUntagged: includeUntagged,
+            scopeFilter: scopeFilter,
+            hubRevision: hubRevision
         )
         if let cache = filteredSkillsCache, cache.stamp == stamp {
             return cache.result
@@ -1246,6 +1276,14 @@ final class AppStore: InstallHost {
             if platform != "全部" && !skill.platforms.contains(platform) { return false }
             if sourceFilter != "全部" && skill.origin.label != sourceFilter { return false }
             if favoritesOnly && !favorites.contains(skill.name) { return false }
+            if !tagFilter.isEmpty || includeUntagged {
+                let ids = Set(SkillTags.load().links[skill.directory] ?? [])
+                let tagged = !ids.isEmpty
+                let hit = !tagFilter.isEmpty && !ids.isDisjoint(with: tagFilter)
+                if !(hit || (includeUntagged && !tagged)) { return false }
+            }
+            if scopeFilter == "项目" && !ProjectSync.isProjectScoped(skill.directory) { return false }
+            if scopeFilter == "本机" && ProjectSync.isProjectScoped(skill.directory) { return false }
             return true
         }
         switch sortOrder {
@@ -1311,10 +1349,12 @@ final class AppStore: InstallHost {
     /// 搜索框自己会展示当前词；这里仅表示菜单里的四类筛选是否生效。
     var hasFacetFilters: Bool {
         category != "全部" || platform != "全部" || stateFilter != "全部" || sourceFilter != "全部"
+            || !tagFilter.isEmpty || includeUntagged || scopeFilter != "全部"
     }
 
     var activeFacetCount: Int {
-        [category, platform, stateFilter, sourceFilter].filter { $0 != "全部" }.count
+        [category, platform, stateFilter, sourceFilter, scopeFilter].filter { $0 != "全部" }.count
+            + (tagFilter.isEmpty && !includeUntagged ? 0 : 1)
     }
 
     var facetSummary: String {
@@ -1325,7 +1365,174 @@ final class AppStore: InstallHost {
         if category != "全部" { parts.append(L(category)) }
         if stateFilter != "全部" { parts.append(L(stateFilter)) }
         if sourceFilter != "全部" { parts.append(L(sourceFilter)) }
+        if scopeFilter != "全部" { parts.append(L(scopeFilter)) }
+        if !tagFilter.isEmpty || includeUntagged { parts.append(L("标签")) }
         return parts.joined(separator: L("、"))
+    }
+
+    func bumpHub() { hubRevision &+= 1; libraryGeneration &+= 1 }
+
+    /// `-atlasPage` / 深链旧名落到现在的五项。
+    static func resolvedLaunchPage(_ page: String) -> NavPage? {
+        switch page {
+        case "overview", "library", "health", "doctor", "guide", "howto":
+            return .library
+        case "discover":
+            return .add
+        case "check", "supply", "inbox":
+            return .updates
+        default:
+            return NavPage(rawValue: page)
+        }
+    }
+
+    func addCustomTool(label: String, skillsDir: String) {
+        let slug = label.lowercased().filter { $0.isLetter || $0.isNumber || $0 == "-" }
+        let id = slug.isEmpty ? "tool-\(UUID().uuidString.prefix(8))" : slug
+        do {
+            try CustomTools.add(id: id, label: label, skillsDir: skillsDir)
+            bumpHub()
+            Task { await rescan(keepSelection: true, discoverLocals: true) }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    func addToolPreset(_ preset: ToolPresets.Preset) {
+        do {
+            try CustomTools.addPreset(preset)
+            bumpHub()
+            Task { await rescan(keepSelection: true, discoverLocals: true) }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    func setCustomToolEnabled(id: String, enabled: Bool) {
+        do {
+            try CustomTools.setEnabled(id: id, enabled: enabled)
+            bumpHub()
+            Task { await rescan(keepSelection: true, discoverLocals: false) }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    func removeCustomTool(id: String) {
+        do {
+            try CustomTools.remove(id: id)
+            bumpHub()
+            Task { await rescan(keepSelection: true, discoverLocals: true) }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    func addSyncProject(path: String) {
+        do {
+            _ = try ProjectSync.addProject(path: path)
+            bumpHub()
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    func removeSyncProject(id: String) {
+        do {
+            try ProjectSync.removeProject(id: id)
+            bumpHub()
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    func setDiscovery(_ key: String, enabled: Bool) {
+        do {
+            try DiscoveryPrefs.set(key, enabled: enabled)
+            bumpHub()
+            Task { await rescan(keepSelection: true, discoverLocals: true) }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    func setTags(directory: String, tagIDs: [String]) {
+        do {
+            try SkillTags.set(directory: directory, tagIDs: tagIDs)
+            bumpHub()
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    func addTagName(_ name: String, to directory: String) {
+        do {
+            let tag = try SkillTags.ensure(name)
+            try SkillTags.add(directory: directory, tagID: tag.id)
+            bumpHub()
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    func setProjects(directory: String, projectIDs: [String]) {
+        pauseWatching()
+        do {
+            try ProjectSync.set(directory: directory, projectIDs: projectIDs)
+            try SkillActions.applyProjectLinks(directory: directory)
+            bumpHub()
+        } catch {
+            actionError = error.localizedDescription
+        }
+        resumeWatching()
+    }
+
+    func setExtraTool(_ skill: Skill, toolID: String, enabled: Bool) {
+        guard skill.origin == .atlas else { return }
+        pauseWatching()
+        do {
+            try SkillActions.setExtraTool(directory: skill.directory, toolID: toolID, enabled: enabled)
+            bumpHub()
+            Task { await rescan(keepSelection: true, discoverLocals: false) }
+        } catch {
+            actionError = error.localizedDescription
+        }
+        resumeWatching()
+    }
+
+    func applyTools(to skills: [Skill], platforms: Set<String>, extra: Set<String>) {
+        pauseWatching()
+        for skill in skills where skill.origin == .atlas && !skill.managed {
+            for platform in AgentPlatform.allCases {
+                let on = platforms.contains(platform.rawValue)
+                if skill.mount(platform).enabled != on {
+                    try? SkillActions.setPlatform(directory: skill.directory, platform: platform, enabled: on)
+                }
+            }
+            for tool in CustomTools.active() {
+                let on = extra.contains(tool.id)
+                try? SkillActions.setExtraTool(directory: skill.directory, toolID: tool.id, enabled: on)
+            }
+        }
+        resumeWatching()
+        bumpHub()
+        Task { await rescan(keepSelection: true, discoverLocals: false) }
+    }
+
+    func requestBulkUninstall(_ skills: [Skill]) {
+        confirmBulkUninstall = skills.filter { $0.origin != .ccSwitch }
+    }
+
+    func confirmBulkUninstallNow() {
+        let targets = confirmBulkUninstall
+        confirmBulkUninstall = []
+        pauseWatching()
+        for skill in targets {
+            try? SkillActions.uninstall(skill: skill, trashLibrary: true)
+        }
+        resumeWatching()
+        skillTable?.clearMultiSelection()
+        Task { await rescan(keepSelection: true) }
     }
 
     // MARK: - 动作
@@ -1364,7 +1571,7 @@ final class AppStore: InstallHost {
            let hit = inboxItems.first(where: { $0.target == skill.directory }) {
             Inbox.pendingFocusID = hit.id
         }
-        nav = .check
+        nav = .updates
     }
 
     func hasCriticalSecurity(_ skill: Skill) -> Bool {
@@ -1476,6 +1683,9 @@ final class AppStore: InstallHost {
         platform = "全部"
         stateFilter = "全部"
         sourceFilter = "全部"
+        tagFilter = []
+        includeUntagged = false
+        scopeFilter = "全部"
         search = ""
     }
 
@@ -1484,6 +1694,9 @@ final class AppStore: InstallHost {
         platform = "全部"
         stateFilter = "全部"
         sourceFilter = "全部"
+        tagFilter = []
+        includeUntagged = false
+        scopeFilter = "全部"
     }
 
     func openFolder(_ path: String) {
@@ -1550,10 +1763,12 @@ final class AppStore: InstallHost {
                 ? LF("%d 个技能 · %d 个可更新", summary.total, updates)
                 : LF("%d 个技能", summary.total)
         case .add:
-            return L("装现成的，或自己做一个")
-        case .check:
-            let pending = inboxBadgeCount
-            return pending > 0 ? LF("%d 件事要你处理", pending) : L("没有要处理的事")
+            return L("装一个，或自己做一个")
+        case .tools:
+            return L("同步到哪些软件")
+        case .updates:
+            let available = updatableSkills.count
+            return available > 0 ? LF("%d 个可更新", available) : L("都是最新的")
         case .settings:
             if data.summary.migrated {
                 return LF("已迁入 %d 个技能", data.summary.atlasCount)
@@ -1594,7 +1809,7 @@ final class AppStore: InstallHost {
         refreshDebounce = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             guard !Task.isCancelled else { return }
-            await self?.rescan(keepSelection: true)
+            await self?.rescan(keepSelection: true, discoverLocals: false)
         }
     }
 
@@ -1981,6 +2196,16 @@ final class AppStore: InstallHost {
             }
             if changed { self.data = data }
         }
+        let available = results.values.filter { $0 }.count
+        let run = UpdateRun(
+            at: Int(Date().timeIntervalSince1970),
+            checked: targets.count,
+            updated: 0,
+            skipped: targets.count - available,
+            failures: []
+        )
+        UpdateRunLog.save(run)
+        lastUpdateRun = run
     }
 
     // MARK: - 安全复扫（二期 F3：防「几个月后变恶意」）

@@ -151,7 +151,6 @@ struct NewSkillSheet: View {
                                 if draft.origin != .ccSwitch {
                                     linkButton(L("开处方")) { store.requestPrescription(draft) }
                                 }
-                                linkButton(L("去「检查」")) { store.nav = .check }
                             }
                         }
                     } else {

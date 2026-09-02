@@ -6,8 +6,8 @@ import AtlasCore
 
 // MARK: - 设置页（居中 640 列，系统设置式分组）
 //
-// 分组：外观 · 通知 · 我在用的软件（平台开关 + 目录）· 技能库 · 发现来源
-//      · 收件箱入口 · 导入与迁移 · 应用 · 进阶（使用记录 / 多机同步）
+// 分组：外观 · 通知 · 技能库 · 发现来源 · 更新入口 · 导入与迁移 · 应用 · 进阶
+// 软件目录、自定义工具、发现扫描、项目在「软件」页。
 //
 // 这里只放长期配置。运维事项归收件箱、供给归供给页、收编与迁移归发现页，
 // 设置里只留一行指路——同一件事不给第二个入口（DESIGN v15）。
@@ -21,10 +21,8 @@ struct SettingsPage: View {
             VStack(spacing: Theme.Space.s20) {
                 AppearanceGroup()
                 NotifyGroup()
-                PlatformsGroup()
                 LibraryGroup()
                 DiscoverySourcesGroup()
-                InboxLinkGroup()
                 LegacyImportGroup()
                 AppGroup()
                 AdvancedSettings()
@@ -209,7 +207,7 @@ private struct TelemetryGroup: View {
 /// 组标题在卡外（系统设置惯例），卡内行之间发丝分隔
 /// 平台行：品牌图标 + 名称 + 真实目录 + 目录改写 + 在用开关。
 /// 图标从原「我在用的软件」那一格搬上来——两处开关合并后，识别度不能丢。
-private struct PlatformSettingRow<Trailing: View>: View {
+struct PlatformSettingRow<Trailing: View>: View {
     var platform: AgentPlatform
     var subtitle: String
     var divider: Bool
@@ -262,7 +260,7 @@ private struct DiscoverySourcesGroup: View {
         SettingsGroup(title: "发现来源") {
             sourceRow(
                 title: L("远程发现"),
-                caption: L("总闸。关掉后「添加技能」与 atlas search --remote 全部零出网。"),
+                caption: L("总闸。关掉后「添加」与 atlas search --remote 全部零出网。"),
                 isOn: SourcePrefs.masterEnabled,
                 enabled: true
             ) { try SourcePrefs.setMaster($0) }
@@ -340,7 +338,7 @@ private struct LegacyImportGroup: View {
         SettingsGroup(title: "导入与迁移") {
             HStack(spacing: Theme.Space.s12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(L("收编与迁移都在「添加技能」"))
+                    Text(L("收编与迁移都在「添加」"))
                         .font(Theme.Fonts.rowTitle)
                         .foregroundStyle(Theme.textPrimary)
                     Text(subtitle)
@@ -349,7 +347,7 @@ private struct LegacyImportGroup: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: Theme.Space.s8)
-                Button(L("去「添加技能」")) { store.nav = .add }
+                Button(L("去「添加」")) { store.nav = .add }
                     .buttonStyle(.plain)
                     .font(Theme.Fonts.secondaryEmphasis)
                     .foregroundStyle(Theme.accent)
@@ -390,39 +388,12 @@ private struct LegacyImportGroup: View {
             return LF("现在有 %d 个散落技能可以收编。", adoptable)
         }
         return store.canMigrate
-            ? L("检测到 CC Switch 的技能，可以在「添加技能」里迁入。")
+            ? L("检测到 CC Switch 的技能，可以在「添加」里迁入。")
             : L("散落在平台目录里的技能、CC Switch 的旧库，都从那里进来。")
     }
 }
 
-/// v15：维护组解散进收件箱（WP-I），设置只留一个入口行
-private struct InboxLinkGroup: View {
-    @Environment(AppStore.self) private var store
-
-    var body: some View {
-        SettingsGroup(title: "检查") {
-            HStack(spacing: Theme.Space.s12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L("要你处理的事都在「检查」"))
-                        .font(Theme.Fonts.rowTitle)
-                        .foregroundStyle(Theme.textPrimary)
-                    Text(L("等你点头、有危险写法、装了用不了、叫不动——只有这四类会来找你"))
-                        .font(Theme.Fonts.caption)
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                Spacer(minLength: Theme.Space.s8)
-                Button(L("去「检查」")) { store.nav = .check }
-                    .buttonStyle(.plain)
-                    .font(Theme.Fonts.secondaryEmphasis)
-                    .foregroundStyle(Theme.accent)
-            }
-            .padding(.horizontal, Theme.Space.s12)
-            .frame(height: 52)
-        }
-    }
-}
-
-private struct SettingsGroup<Content: View>: View {
+struct SettingsGroup<Content: View>: View {
     var title: String
     @ViewBuilder var content: Content
 
@@ -441,7 +412,7 @@ private struct SettingsGroup<Content: View>: View {
 }
 
 /// 标准设置行：左侧标题 + 副文案，右侧控件
-private struct SettingsRow<Trailing: View>: View {
+struct SettingsRow<Trailing: View>: View {
     var title: String
     var subtitle: String?
     var divider = true
@@ -493,7 +464,7 @@ private struct NotifyGroup: View {
 
     var body: some View {
         SettingsGroup(title: "通知") {
-            SettingsRow(title: "新技能有可疑写法", subtitle: "只在新出现时提醒一次，已知的留在「检查」里排队。默认开。") {
+            SettingsRow(title: "新技能有可疑写法", subtitle: "只在新出现时提醒一次。默认开。") {
                 Toggle("", isOn: $security)
                     .toggleStyle(.switch)
                     .controlSize(.small)
@@ -516,7 +487,7 @@ private struct NotifyGroup: View {
     }
 }
 
-private struct PlatformsGroup: View {
+struct PlatformsGroup: View {
     @Environment(AppStore.self) private var store
     @State private var rootRevision = 0
 

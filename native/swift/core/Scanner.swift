@@ -34,16 +34,37 @@ package enum SkillScanner {
     }
 
     package static func scan() throws -> AtlasData {
+        try scan(options: .full)
+    }
+
+    package static func scan(options: SkillIndex.ScanOptions) throws -> AtlasData {
         AtlasCatalog.migrateLegacyIfNeeded()
         let catalog = AtlasCatalog.load()
         let hasCCSwitch = FileManager.default.fileExists(atPath: databaseURL.path)
         let migrated = catalog.migratedFromCCSwitch
+        let cache = SkillIndex.loadEntries()
 
         var skills: [Skill] = []
+        var nextEntries: [SkillIndex.Entry] = []
         var healthCounts: [Health: Int] = [.healthy: 0, .warning: 0, .error: 0]
         var verified: [String: Int] = [:]
         var seenPaths = Set<String>()
         var seenNames = Set<String>()
+
+        func remember(_ skill: Skill) {
+            let stamp = SkillIndex.fileStamp(URL(fileURLWithPath: skill.skillFile))
+            nextEntries.append(SkillIndex.Entry(
+                cacheKey: SkillIndex.cacheKey(origin: skill.origin, directory: skill.directory),
+                directory: skill.directory,
+                origin: skill.origin,
+                sourcePath: skill.sourcePath,
+                skillFile: skill.skillFile,
+                mtime: stamp.mtime,
+                size: stamp.size,
+                disabled: skill.disabled,
+                skill: skill
+            ))
+        }
 
         func tallyVerified(_ skill: Skill) {
             for platform in AgentPlatform.allCases where skill.mount(platform).status == .ok {
@@ -52,11 +73,12 @@ package enum SkillScanner {
         }
 
         // 主源：本库
-        let atlasSkills = scanAtlasLibrary(catalog: catalog)
+        let atlasSkills = scanAtlasLibrary(catalog: catalog, cache: cache)
         for skill in atlasSkills {
             if !skill.disabled { healthCounts[skill.health, default: 0] += 1 }
             tallyVerified(skill)
             skills.append(skill)
+            remember(skill)
             seenPaths.insert(URL(fileURLWithPath: skill.sourcePath).resolvingSymlinksInPath().standardizedFileURL.path)
             seenNames.insert(skill.name)
         }
@@ -74,18 +96,21 @@ package enum SkillScanner {
                 if !skill.disabled { healthCounts[skill.health, default: 0] += 1 }
                 tallyVerified(skill)
                 skills.append(skill)
+                remember(skill)
                 seenPaths.insert(realPath)
                 seenNames.insert(name)
             }
         }
 
-        // 平台目录始终扫描：发现散装技能供收编——迁完 CC Switch 的用户手动新装的
-        // 散装技能也要能看见（否则收编不可达，且体检/安全扫描对它全盲）。
-        // 已收进库/CC 已收录的入口 resolve 后都在 seenPaths 里，不会重复计入。
-        let localSkills = scanLocalSkills(excluding: seenPaths, usedNames: seenNames)
+        // 散装发现：冷启动 / 手动刷新才走全平台根。监听抖动只复用上一轮还在的本地条目，
+        // 避免 11 个根 × 全部软链 resolve 把界面卡住（skills-hub 的 discovery 也是可选扫描）。
+        let localSkills = options.discoverLocals
+            ? scanLocalSkills(excluding: seenPaths, usedNames: seenNames, cache: cache)
+            : reuseLocalSkills(cache: cache, excluding: seenPaths, usedNames: seenNames)
         for skill in localSkills {
             if !skill.disabled { healthCounts[skill.health, default: 0] += 1 }
             skills.append(skill)
+            remember(skill)
             seenPaths.insert(URL(fileURLWithPath: skill.sourcePath).resolvingSymlinksInPath().standardizedFileURL.path)
             seenNames.insert(skill.name)
         }
@@ -116,7 +141,9 @@ package enum SkillScanner {
             checkedPaths: checkedScanPaths(hasCCSwitch: hasCCSwitch),
             scannedAt: Date()
         )
-        return AtlasData(skills: skills, summary: summary)
+        let data = AtlasData(skills: skills, summary: summary)
+        SkillIndex.save(entries: nextEntries, snapshot: data)
+        return data
     }
 
     /// 设置页「扫描范围」展示的真实路径：本库 + CC Switch 源 + 各平台根。
@@ -238,7 +265,7 @@ package enum SkillScanner {
 
     // MARK: - Skill Atlas 自己的库
 
-    private static func scanAtlasLibrary(catalog: AtlasCatalogFile) -> [Skill] {
+    private static func scanAtlasLibrary(catalog: AtlasCatalogFile, cache: [String: SkillIndex.Entry]) -> [Skill] {
         let fileManager = FileManager.default
         let root = AtlasPaths.libraryRoot
         guard fileManager.fileExists(atPath: root.path) else { return [] }
@@ -273,6 +300,24 @@ package enum SkillScanner {
             let record = catalog.skills[hit.directory]
             let source = hit.url
             let skillFile = source.appendingPathComponent("SKILL.md")
+            let cacheKey = SkillIndex.cacheKey(origin: .atlas, directory: hit.directory)
+            if let cached = cache[cacheKey],
+               SkillIndex.contentMatches(cached, skillFile: skillFile, sourcePath: source.path, disabled: hit.disabled) {
+                var skill = cached.skill
+                skill.repo = record?.repoDisplay ?? "Skill Atlas"
+                skill.repoOwner = record?.repoOwner ?? ""
+                skill.repoName = record?.repoName ?? ""
+                skill.repoBranch = record?.repoBranch ?? "main"
+                skill.managed = record?.managed == true
+                skill.disabled = hit.disabled
+                if let installed = record?.installedAt, installed != 0 { skill.installedAt = installed }
+                if let updated = record?.updatedAt, updated != 0 { skill.updatedAt = updated }
+                let enabled = Dictionary(uniqueKeysWithValues: AgentPlatform.allCases.map {
+                    ($0, record?.isEnabled($0) ?? false)
+                })
+                result.append(refreshMounts(skill: skill, enabled: enabled))
+                continue
+            }
             let metadata = readFrontmatter(skillFile)
             let name = metadata["name"].flatMap { $0.isEmpty ? nil : $0 } ?? hit.directory
 
@@ -329,7 +374,7 @@ package enum SkillScanner {
                 .map { Int($0.timeIntervalSince1970) } ?? installedAt
             let updatedAt = (record?.updatedAt).flatMap { $0 != 0 ? $0 : nil } ?? modifiedAt
 
-            result.append(Skill(
+            result.append(attachExtraMounts(Skill(
                 dbId: 0,
                 name: name,
                 directory: hit.directory,
@@ -353,26 +398,63 @@ package enum SkillScanner {
                 disabled: hit.disabled,
                 managed: record?.managed == true,
                 searchText: "\(name) \(description) \(category) skill atlas 本地\(hit.disabled ? " 已停用" : "")".lowercased()
-            ))
+            )))
         }
         return result
     }
 
     // MARK: - 本地安装技能（DB / Atlas 之外的真实目录）
 
-    private static func scanLocalSkills(excluding seenPaths: Set<String>, usedNames: Set<String>) -> [Skill] {
+    private static func reuseLocalSkills(
+        cache: [String: SkillIndex.Entry],
+        excluding seenPaths: Set<String>,
+        usedNames: Set<String>
+    ) -> [Skill] {
+        var names = usedNames
+        var result: [Skill] = []
+        for entry in cache.values where entry.origin == .local {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: entry.sourcePath, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { continue }
+            let real = URL(fileURLWithPath: entry.sourcePath).standardizedFileURL.path
+            guard !seenPaths.contains(real), !names.contains(entry.skill.name) else { continue }
+            names.insert(entry.skill.name)
+            result.append(entry.skill)
+        }
+        return result.sorted { $0.directory < $1.directory }
+    }
+
+    private static func scanLocalSkills(
+        excluding seenPaths: Set<String>,
+        usedNames: Set<String>,
+        cache: [String: SkillIndex.Entry]
+    ) -> [Skill] {
         let fileManager = FileManager.default
         /// 真实源路径 → 在哪些平台根目录发现 + 是否位于 .disabled/（已停用）
         var found: [String: (dirName: String, platforms: Set<String>, disabled: Bool)] = [:]
+        let libraryPrefix = AtlasPaths.libraryRoot.resolvingSymlinksInPath().standardizedFileURL.path
 
         func collect(from directory: URL, platform: String, disabled: Bool) {
             guard let entries = try? fileManager.contentsOfDirectory(
                 at: directory,
-                includingPropertiesForKeys: [.isDirectoryKey],
+                includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
                 options: disabled ? [] : [.skipsHiddenFiles]
             ) else { return }
             for entry in entries {
                 guard !entry.lastPathComponent.hasPrefix(".") else { continue }
+                // 本库软链是扫描的大宗：读 link 目标即可排除，不必 resolve 整棵树
+                if LinkTool.isSymlink(entry) {
+                    let dest = LinkTool.destination(of: entry)
+                    if !dest.isEmpty {
+                        let target = dest.hasPrefix("/")
+                            ? URL(fileURLWithPath: dest)
+                            : URL(fileURLWithPath: dest, relativeTo: entry.deletingLastPathComponent())
+                        let standardized = target.standardizedFileURL.path
+                        if standardized.hasPrefix(libraryPrefix) || seenPaths.contains(standardized) {
+                            continue
+                        }
+                    }
+                }
                 let real = entry.resolvingSymlinksInPath().standardizedFileURL
                 var isDirectory: ObjCBool = false
                 guard fileManager.fileExists(atPath: real.path, isDirectory: &isDirectory),
@@ -383,7 +465,7 @@ package enum SkillScanner {
             }
         }
 
-        for platform in AgentPlatform.allCases {
+        for platform in AgentPlatform.allCases where DiscoveryPrefs.isEnabled(platform.rawValue) {
             collect(from: platform.root(home: home).resolvingSymlinksInPath(), platform: platform.label, disabled: false)
             collect(
                 from: platform.root(home: home).resolvingSymlinksInPath().appendingPathComponent(".disabled"),
@@ -391,12 +473,26 @@ package enum SkillScanner {
                 disabled: true
             )
         }
+        for tool in CustomTools.active() where DiscoveryPrefs.isEnabled(tool.id) {
+            collect(from: tool.root, platform: tool.label, disabled: false)
+        }
 
         var names = usedNames
         var result: [Skill] = []
         for (realPath, hit) in found.sorted(by: { $0.value.dirName < $1.value.dirName }) {
             let source = URL(fileURLWithPath: realPath, isDirectory: true)
             let skillFile = source.appendingPathComponent("SKILL.md")
+            let cacheKey = SkillIndex.cacheKey(origin: .local, directory: hit.dirName)
+            if let cached = cache[cacheKey],
+               SkillIndex.contentMatches(cached, skillFile: skillFile, sourcePath: realPath, disabled: hit.disabled),
+               !names.contains(cached.skill.name) {
+                names.insert(cached.skill.name)
+                var skill = cached.skill
+                skill.platforms = hit.platforms.sorted()
+                skill.disabled = hit.disabled
+                result.append(skill)
+                continue
+            }
             let metadata = readFrontmatter(skillFile)
             let name = metadata["name"].flatMap { $0.isEmpty ? nil : $0 } ?? hit.dirName
             // 与 DB 技能重名的本地技能跳过（id 以 name 为键；同名不同源极罕见）
@@ -599,6 +695,26 @@ package enum SkillScanner {
         updated.platforms = platforms
         updated.problems = problems
         updated.health = severity
+        return attachExtraMounts(updated)
+    }
+
+    /// 自定义工具挂载：catalog.enabled[toolID] 为开时检查软链。
+    package static func attachExtraMounts(_ skill: Skill) -> Skill {
+        guard skill.origin == .atlas else { return skill }
+        var updated = skill
+        let record = AtlasCatalog.load().skills[skill.directory]
+        let source = URL(fileURLWithPath: skill.sourcePath)
+        var extras: [String: Mount] = [:]
+        for tool in CustomTools.active() {
+            let on = (record?.enabled[tool.id] ?? false) && !skill.disabled
+            extras[tool.id] = mountState(
+                root: tool.root,
+                directory: skill.directory,
+                enabled: on,
+                source: source
+            )
+        }
+        updated.extraMounts = extras
         return updated
     }
 

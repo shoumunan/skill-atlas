@@ -67,8 +67,8 @@ enum AtlasNotify {
         // id 稳定：同一批发现重复投递会合并，不会在通知中心堆成一摞
         post(id: "security-\(fresh.sorted().joined(separator: ","))",
              title: title,
-             body: L("装之前扫出来的。点开到「检查」看原文。"),
-             deepLink: "skillatlas://inbox")
+             body: L("装之前扫出来的。到技能详情里看原文。"),
+             deepLink: "skillatlas://skill/\(names[0])")
     }
 
     static func missDigest(_ hits: [MissHit]) {

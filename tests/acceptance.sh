@@ -427,4 +427,26 @@ echo "文案 acceptance OK"
 python3 "$ROOT/tests/assert_probe_safety.py"
 echo "探针 acceptance OK"
 
+# --- 技能索盘：二次扫描复用快照，改 SKILL.md / 新增目录仍能看见 ---
+[[ -f "$HOME_FIX/.skill-atlas/skill-index.db" ]] || { echo "第一次 list 后应写出 skill-index.db" >&2; exit 1; }
+LIST_AGAIN=$("$ATLAS" list --json)
+echo "$LIST_AGAIN" | jget ok | grep -q true
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["data"]["count"]>=3' "$LIST_AGAIN"
+write_skill alpha alpha "alpha helper 「alpha-task」 rewritten for index tests"
+ALPHA_JSON=$("$ATLAS" info alpha --json)
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert "rewritten" in d["data"]["description"], d' "$ALPHA_JSON"
+write_skill delta delta "delta helper 「delta-task」 for index tests"
+python3 - <<PY
+import json, os, time
+home=os.environ["ATLAS_HOME"]
+path=os.path.join(home,".skill-atlas","atlas.json")
+cat=json.load(open(path))
+now=int(time.time())
+cat["skills"]["delta"]={"directory":"delta","enabled":{"claude":False},"repoOwner":"t","repoName":"t","repoBranch":"main","installedAt":now,"updatedAt":now}
+open(path,"w").write(json.dumps(cat))
+PY
+LIST_DELTA=$("$ATLAS" list --json)
+python3 -c 'import json,sys; names=[s["name"] for s in json.loads(sys.argv[1])["data"]["skills"]]; assert "delta" in names, names' "$LIST_DELTA"
+echo "技能索盘 acceptance OK"
+
 echo "ALL acceptance OK"

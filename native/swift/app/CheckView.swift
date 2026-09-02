@@ -3,104 +3,93 @@ import SwiftUI
 import AtlasCore
 #endif
 
-// MARK: - 检查（v16 一级页，ROADMAP 2.2）
-//
-// 回答用户会用人话问出来的那句：「有什么要我处理吗？」
-//
-// 这里只放**待办**：有限、必须逐条决定、处理完就没了。安全提示（本机 118 条）、
-// 触发词重叠、介绍埋太深那些属于技能自身的**性质**，数量大又不需要逐条决定，
-// 排进队列的结果是既清不完又看不懂——它们回到技能行上当标记。
-//
-// 页顶那张卡是原「供给页」的全部实际价值：技能清单占多少 token，一键清理。
-// 一个数字 + 一个动作，不需要一整页和「供给」这个没人懂的词。
+// MARK: - 更新（只谈技能新版本）
 
-struct CheckPage: View {
+struct UpdatesPage: View {
     @Environment(AppStore.self) private var store
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var inbox = InboxStore()
 
     var body: some View {
-        let groups = InboxGroup.build(inbox.items(store: store))
-        let leadID = InboxGroup.leadID(groups)
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.s20) {
-                    if let receipt = inbox.receipt {
-                        ReceiptLine(text: receipt.text, failed: receipt.failed) {
-                            inbox.receipt = nil
-                        }
-                        .receiptTransition(reduceMotion: reduceMotion)
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.s20) {
+                if let run = store.lastUpdateRun {
+                    UpdateRunCard(run: run)
+                        .padding(Theme.Space.s16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .quietControl(cornerRadius: Theme.Radius.tile)
+                }
+                HStack(spacing: Theme.Space.s8) {
+                    Button {
+                        Task { await store.checkSkillUpdates(interactive: true) }
+                    } label: {
+                        Text(store.checkingInteractive ? L("正在检查…") : L("检查更新"))
+                            .font(Theme.Fonts.calloutEmphasis)
+                            .foregroundStyle(Theme.textPrimary)
+                            .padding(.horizontal, Theme.Space.s12)
+                            .frame(height: 28)
                     }
+                    .buttonStyle(PressableButtonStyle())
+                    .quietControl()
+                    .disabled(store.checkingSkillUpdates || store.skills.isEmpty)
+                    Button {
+                        store.requestUpdateAll()
+                    } label: {
+                        Text(store.updatableSkills.isEmpty ? L("没有可更新的") : LF("更新全部（%d）", store.updatableSkills.count))
+                            .font(Theme.Fonts.calloutEmphasis)
+                            .foregroundStyle(store.updatableSkills.isEmpty ? Theme.textTertiary : .white)
+                            .padding(.horizontal, Theme.Space.s12)
+                            .frame(height: 28)
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                    .accentGlass(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                    .disabled(store.updatableSkills.isEmpty)
+                    Spacer(minLength: 0)
+                }
 
-                    if groups.isEmpty {
-                        quietState
-                    } else {
-                        section(L("要你处理的")) {
-                            VStack(alignment: .leading, spacing: Theme.Space.s12) {
-                                ForEach(groups) { group in
-                                    // 全页只允许一个实心主按钮。六张卡各顶一个发光蓝按钮，
-                                    // 等于六个「先点我」——没有优先级就是没有引导；但一个都不给
-                                    // 又等于没有入口。给「一键能修掉最多条」的那张，
-                                    // 那里点一下收益最大。
-                                    GroupCard(inbox: inbox, group: group, lead: group.id == leadID)
-                                        .id(group.id)
+                if store.updatableSkills.isEmpty {
+                    EmptyStateBlock(
+                        symbol: "checkmark.circle",
+                        title: L("都是最新的"),
+                        caption: L("有新版本时会出现在这里。"),
+                        actionTitle: L("再查一遍")
+                    ) {
+                        Task { await store.checkSkillUpdates(interactive: true) }
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: Theme.Space.s8) {
+                        ForEach(store.updatableSkills) { skill in
+                            Button {
+                                store.requestUpdate(skill)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(skill.name)
+                                            .font(Theme.Fonts.rowTitle)
+                                            .foregroundStyle(Theme.textPrimary)
+                                        Text(skill.description)
+                                            .font(Theme.Fonts.caption)
+                                            .foregroundStyle(Theme.textTertiary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer(minLength: 0)
+                                    Text(L("更新…"))
+                                        .font(Theme.Fonts.secondaryEmphasis)
+                                        .foregroundStyle(Theme.accent)
                                 }
+                                .padding(Theme.Space.s12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .quietControl(cornerRadius: Theme.Radius.tile)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
-
-                    // 账单不是待办：它不会「处理完就没了」，是这个库长期的一条属性。
-                    // 所以它在待办下面、自己一节，标题也说清楚是「顺便」。
-                    section(L("顺便看一眼")) { TokenCard() }
-                }
-                .padding(Theme.Space.s20)
-                .animation(reduceMotion ? nil : Motion.standard, value: inbox.receipt)
-                .frame(maxWidth: 720, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .top)
-            }
-            .panelScroll()
-            .contentSurface()
-            .onAppear {
-                if let target = Inbox.pendingFocusID {
-                    Inbox.pendingFocusID = nil
-                    withAnimation(nil) { proxy.scrollTo(target, anchor: .center) }
                 }
             }
+            .padding(Theme.Space.s20)
+            .frame(maxWidth: 720, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
-    }
-
-    private func section<Content: View>(
-        _ title: String, @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s8) {
-            Text(title)
-                .font(Theme.Fonts.secondaryEmphasis)
-                .foregroundStyle(Theme.textSecondary)
-                .padding(.leading, Theme.Space.s4)
-            content()
-        }
-    }
-
-    private var quietState: some View {
-        EmptyStateBlock(
-            symbol: "checkmark.circle",
-            title: L("没有要处理的事"),
-            caption: lastClearedText,
-            actionTitle: L("再查一遍")
-        ) {
-            Task { await store.rescan() }
-        }
-    }
-
-    private var lastClearedText: String {
-        guard let at = InboxState.lastDecisionAt else {
-            return L("技能装了就能用。真出问题时会出现在这里。")
-        }
-        let date = Date(timeIntervalSince1970: TimeInterval(at))
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return LF("上次处理：%@", formatter.string(from: date))
+        .panelScroll()
+        .contentSurface()
     }
 }
 
@@ -477,57 +466,5 @@ private struct InboxActions: View {
         }
         .buttonStyle(.plain)
         .help(title)
-    }
-}
-
-
-// MARK: - 技能清单占用（原「供给页」的全部实际价值）
-
-/// 一个数字 + 一个动作。原来这需要一整页、一条 ScopeRail、三档控件、场景包
-/// chips 和「上下文账单」这个词——而用户真正想知道的只有「占了多少、能不能少点」。
-private struct TokenCard: View {
-    @Environment(AppStore.self) private var store
-    @State private var slimPresented = false
-
-    var body: some View {
-        let tokens = store.doctorReport.totalTokens
-        let stale = store.staleSkills.count
-        HStack(alignment: .center, spacing: Theme.Space.s16) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s8) {
-                    Text(LF("%d tok", tokens))
-                        .font(Theme.Fonts.panelTitle)
-                        .monospacedDigit()
-                        .foregroundStyle(tokens > 10_000 ? Theme.warning : Theme.textPrimary)
-                        .contentTransition(.numericText())
-                    Text(L("估算"))
-                        .font(Theme.Fonts.caption)
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                Text(L("每次跟 Claude 说话，它都要先读一遍你所有技能的简介。这是那份简介的长度。"))
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if stale > 0 {
-                    Text(LF("其中 %d 个技能三个月没用过了。", stale))
-                        .font(Theme.Fonts.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                }
-            }
-            Spacer(minLength: Theme.Space.s8)
-            Button(L("挑出不用的")) { slimPresented = true }
-                .buttonStyle(PressableButtonStyle())
-                .font(Theme.Fonts.calloutEmphasis)
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.horizontal, Theme.Space.s12)
-                .frame(height: 28)
-                .contentShape(Capsule())
-                .glassChrome(Capsule(style: .continuous), interactive: true)
-                .help(L("按使用次数排一遍，你逐个确认要不要关掉"))
-        }
-        .padding(Theme.Space.s16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .quietControl(cornerRadius: Theme.Radius.tile)
-        .sheet(isPresented: $slimPresented) { SlimDraftSheet() }
     }
 }

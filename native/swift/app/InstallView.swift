@@ -390,6 +390,7 @@ struct InstallSheet: View {
             .frame(height: min(CGFloat(model.candidates.count) * 44 + 4, 260))
             .panelScroll()
             PlatformPrefStrip(selection: $model.selectedPlatforms, installSession: true)
+            InstallExtras(model: model)
             HStack {
                 Text(L("装进本库，并点亮勾选的软件"))
                     .font(Theme.Fonts.caption)
@@ -588,6 +589,61 @@ struct InstallSheet: View {
                     }
                     .buttonStyle(PressableButtonStyle())
                     .keyboardShortcut(.defaultAction)
+                }
+            }
+        }
+    }
+}
+
+private struct InstallExtras: View {
+    @Bindable var model: InstallerModel
+    @State private var tagDraft = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s8) {
+            TextField(L("标签，用逗号分开（可选）"), text: $tagDraft)
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: tagDraft) { _, value in
+                    model.pendingTagNames = value
+                        .split(separator: ",")
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+                }
+            let projects = ProjectSync.load().projects
+            if !projects.isEmpty {
+                Text(L("同步到项目"))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                ForEach(projects) { project in
+                    Toggle(project.displayName, isOn: Binding(
+                        get: { model.pendingProjectIDs.contains(project.id) },
+                        set: { on in
+                            if on {
+                                if !model.pendingProjectIDs.contains(project.id) {
+                                    model.pendingProjectIDs.append(project.id)
+                                }
+                            } else {
+                                model.pendingProjectIDs.removeAll { $0 == project.id }
+                            }
+                        }
+                    ))
+                    .toggleStyle(.checkbox)
+                }
+            }
+            let tools = CustomTools.active()
+            if !tools.isEmpty {
+                Text(L("更多软件"))
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                ForEach(tools) { tool in
+                    Toggle(tool.label, isOn: Binding(
+                        get: { model.selectedExtraTools.contains(tool.id) },
+                        set: { on in
+                            if on { model.selectedExtraTools.insert(tool.id) }
+                            else { model.selectedExtraTools.remove(tool.id) }
+                        }
+                    ))
+                    .toggleStyle(.checkbox)
                 }
             }
         }

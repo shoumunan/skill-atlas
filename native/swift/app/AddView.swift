@@ -19,6 +19,7 @@ struct AddPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.s20) {
+                DiscoveryBanner()
                 importSection
                 discoverSection
             }

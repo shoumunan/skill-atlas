@@ -40,12 +40,7 @@ package enum PreferredPlatforms {
         UserDefaults.standard.set(true, forKey: chosenKey)
     }
 
-    private static let allowed: Set<String> = [
-        AgentPlatform.claude.rawValue,
-        AgentPlatform.codex.rawValue,
-        AgentPlatform.gemini.rawValue,
-        AgentPlatform.grokbuild.rawValue,
-        AgentPlatform.cursor.rawValue,
-        AgentPlatform.workbuddy.rawValue,
-    ]
+    private static var allowed: Set<String> {
+        Set(AgentPlatform.allCases.map(\.rawValue))
+    }
 }

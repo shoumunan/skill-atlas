@@ -750,7 +750,7 @@ private final class SkillRowCell: NSTableCellView {
                 button.alphaValue = halfLit ? 0.55 : (lit ? 1 : 0.5)
             }
             button.toolTip = halfLit
-                ? LF("%@：装着，但不进开场清单。点击停止同步；要改去「检查」。", platform.displayName)
+                ? LF("%@：装着，但不进开场清单。点击停止同步。", platform.displayName)
                 : platformHelp(platform, lit: lit, togglable: togglable, origin: row.origin)
         }
     }
@@ -937,7 +937,7 @@ private enum SkillRowMenu {
             store.toggleFavorite(skill.name)
         }
         add(menu, L("在访达中显示")) { store.openFolder(skill.sourcePath) }
-        add(menu, L("档位与供给…")) { store.nav = .check }
+        add(menu, L("开场清单…")) { store.nav = .updates }
         if skill.origin != .ccSwitch {
             menu.addItem(.separator())
             add(menu, skill.disabled ? L("恢复") : L("停用")) {
